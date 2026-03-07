@@ -1,0 +1,184 @@
+import 'package:sqflite/sqflite.dart';
+import 'package:path/path.dart';
+
+import '../models/meal_log.dart';
+import '../models/meal_photo.dart';
+import '../models/restaurant.dart';
+
+class LocalDatabase {
+  static Database? _database;
+
+  static Future<Database> get database async {
+    if (_database != null) return _database!;
+    _database = await _initDatabase();
+    return _database!;
+  }
+
+  static Future<Database> _initDatabase() async {
+    final dbPath = await getDatabasesPath();
+    final path = join(dbPath, 'koko_meshi.db');
+
+    return openDatabase(
+      path,
+      version: 1,
+      onCreate: _onCreate,
+    );
+  }
+
+  static Future<void> _onCreate(Database db, int version) async {
+    await db.execute('''
+      CREATE TABLE restaurants (
+        id TEXT PRIMARY KEY,
+        google_place_id TEXT,
+        name TEXT NOT NULL,
+        address TEXT,
+        latitude REAL,
+        longitude REAL,
+        cuisine_genre TEXT,
+        created_at TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE meal_logs (
+        id TEXT PRIMARY KEY,
+        user_id TEXT,
+        meal_type TEXT NOT NULL,
+        restaurant_id TEXT,
+        eaten_at TEXT NOT NULL,
+        total_price INTEGER,
+        note TEXT,
+        sync_status TEXT NOT NULL DEFAULT 'pending',
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (restaurant_id) REFERENCES restaurants(id)
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE meal_photos (
+        id TEXT PRIMARY KEY,
+        meal_log_id TEXT NOT NULL,
+        local_path TEXT NOT NULL,
+        original_url TEXT,
+        thumbnail_url TEXT,
+        ai_status TEXT NOT NULL DEFAULT 'pending',
+        ai_menu_name TEXT,
+        ai_estimated_price INTEGER,
+        ai_estimated_calories INTEGER,
+        ai_cuisine_genre TEXT,
+        user_corrected_name TEXT,
+        user_corrected_price INTEGER,
+        user_corrected_calories INTEGER,
+        upload_status TEXT NOT NULL DEFAULT 'pending',
+        shot_at TEXT NOT NULL,
+        latitude REAL,
+        longitude REAL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (meal_log_id) REFERENCES meal_logs(id)
+      )
+    ''');
+  }
+
+  // --- MealLog CRUD ---
+
+  static Future<void> insertMealLog(MealLog log) async {
+    final db = await database;
+    await db.insert('meal_logs', log.toMap());
+  }
+
+  static Future<List<MealLog>> getMealLogs() async {
+    final db = await database;
+    final maps = await db.query('meal_logs', orderBy: 'eaten_at DESC');
+    return maps.map((m) => MealLog.fromMap(m)).toList();
+  }
+
+  static Future<MealLog?> getMealLog(String id) async {
+    final db = await database;
+    final maps = await db.query('meal_logs', where: 'id = ?', whereArgs: [id]);
+    if (maps.isEmpty) return null;
+    return MealLog.fromMap(maps.first);
+  }
+
+  static Future<void> updateMealLog(MealLog log) async {
+    final db = await database;
+    await db.update('meal_logs', log.toMap(), where: 'id = ?', whereArgs: [log.id]);
+  }
+
+  static Future<void> deleteMealLog(String id) async {
+    final db = await database;
+    await db.delete('meal_photos', where: 'meal_log_id = ?', whereArgs: [id]);
+    await db.delete('meal_logs', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // --- MealPhoto CRUD ---
+
+  static Future<void> insertMealPhoto(MealPhoto photo) async {
+    final db = await database;
+    await db.insert('meal_photos', photo.toMap());
+  }
+
+  static Future<List<MealPhoto>> getPhotosForMealLog(String mealLogId) async {
+    final db = await database;
+    final maps = await db.query(
+      'meal_photos',
+      where: 'meal_log_id = ?',
+      whereArgs: [mealLogId],
+      orderBy: 'shot_at ASC',
+    );
+    return maps.map((m) => MealPhoto.fromMap(m)).toList();
+  }
+
+  static Future<List<MealPhoto>> getPendingAiPhotos() async {
+    final db = await database;
+    final maps = await db.query(
+      'meal_photos',
+      where: 'ai_status = ?',
+      whereArgs: ['pending'],
+    );
+    return maps.map((m) => MealPhoto.fromMap(m)).toList();
+  }
+
+  static Future<List<MealPhoto>> getPendingUploadPhotos() async {
+    final db = await database;
+    final maps = await db.query(
+      'meal_photos',
+      where: 'upload_status = ?',
+      whereArgs: ['pending'],
+    );
+    return maps.map((m) => MealPhoto.fromMap(m)).toList();
+  }
+
+  static Future<void> updateMealPhoto(MealPhoto photo) async {
+    final db = await database;
+    await db.update('meal_photos', photo.toMap(), where: 'id = ?', whereArgs: [photo.id]);
+  }
+
+  // --- Restaurant CRUD ---
+
+  static Future<void> insertRestaurant(Restaurant restaurant) async {
+    final db = await database;
+    await db.insert(
+      'restaurants',
+      restaurant.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+  }
+
+  static Future<Restaurant?> getRestaurant(String id) async {
+    final db = await database;
+    final maps = await db.query('restaurants', where: 'id = ?', whereArgs: [id]);
+    if (maps.isEmpty) return null;
+    return Restaurant.fromMap(maps.first);
+  }
+
+  static Future<Restaurant?> getRestaurantByPlaceId(String placeId) async {
+    final db = await database;
+    final maps = await db.query(
+      'restaurants',
+      where: 'google_place_id = ?',
+      whereArgs: [placeId],
+    );
+    if (maps.isEmpty) return null;
+    return Restaurant.fromMap(maps.first);
+  }
+}
