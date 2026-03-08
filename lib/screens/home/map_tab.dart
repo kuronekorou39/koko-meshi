@@ -281,63 +281,187 @@ class _MapTabState extends ConsumerState<MapTab> {
     await launchUrl(url, mode: LaunchMode.externalApplication);
   }
 
-  Future<void> _showSaveLocationDialog(LatLng position) async {
-    final nameController = TextEditingController(text: '自宅');
-    String iconType = 'home';
+  /// お気に入り場所管理のボトムシートを表示
+  Future<void> _showPlacesManager() async {
+    final places = await LocalDatabase.getSavedPlaces();
+    if (!mounted) return;
 
-    final result = await showDialog<bool>(
+    final home = places.where((p) => p.iconType == 'home').firstOrNull;
+    final favorites = places.where((p) => p.iconType == 'favorite').toList();
+
+    // スロット定義: 自宅1つ + お気に入り3つ
+    final slots = <_PlaceSlot>[
+      _PlaceSlot(label: '自宅', icon: Icons.home, iconType: 'home', place: home),
+      for (var i = 0; i < 3; i++)
+        _PlaceSlot(
+          label: 'お気に入り${i + 1}',
+          icon: Icons.star,
+          iconType: 'favorite',
+          place: i < favorites.length ? favorites[i] : null,
+        ),
+    ];
+
+    await showModalBottomSheet(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('この場所を保存'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: '場所の名前',
-                  hintText: '例: 自宅、会社',
-                ),
-              ),
-              const SizedBox(height: 12),
-              SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(value: 'home', label: Text('自宅'), icon: Icon(Icons.home)),
-                  ButtonSegment(value: 'work', label: Text('会社'), icon: Icon(Icons.work)),
-                  ButtonSegment(value: 'custom', label: Text('その他'), icon: Icon(Icons.place)),
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Row(
+                children: [
+                  const Text('マイプレイス',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context),
+                  ),
                 ],
-                selected: {iconType},
-                onSelectionChanged: (v) => setDialogState(() => iconType = v.first),
               ),
-            ],
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('キャンセル')),
-            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('保存')),
+            ),
+            const Divider(height: 1),
+            ...slots.map((slot) => _buildPlaceSlotTile(context, slot)),
+            const SizedBox(height: 8),
           ],
         ),
       ),
     );
+  }
 
-    if (result == true && mounted) {
-      final place = SavedPlace(
-        id: const Uuid().v4(),
-        name: nameController.text.trim().isEmpty ? '場所' : nameController.text.trim(),
-        latitude: position.latitude,
-        longitude: position.longitude,
-        iconType: iconType,
-        createdAt: DateTime.now(),
-      );
-      await LocalDatabase.insertSavedPlace(place);
-      _loadMealMarkers();
+  Widget _buildPlaceSlotTile(BuildContext sheetContext, _PlaceSlot slot) {
+    final isSet = slot.place != null;
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('「${place.name}」を保存しました')),
-        );
-      }
-    }
+    return ListTile(
+      leading: Icon(
+        slot.icon,
+        color: isSet ? Theme.of(context).colorScheme.primary : Colors.grey,
+      ),
+      title: Text(isSet ? slot.place!.name : slot.label),
+      subtitle: isSet
+          ? Text(
+              '${slot.place!.latitude.toStringAsFixed(4)}, ${slot.place!.longitude.toStringAsFixed(4)}',
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            )
+          : Text('未設定', style: TextStyle(color: Colors.grey[500])),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // その場所に移動
+          if (isSet)
+            IconButton(
+              icon: const Icon(Icons.near_me, size: 22),
+              tooltip: 'この場所に移動',
+              onPressed: () {
+                Navigator.pop(sheetContext);
+                final pos = LatLng(slot.place!.latitude, slot.place!.longitude);
+                _mapController?.animateCamera(
+                  CameraUpdate.newCameraPosition(
+                    CameraPosition(
+                      target: pos,
+                      zoom: 16,
+                      tilt: _isTilted ? 45 : 0,
+                    ),
+                  ),
+                );
+              },
+            ),
+          // 現在のマップ中心を設定
+          IconButton(
+            icon: Icon(
+              isSet ? Icons.edit_location_alt : Icons.add_location_alt,
+              size: 22,
+            ),
+            tooltip: 'マップ中央を設定',
+            onPressed: () async {
+              // 上書き確認
+              if (isSet) {
+                final confirmed = await showDialog<bool>(
+                  context: sheetContext,
+                  builder: (context) => AlertDialog(
+                    title: const Text('場所を更新'),
+                    content: Text('「${slot.place!.name}」を現在のマップ位置に更新しますか？'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context, false),
+                        child: const Text('キャンセル'),
+                      ),
+                      FilledButton(
+                        onPressed: () => Navigator.pop(context, true),
+                        child: const Text('更新'),
+                      ),
+                    ],
+                  ),
+                );
+                if (confirmed != true) return;
+              }
+
+              // 名前入力（新規の場合）
+              String name = slot.place?.name ?? slot.label;
+              if (!isSet) {
+                if (!sheetContext.mounted) return;
+                final inputName = await showDialog<String>(
+                  context: sheetContext,
+                  builder: (context) {
+                    final controller = TextEditingController(text: slot.label);
+                    return AlertDialog(
+                      title: const Text('場所の名前'),
+                      content: TextField(
+                        controller: controller,
+                        autofocus: true,
+                        decoration: const InputDecoration(
+                          hintText: '例: 自宅、よく行くカフェ',
+                        ),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('キャンセル'),
+                        ),
+                        FilledButton(
+                          onPressed: () => Navigator.pop(
+                            context,
+                            controller.text.trim().isEmpty
+                                ? slot.label
+                                : controller.text.trim(),
+                          ),
+                          child: const Text('OK'),
+                        ),
+                      ],
+                    );
+                  },
+                );
+                if (inputName == null) return;
+                name = inputName;
+              }
+
+              // 保存
+              if (slot.place != null) {
+                await LocalDatabase.deleteSavedPlace(slot.place!.id);
+              }
+              final newPlace = SavedPlace(
+                id: slot.place?.id ?? const Uuid().v4(),
+                name: name,
+                latitude: _currentCenter.latitude,
+                longitude: _currentCenter.longitude,
+                iconType: slot.iconType,
+                createdAt: DateTime.now(),
+              );
+              await LocalDatabase.insertSavedPlace(newPlace);
+              _loadMealMarkers();
+
+              if (sheetContext.mounted) Navigator.pop(sheetContext);
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('「${newPlace.name}」を保存しました')),
+                );
+              }
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   void _clearSearchResults() {
@@ -410,7 +534,6 @@ class _MapTabState extends ConsumerState<MapTab> {
                     setState(() => _showSearchButton = true);
                   },
                   onTap: (_) => _closeSheet(),
-                  onLongPress: _showSaveLocationDialog,
                 ),
 
                 // 視点切り替えボタン
@@ -439,16 +562,29 @@ class _MapTabState extends ConsumerState<MapTab> {
                     ),
                   ),
 
-                // 現在地ボタン
+                // マイプレイスボタン
                 Positioned(
                   bottom: _sheetVisible ? 260 : 16,
                   right: 12,
-                  child: FloatingActionButton.small(
-                    heroTag: 'myLocation',
-                    backgroundColor: Colors.white,
-                    foregroundColor: Colors.black87,
-                    onPressed: _initCurrentPosition,
-                    child: const Icon(Icons.my_location),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      FloatingActionButton.small(
+                        heroTag: 'myPlaces',
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.black87,
+                        onPressed: _showPlacesManager,
+                        child: const Icon(Icons.bookmark),
+                      ),
+                      const SizedBox(height: 8),
+                      FloatingActionButton.small(
+                        heroTag: 'myLocation',
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.black87,
+                        onPressed: _initCurrentPosition,
+                        child: const Icon(Icons.my_location),
+                      ),
+                    ],
                   ),
                 ),
 
@@ -757,4 +893,18 @@ class _SheetContent {
   final PlaceInfo? place;
 
   _SheetContent({this.mealLog, this.photos = const [], this.place});
+}
+
+class _PlaceSlot {
+  final String label;
+  final IconData icon;
+  final String iconType;
+  final SavedPlace? place;
+
+  _PlaceSlot({
+    required this.label,
+    required this.icon,
+    required this.iconType,
+    this.place,
+  });
 }

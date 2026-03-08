@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:geocoding/geocoding.dart';
 
 import '../../database/local_database.dart';
 import '../../models/saved_place.dart';
@@ -46,17 +47,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
   IconData _iconForType(String iconType) {
     return switch (iconType) {
       'home' => Icons.home,
-      'work' => Icons.work,
+      'favorite' => Icons.star,
       _ => Icons.place,
     };
+  }
+
+  Future<String?> _reverseGeocode(double lat, double lng) async {
+    try {
+      final placemarks = await placemarkFromCoordinates(lat, lng);
+      if (placemarks.isEmpty) return null;
+      final p = placemarks.first;
+      final parts = <String>[
+        if (p.administrativeArea?.isNotEmpty == true) p.administrativeArea!,
+        if (p.locality?.isNotEmpty == true) p.locality!,
+        if (p.subLocality?.isNotEmpty == true) p.subLocality!,
+        if (p.thoroughfare?.isNotEmpty == true) p.thoroughfare!,
+        if (p.subThoroughfare?.isNotEmpty == true) p.subThoroughfare!,
+      ];
+      return parts.isEmpty ? null : parts.join('');
+    } catch (_) {
+      return null;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('設定'),
-      ),
+      appBar: AppBar(title: const Text('設定')),
       body: ListView(
         children: [
           // 保存した場所
@@ -71,14 +88,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const ListTile(
               leading: Icon(Icons.info_outline),
               title: Text('保存した場所はありません'),
-              subtitle: Text('マップを長押しして場所を保存できます'),
+              subtitle: Text('マップ画面から登録できます'),
             )
           else
             ..._savedPlaces.map((place) => ListTile(
               leading: Icon(_iconForType(place.iconType)),
               title: Text(place.name),
-              subtitle: Text(
-                '${place.latitude.toStringAsFixed(4)}, ${place.longitude.toStringAsFixed(4)}',
+              subtitle: FutureBuilder<String?>(
+                future: _reverseGeocode(place.latitude, place.longitude),
+                builder: (context, snapshot) {
+                  if (snapshot.hasData && snapshot.data != null) {
+                    return Text(snapshot.data!, maxLines: 1, overflow: TextOverflow.ellipsis);
+                  }
+                  return Text(
+                    '${place.latitude.toStringAsFixed(4)}, ${place.longitude.toStringAsFixed(4)}',
+                  );
+                },
               ),
               trailing: IconButton(
                 icon: const Icon(Icons.delete_outline),
