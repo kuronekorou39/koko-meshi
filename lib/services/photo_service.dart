@@ -12,9 +12,12 @@ class PhotoService {
   static final _picker = ImagePicker();
   static const _uuid = Uuid();
 
-  /// カメラで撮影
+  /// カメラで撮影（最高画質）
   static Future<XFile?> takePhoto() async {
-    return _picker.pickImage(source: ImageSource.camera);
+    return _picker.pickImage(
+      source: ImageSource.camera,
+      imageQuality: 100,
+    );
   }
 
   /// ライブラリから選択（複数可）

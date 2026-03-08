@@ -29,6 +29,7 @@ dependencies:
 
   # 位置情報
   geolocator: ^13.0.2
+  geocoding: ^3.0.0
 
   # 地図
   google_maps_flutter: ^2.12.1
@@ -51,6 +52,12 @@ dependencies:
   # 日付フォーマット
   intl: ^0.20.2
 
+  # URL起動
+  url_launcher: ^6.3.1
+
+  # 環境変数
+  flutter_dotenv: ^5.2.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -60,3 +67,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - .env
+    - assets/

@@ -23,10 +23,12 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: _tabs[_currentIndex],
-      floatingActionButton: FloatingActionButton.large(
-        onPressed: () => context.push('/capture'),
-        child: const Icon(Icons.camera_alt, size: 36),
-      ),
+      floatingActionButton: _currentIndex == 0
+          ? FloatingActionButton.large(
+              onPressed: () => context.push('/capture'),
+              child: const Icon(Icons.camera_alt, size: 36),
+            )
+          : null,
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,

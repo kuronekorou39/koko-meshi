@@ -1,8 +1,10 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../database/local_database.dart';
@@ -10,6 +12,7 @@ import '../../models/meal_log.dart';
 import '../../models/meal_photo.dart';
 import '../../models/meal_type.dart';
 import '../../providers/meal_providers.dart';
+import '../../services/location_service.dart';
 import '../../services/photo_service.dart';
 
 class CaptureScreen extends ConsumerStatefulWidget {
@@ -25,79 +28,169 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   final List<XFile> _selectedPhotos = [];
   bool _saving = false;
 
+  // GPS・日時
+  Position? _position;
+  String? _address;
+  bool _loadingLocation = true;
+  late DateTime _capturedAt;
+
+  @override
+  void initState() {
+    super.initState();
+    _capturedAt = DateTime.now();
+    _fetchLocation();
+  }
+
+  Future<void> _fetchLocation() async {
+    final pos = await LocationService.getCurrentPosition();
+    if (!mounted) return;
+
+    setState(() {
+      _position = pos;
+      _loadingLocation = pos != null; // 住所取得中はまだloading
+    });
+
+    if (pos != null) {
+      final addr = await LocationService.getAddressFromPosition(pos);
+      if (mounted) {
+        setState(() {
+          _address = addr;
+          _loadingLocation = false;
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final dateFormat = DateFormat('yyyy/M/d (E) HH:mm', 'ja');
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('食事を記録'),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // 写真表示エリア
-            Expanded(
-              child: _selectedPhotos.isEmpty
-                  ? _buildPhotoPlaceholder()
-                  : _buildPhotoGrid(),
-            ),
-            const SizedBox(height: 12),
-
-            // 写真追加ボタン
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _takePhoto,
-                    icon: const Icon(Icons.camera_alt),
-                    label: const Text('撮影'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _pickFromLibrary,
-                    icon: const Icon(Icons.photo_library),
-                    label: const Text('ライブラリ'),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-
-            // 食事種別選択
-            SegmentedButton<MealType>(
-              segments: MealType.values
-                  .map((type) => ButtonSegment(
-                        value: type,
-                        label: Text(type.label),
-                      ))
-                  .toList(),
-              selected: {_selectedType},
-              onSelectionChanged: (selected) {
-                setState(() => _selectedType = selected.first);
-              },
-            ),
-            const SizedBox(height: 16),
-
-            // 保存ボタン
-            FilledButton.icon(
-              onPressed: _selectedPhotos.isEmpty || _saving ? null : _save,
-              icon: _saving
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.check),
-              label: Text(_saving ? '保存中...' : '保存'),
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(56),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // 写真表示エリア
+              Expanded(
+                child: _selectedPhotos.isEmpty
+                    ? _buildPhotoPlaceholder()
+                    : _buildPhotoGrid(),
               ),
-            ),
-          ],
+              const SizedBox(height: 12),
+
+              // 写真追加ボタン
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _takePhoto,
+                      icon: const Icon(Icons.camera_alt),
+                      label: const Text('撮影'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _pickFromLibrary,
+                      icon: const Icon(Icons.photo_library),
+                      label: const Text('ライブラリ'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // 食事種別選択
+              SegmentedButton<MealType>(
+                segments: MealType.values
+                    .map((type) => ButtonSegment(
+                          value: type,
+                          label: Text(type.label),
+                        ))
+                    .toList(),
+                selected: {_selectedType},
+                onSelectionChanged: (selected) {
+                  setState(() => _selectedType = selected.first);
+                },
+              ),
+              const SizedBox(height: 12),
+
+              // 日時・位置情報
+              _buildMetadataBar(dateFormat),
+              const SizedBox(height: 12),
+
+              // 保存ボタン
+              FilledButton.icon(
+                onPressed: _selectedPhotos.isEmpty || _saving ? null : _save,
+                icon: _saving
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.check),
+                label: Text(_saving ? '保存中...' : '保存'),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(56),
+                ),
+              ),
+            ],
+          ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildMetadataBar(DateFormat dateFormat) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          // 日時
+          Icon(Icons.schedule, size: 16, color: Colors.grey[600]),
+          const SizedBox(width: 4),
+          Text(
+            dateFormat.format(_capturedAt),
+            style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+          ),
+          const SizedBox(width: 12),
+          // 位置情報
+          Icon(Icons.location_on, size: 16, color: Colors.grey[600]),
+          const SizedBox(width: 4),
+          Expanded(
+            child: _loadingLocation
+                ? const SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(strokeWidth: 1.5),
+                  )
+                : _position != null
+                    ? Text(
+                        _address ?? '${_position!.latitude.toStringAsFixed(4)}, ${_position!.longitude.toStringAsFixed(4)}',
+                        style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                        overflow: TextOverflow.ellipsis,
+                      )
+                    : GestureDetector(
+                        onTap: () {
+                          setState(() => _loadingLocation = true);
+                          _fetchLocation();
+                        },
+                        child: Text(
+                          '取得できません (タップで再取得)',
+                          style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                        ),
+                      ),
+          ),
+        ],
       ),
     );
   }
@@ -215,15 +308,14 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     setState(() => _saving = true);
 
     try {
-      final now = DateTime.now();
       final mealLogId = _uuid.v4();
 
       // 食事記録を作成
       final mealLog = MealLog(
         id: mealLogId,
         mealType: _selectedType,
-        eatenAt: now,
-        createdAt: now,
+        eatenAt: _capturedAt,
+        createdAt: DateTime.now(),
       );
       await LocalDatabase.insertMealLog(mealLog);
 
@@ -237,8 +329,10 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
           mealLogId: mealLogId,
           localPath: localPath,
           thumbnailUrl: thumbnailPath,
-          shotAt: now,
-          createdAt: now,
+          shotAt: _capturedAt,
+          latitude: _position?.latitude,
+          longitude: _position?.longitude,
+          createdAt: DateTime.now(),
         );
         await LocalDatabase.insertMealPhoto(photo);
       }

@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(flutter:*)",
+      "Bash(shopt:*)",
+      "Bash(java:*)",
+      "Bash(where java:*)",
+      "Bash(gcloud:*)",
+      "Bash(adb:*)",
+      "Bash(taskkill:*)"
+    ]
+  }
+}

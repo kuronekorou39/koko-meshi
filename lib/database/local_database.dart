@@ -4,6 +4,7 @@ import 'package:path/path.dart';
 import '../models/meal_log.dart';
 import '../models/meal_photo.dart';
 import '../models/restaurant.dart';
+import '../models/saved_place.dart';
 
 class LocalDatabase {
   static Database? _database;
@@ -20,8 +21,9 @@ class LocalDatabase {
 
     return openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
     );
   }
 
@@ -75,6 +77,26 @@ class LocalDatabase {
         longitude REAL,
         created_at TEXT NOT NULL,
         FOREIGN KEY (meal_log_id) REFERENCES meal_logs(id)
+      )
+    ''');
+    await _createSavedPlacesTable(db);
+  }
+
+  static Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await _createSavedPlacesTable(db);
+    }
+  }
+
+  static Future<void> _createSavedPlacesTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS saved_places (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        latitude REAL NOT NULL,
+        longitude REAL NOT NULL,
+        icon_type TEXT NOT NULL DEFAULT 'custom',
+        created_at TEXT NOT NULL
       )
     ''');
   }
@@ -180,5 +202,23 @@ class LocalDatabase {
     );
     if (maps.isEmpty) return null;
     return Restaurant.fromMap(maps.first);
+  }
+
+  // --- SavedPlace CRUD ---
+
+  static Future<void> insertSavedPlace(SavedPlace place) async {
+    final db = await database;
+    await db.insert('saved_places', place.toMap());
+  }
+
+  static Future<List<SavedPlace>> getSavedPlaces() async {
+    final db = await database;
+    final maps = await db.query('saved_places', orderBy: 'created_at ASC');
+    return maps.map((m) => SavedPlace.fromMap(m)).toList();
+  }
+
+  static Future<void> deleteSavedPlace(String id) async {
+    final db = await database;
+    await db.delete('saved_places', where: 'id = ?', whereArgs: [id]);
   }
 }

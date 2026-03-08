@@ -1,7 +1,55 @@
 import 'package:flutter/material.dart';
 
-class SettingsScreen extends StatelessWidget {
+import '../../database/local_database.dart';
+import '../../models/saved_place.dart';
+
+class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
+
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  List<SavedPlace> _savedPlaces = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedPlaces();
+  }
+
+  Future<void> _loadSavedPlaces() async {
+    final places = await LocalDatabase.getSavedPlaces();
+    if (mounted) setState(() => _savedPlaces = places);
+  }
+
+  Future<void> _deleteSavedPlace(SavedPlace place) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('場所を削除'),
+        content: Text('「${place.name}」を削除しますか？'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('キャンセル')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('削除')),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await LocalDatabase.deleteSavedPlace(place.id);
+      _loadSavedPlaces();
+    }
+  }
+
+  IconData _iconForType(String iconType) {
+    return switch (iconType) {
+      'home' => Icons.home,
+      'work' => Icons.work,
+      _ => Icons.place,
+    };
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -11,6 +59,34 @@ class SettingsScreen extends StatelessWidget {
       ),
       body: ListView(
         children: [
+          // 保存した場所
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Text(
+              '保存した場所',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.grey[600]),
+            ),
+          ),
+          if (_savedPlaces.isEmpty)
+            const ListTile(
+              leading: Icon(Icons.info_outline),
+              title: Text('保存した場所はありません'),
+              subtitle: Text('マップを長押しして場所を保存できます'),
+            )
+          else
+            ..._savedPlaces.map((place) => ListTile(
+              leading: Icon(_iconForType(place.iconType)),
+              title: Text(place.name),
+              subtitle: Text(
+                '${place.latitude.toStringAsFixed(4)}, ${place.longitude.toStringAsFixed(4)}',
+              ),
+              trailing: IconButton(
+                icon: const Icon(Icons.delete_outline),
+                onPressed: () => _deleteSavedPlace(place),
+              ),
+            )),
+          const Divider(),
+
           // アカウント連携
           ListTile(
             leading: const Icon(Icons.person),

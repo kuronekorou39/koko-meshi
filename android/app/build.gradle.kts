@@ -5,6 +5,19 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// .env からAPIキーを読み込む
+val envFile = rootProject.file("../.env")
+val envMap = mutableMapOf<String, String>()
+if (envFile.exists()) {
+    envFile.readLines().forEach { line ->
+        val trimmed = line.trim()
+        if (trimmed.isNotEmpty() && !trimmed.startsWith("#") && trimmed.contains("=")) {
+            val (key, value) = trimmed.split("=", limit = 2)
+            envMap[key.trim()] = value.trim()
+        }
+    }
+}
+
 android {
     namespace = "com.kokomeshi.koko_meshi"
     compileSdk = flutter.compileSdkVersion
@@ -28,6 +41,9 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // .env から Google Maps APIキーを注入
+        manifestPlaceholders["GOOGLE_MAPS_API_KEY"] = envMap["GOOGLE_MAPS_API_KEY"] ?: ""
     }
 
     buildTypes {
