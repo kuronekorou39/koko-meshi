@@ -137,9 +137,7 @@ class MealCard extends StatelessWidget {
   }
 
   Widget _photoImage(MealPhoto photo) {
-    // サムネイルがあればサムネイル、なければオリジナル
-    final path = photo.thumbnailUrl ?? photo.localPath;
-    final file = File(path);
+    final file = File(photo.localPath);
 
     if (!file.existsSync()) {
       return Container(

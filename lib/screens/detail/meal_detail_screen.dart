@@ -1,20 +1,50 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../database/local_database.dart';
 import '../../providers/meal_providers.dart';
 import '../../models/meal_photo.dart';
 
-class MealDetailScreen extends ConsumerWidget {
+class MealDetailScreen extends ConsumerStatefulWidget {
   final String mealLogId;
 
   const MealDetailScreen({super.key, required this.mealLogId});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final mealLogAsync = ref.watch(mealLogProvider(mealLogId));
-    final photosAsync = ref.watch(mealPhotosProvider(mealLogId));
+  ConsumerState<MealDetailScreen> createState() => _MealDetailScreenState();
+}
+
+class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
+  Timer? _refreshTimer;
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  void _startAutoRefresh(List<MealPhoto> photos) {
+    _refreshTimer?.cancel();
+    final hasPending = photos.any(
+      (p) => p.aiStatus == 'pending' || p.aiStatus == 'processing',
+    );
+    if (hasPending) {
+      _refreshTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+        ref.invalidate(mealPhotosProvider(widget.mealLogId));
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mealLogAsync = ref.watch(mealLogProvider(widget.mealLogId));
+    final photosAsync = ref.watch(mealPhotosProvider(widget.mealLogId));
+
+    // pending写真がある場合、自動リフレッシュ
+    photosAsync.whenData(_startAutoRefresh);
 
     return Scaffold(
       appBar: AppBar(
@@ -22,7 +52,7 @@ class MealDetailScreen extends ConsumerWidget {
         actions: [
           IconButton(
             icon: const Icon(Icons.delete_outline),
-            onPressed: () => _confirmDelete(context, ref),
+            onPressed: () => _confirmDelete(context),
           ),
         ],
       ),
@@ -40,7 +70,6 @@ class MealDetailScreen extends ConsumerWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 写真ギャラリー
                 photosAsync.when(
                   loading: () => const SizedBox(
                     height: 300,
@@ -53,16 +82,22 @@ class MealDetailScreen extends ConsumerWidget {
                   data: (photos) => _buildPhotoGallery(photos),
                 ),
 
-                // 基本情報
                 Padding(
                   padding: const EdgeInsets.all(16),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // 食事種別 + 日時
                       Row(
                         children: [
                           Chip(label: Text(mealLog.mealType.label)),
+                          if (mealLog.locationTag == 'home')
+                            Padding(
+                              padding: const EdgeInsets.only(left: 8),
+                              child: Chip(
+                                avatar: const Icon(Icons.home, size: 16),
+                                label: const Text('自宅'),
+                              ),
+                            ),
                           const Spacer(),
                           Text(
                             dateFormat.format(mealLog.eatenAt),
@@ -75,11 +110,10 @@ class MealDetailScreen extends ConsumerWidget {
                       ),
                       const SizedBox(height: 16),
 
-                      // AI解析結果
                       photosAsync.when(
                         loading: () => const SizedBox.shrink(),
                         error: (_, _) => const SizedBox.shrink(),
-                        data: (photos) => _buildAiResults(photos),
+                        data: (photos) => _buildAiResults(context, photos),
                       ),
                     ],
                   ),
@@ -135,9 +169,9 @@ class MealDetailScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildAiResults(List<MealPhoto> photos) {
+  Widget _buildAiResults(BuildContext context, List<MealPhoto> photos) {
     final analyzed = photos.where((p) => p.aiStatus == 'completed').toList();
-    final pending = photos.where((p) => p.aiStatus == 'pending').toList();
+    final pending = photos.where((p) => p.aiStatus == 'pending' || p.aiStatus == 'processing').toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -148,28 +182,24 @@ class MealDetailScreen extends ConsumerWidget {
             style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
-          ...analyzed.map((photo) => ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(photo.displayName ?? '不明'),
-                subtitle: Row(
-                  children: [
-                    if (photo.displayPrice != null)
-                      Text('¥${NumberFormat('#,###').format(photo.displayPrice)}'),
-                    if (photo.displayPrice != null && photo.displayCalories != null)
-                      const Text(' / '),
-                    if (photo.displayCalories != null)
-                      Text('${photo.displayCalories} kcal'),
-                  ],
-                ),
-                trailing: const Icon(Icons.edit, size: 18, color: Colors.grey),
-              )),
+          ...analyzed.map((photo) => _buildMenuTile(context, photo)),
         ],
         if (pending.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 8),
-            child: Text(
-              '${pending.length}枚の写真を解析待ち...',
-              style: TextStyle(color: Colors.grey[500], fontSize: 14),
+            child: Row(
+              children: [
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '${pending.length}枚の写真を解析中...',
+                  style: TextStyle(color: Colors.grey[500], fontSize: 14),
+                ),
+              ],
             ),
           ),
         if (analyzed.isEmpty && pending.isEmpty)
@@ -181,7 +211,126 @@ class MealDetailScreen extends ConsumerWidget {
     );
   }
 
-  Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
+  Widget _buildMenuTile(BuildContext context, MealPhoto photo) {
+    final isUserCorrected = photo.userCorrectedName != null ||
+        photo.userCorrectedPrice != null ||
+        photo.userCorrectedCalories != null;
+
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Text(photo.displayName ?? '不明'),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              if (photo.displayPrice != null)
+                Text('¥${NumberFormat('#,###').format(photo.displayPrice)}'),
+              if (photo.displayPrice != null && photo.displayCalories != null)
+                const Text(' / '),
+              if (photo.displayCalories != null)
+                Text('${photo.displayCalories} kcal'),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Row(
+            children: [
+              if (photo.aiModel != null)
+                Text(
+                  photo.aiModel!,
+                  style: TextStyle(fontSize: 11, color: Colors.grey[400]),
+                ),
+              if (isUserCorrected) ...[
+                if (photo.aiModel != null)
+                  Text(' · ', style: TextStyle(fontSize: 11, color: Colors.grey[400])),
+                Text(
+                  'ユーザー修正済',
+                  style: TextStyle(fontSize: 11, color: Colors.blue[300]),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+      trailing: IconButton(
+        icon: const Icon(Icons.edit, size: 18, color: Colors.grey),
+        onPressed: () => _showEditDialog(context, photo),
+      ),
+    );
+  }
+
+  Future<void> _showEditDialog(BuildContext context, MealPhoto photo) async {
+    final nameCtrl = TextEditingController(text: photo.displayName ?? '');
+    final priceCtrl = TextEditingController(
+      text: photo.displayPrice?.toString() ?? '',
+    );
+    final caloriesCtrl = TextEditingController(
+      text: photo.displayCalories?.toString() ?? '',
+    );
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('メニュー情報を編集'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameCtrl,
+              decoration: const InputDecoration(
+                labelText: 'メニュー名',
+                hintText: '例: 味噌ラーメン',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: priceCtrl,
+              decoration: const InputDecoration(
+                labelText: '価格 (円)',
+                hintText: '例: 800',
+              ),
+              keyboardType: TextInputType.number,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: caloriesCtrl,
+              decoration: const InputDecoration(
+                labelText: 'カロリー (kcal)',
+                hintText: '例: 500',
+              ),
+              keyboardType: TextInputType.number,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true) {
+      final updated = photo.copyWith(
+        userCorrectedName: nameCtrl.text.trim().isEmpty ? null : nameCtrl.text.trim(),
+        userCorrectedPrice: int.tryParse(priceCtrl.text.trim()),
+        userCorrectedCalories: int.tryParse(caloriesCtrl.text.trim()),
+      );
+      await LocalDatabase.updateMealPhoto(updated);
+      ref.invalidate(mealPhotosProvider(widget.mealLogId));
+    }
+
+    nameCtrl.dispose();
+    priceCtrl.dispose();
+    caloriesCtrl.dispose();
+  }
+
+  Future<void> _confirmDelete(BuildContext context) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -201,7 +350,7 @@ class MealDetailScreen extends ConsumerWidget {
     );
 
     if (confirmed == true && context.mounted) {
-      await ref.read(mealLogsProvider.notifier).deleteMealLog(mealLogId);
+      await ref.read(mealLogsProvider.notifier).deleteMealLog(widget.mealLogId);
       if (context.mounted) Navigator.pop(context);
     }
   }

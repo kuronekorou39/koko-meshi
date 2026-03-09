@@ -12,6 +12,7 @@ import '../../models/meal_log.dart';
 import '../../models/meal_photo.dart';
 import '../../models/meal_type.dart';
 import '../../providers/meal_providers.dart';
+import '../../services/ai_analysis_service.dart';
 import '../../services/location_service.dart';
 import '../../services/photo_service.dart';
 
@@ -310,11 +311,37 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     try {
       final mealLogId = _uuid.v4();
 
+      // 自宅判定: GPSと保存済み場所を比較
+      String? locationTag;
+      if (_position != null) {
+        final savedPlaces = await LocalDatabase.getSavedPlaces();
+        debugPrint('[Location] GPS: ${_position!.latitude}, ${_position!.longitude}, SavedPlaces: ${savedPlaces.length}');
+        for (final place in savedPlaces) {
+          final distance = Geolocator.distanceBetween(
+            _position!.latitude,
+            _position!.longitude,
+            place.latitude,
+            place.longitude,
+          );
+          debugPrint('[Location] ${place.name}(${place.iconType}): ${distance.toStringAsFixed(0)}m');
+          if (distance <= 100) {
+            locationTag = place.iconType == 'home' ? 'home' : place.id;
+            break;
+          }
+        }
+        debugPrint('[Location] Tag: $locationTag');
+      } else {
+        debugPrint('[Location] No GPS position available');
+      }
+
       // 食事記録を作成
       final mealLog = MealLog(
         id: mealLogId,
         mealType: _selectedType,
         eatenAt: _capturedAt,
+        latitude: _position?.latitude,
+        longitude: _position?.longitude,
+        locationTag: locationTag,
         createdAt: DateTime.now(),
       );
       await LocalDatabase.insertMealLog(mealLog);
@@ -339,6 +366,11 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
 
       // 一覧を更新
       ref.read(mealLogsProvider.notifier).refresh();
+
+      // AI解析をバックグラウンドで実行（結果を待たない）
+      AiAnalysisService.processPendingPhotos().then((_) {
+        if (mounted) ref.read(mealLogsProvider.notifier).refresh();
+      });
 
       if (mounted) context.pop();
     } catch (e) {

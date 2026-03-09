@@ -8,6 +8,9 @@ class MealLog {
   final DateTime eatenAt;
   final int? totalPrice;
   final String? note;
+  final String? locationTag; // 'home' / SavedPlace.id / null
+  final double? latitude;
+  final double? longitude;
   final String syncStatus; // pending / synced
   final DateTime createdAt;
 
@@ -19,6 +22,9 @@ class MealLog {
     required this.eatenAt,
     this.totalPrice,
     this.note,
+    this.locationTag,
+    this.latitude,
+    this.longitude,
     this.syncStatus = 'pending',
     required this.createdAt,
   });
@@ -32,6 +38,9 @@ class MealLog {
       'eaten_at': eatenAt.toIso8601String(),
       'total_price': totalPrice,
       'note': note,
+      'location_tag': locationTag,
+      'latitude': latitude,
+      'longitude': longitude,
       'sync_status': syncStatus,
       'created_at': createdAt.toIso8601String(),
     };
@@ -46,6 +55,9 @@ class MealLog {
       eatenAt: DateTime.parse(map['eaten_at'] as String),
       totalPrice: map['total_price'] as int?,
       note: map['note'] as String?,
+      locationTag: map['location_tag'] as String?,
+      latitude: map['latitude'] as double?,
+      longitude: map['longitude'] as double?,
       syncStatus: map['sync_status'] as String? ?? 'pending',
       createdAt: DateTime.parse(map['created_at'] as String),
     );
@@ -58,6 +70,9 @@ class MealLog {
     DateTime? eatenAt,
     int? totalPrice,
     String? note,
+    String? locationTag,
+    double? latitude,
+    double? longitude,
     String? syncStatus,
   }) {
     return MealLog(
@@ -68,6 +83,9 @@ class MealLog {
       eatenAt: eatenAt ?? this.eatenAt,
       totalPrice: totalPrice ?? this.totalPrice,
       note: note ?? this.note,
+      locationTag: locationTag ?? this.locationTag,
+      latitude: latitude ?? this.latitude,
+      longitude: longitude ?? this.longitude,
       syncStatus: syncStatus ?? this.syncStatus,
       createdAt: createdAt,
     );

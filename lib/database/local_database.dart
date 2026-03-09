@@ -21,7 +21,7 @@ class LocalDatabase {
 
     return openDatabase(
       path,
-      version: 2,
+      version: 4,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -50,6 +50,9 @@ class LocalDatabase {
         eaten_at TEXT NOT NULL,
         total_price INTEGER,
         note TEXT,
+        location_tag TEXT,
+        latitude REAL,
+        longitude REAL,
         sync_status TEXT NOT NULL DEFAULT 'pending',
         created_at TEXT NOT NULL,
         FOREIGN KEY (restaurant_id) REFERENCES restaurants(id)
@@ -68,6 +71,7 @@ class LocalDatabase {
         ai_estimated_price INTEGER,
         ai_estimated_calories INTEGER,
         ai_cuisine_genre TEXT,
+        ai_model TEXT,
         user_corrected_name TEXT,
         user_corrected_price INTEGER,
         user_corrected_calories INTEGER,
@@ -85,6 +89,14 @@ class LocalDatabase {
   static Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
       await _createSavedPlacesTable(db);
+    }
+    if (oldVersion < 3) {
+      await db.execute('ALTER TABLE meal_photos ADD COLUMN ai_model TEXT');
+    }
+    if (oldVersion < 4) {
+      await db.execute('ALTER TABLE meal_logs ADD COLUMN location_tag TEXT');
+      await db.execute('ALTER TABLE meal_logs ADD COLUMN latitude REAL');
+      await db.execute('ALTER TABLE meal_logs ADD COLUMN longitude REAL');
     }
   }
 
@@ -156,6 +168,16 @@ class LocalDatabase {
       'meal_photos',
       where: 'ai_status = ?',
       whereArgs: ['pending'],
+    );
+    return maps.map((m) => MealPhoto.fromMap(m)).toList();
+  }
+
+  static Future<List<MealPhoto>> getFailedAiPhotos() async {
+    final db = await database;
+    final maps = await db.query(
+      'meal_photos',
+      where: 'ai_status = ?',
+      whereArgs: ['failed'],
     );
     return maps.map((m) => MealPhoto.fromMap(m)).toList();
   }

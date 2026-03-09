@@ -9,6 +9,7 @@ class MealPhoto {
   final int? aiEstimatedPrice;
   final int? aiEstimatedCalories;
   final String? aiCuisineGenre;
+  final String? aiModel; // 解析に使用したAIモデル名
   final String? userCorrectedName;
   final int? userCorrectedPrice;
   final int? userCorrectedCalories;
@@ -29,6 +30,7 @@ class MealPhoto {
     this.aiEstimatedPrice,
     this.aiEstimatedCalories,
     this.aiCuisineGenre,
+    this.aiModel,
     this.userCorrectedName,
     this.userCorrectedPrice,
     this.userCorrectedCalories,
@@ -60,6 +62,7 @@ class MealPhoto {
       'ai_estimated_price': aiEstimatedPrice,
       'ai_estimated_calories': aiEstimatedCalories,
       'ai_cuisine_genre': aiCuisineGenre,
+      'ai_model': aiModel,
       'user_corrected_name': userCorrectedName,
       'user_corrected_price': userCorrectedPrice,
       'user_corrected_calories': userCorrectedCalories,
@@ -83,6 +86,7 @@ class MealPhoto {
       aiEstimatedPrice: map['ai_estimated_price'] as int?,
       aiEstimatedCalories: map['ai_estimated_calories'] as int?,
       aiCuisineGenre: map['ai_cuisine_genre'] as String?,
+      aiModel: map['ai_model'] as String?,
       userCorrectedName: map['user_corrected_name'] as String?,
       userCorrectedPrice: map['user_corrected_price'] as int?,
       userCorrectedCalories: map['user_corrected_calories'] as int?,
@@ -102,6 +106,7 @@ class MealPhoto {
     int? aiEstimatedPrice,
     int? aiEstimatedCalories,
     String? aiCuisineGenre,
+    String? aiModel,
     String? userCorrectedName,
     int? userCorrectedPrice,
     int? userCorrectedCalories,
@@ -118,6 +123,7 @@ class MealPhoto {
       aiEstimatedPrice: aiEstimatedPrice ?? this.aiEstimatedPrice,
       aiEstimatedCalories: aiEstimatedCalories ?? this.aiEstimatedCalories,
       aiCuisineGenre: aiCuisineGenre ?? this.aiCuisineGenre,
+      aiModel: aiModel ?? this.aiModel,
       userCorrectedName: userCorrectedName ?? this.userCorrectedName,
       userCorrectedPrice: userCorrectedPrice ?? this.userCorrectedPrice,
       userCorrectedCalories: userCorrectedCalories ?? this.userCorrectedCalories,

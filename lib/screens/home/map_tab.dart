@@ -90,15 +90,109 @@ class _MapTabState extends ConsumerState<MapTab> {
     final savedPlaces = await LocalDatabase.getSavedPlaces();
     final markers = <Marker>{};
 
+    // SavedPlaceごとに紐づく食事記録を集計
+    final placeLogMap = <String, List<_MealLogWithPhotos>>{}; // placeId → logs
+    final ungroupedLogs = <_MealLogWithPhotos>[];
+
     for (final log in mealLogs) {
       final photos = await LocalDatabase.getPhotosForMealLog(log.id);
-      final photoWithLocation = photos.cast<MealPhoto?>().firstWhere(
+
+      // MealLog自体にlocationTagがあればそれを使う
+      if (log.locationTag != null) {
+        placeLogMap.putIfAbsent(log.locationTag!, () => [])
+            .add(_MealLogWithPhotos(log, photos));
+        continue;
+      }
+
+      // GPS座標がある場合、SavedPlaceとの距離で判定
+      final lat = log.latitude;
+      final lng = log.longitude;
+      if (lat != null && lng != null) {
+        bool grouped = false;
+        for (final place in savedPlaces) {
+          final distance = _distanceBetween(lat, lng, place.latitude, place.longitude);
+          if (distance <= 100) {
+            final key = place.iconType == 'home' ? 'home' : place.id;
+            placeLogMap.putIfAbsent(key, () => [])
+                .add(_MealLogWithPhotos(log, photos));
+            grouped = true;
+            break;
+          }
+        }
+        if (!grouped) {
+          ungroupedLogs.add(_MealLogWithPhotos(log, photos));
+        }
+      } else {
+        // GPSがない場合、写真のGPSを確認
+        final photoWithLocation = photos.cast<MealPhoto?>().firstWhere(
+          (p) => p!.latitude != null && p.longitude != null,
+          orElse: () => null,
+        );
+        if (photoWithLocation != null) {
+          bool grouped = false;
+          for (final place in savedPlaces) {
+            final distance = _distanceBetween(
+              photoWithLocation.latitude!, photoWithLocation.longitude!,
+              place.latitude, place.longitude,
+            );
+            if (distance <= 100) {
+              final key = place.iconType == 'home' ? 'home' : place.id;
+              placeLogMap.putIfAbsent(key, () => [])
+                  .add(_MealLogWithPhotos(log, photos));
+              grouped = true;
+              break;
+            }
+          }
+          if (!grouped) {
+            ungroupedLogs.add(_MealLogWithPhotos(log, photos));
+          }
+        }
+      }
+    }
+
+    // SavedPlaceマーカー（食事件数バッジ付き）
+    for (final place in savedPlaces) {
+      final key = place.iconType == 'home' ? 'home' : place.id;
+      final logs = placeLogMap[key] ?? [];
+      final count = logs.length;
+
+      final icon = count > 0
+          ? await _createCountBadgeMarker(
+              place.iconType == 'home' ? Icons.home : Icons.star,
+              count,
+            )
+          : BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueViolet);
+
+      markers.add(
+        Marker(
+          markerId: MarkerId('saved_${place.id}'),
+          position: LatLng(place.latitude, place.longitude),
+          icon: icon,
+          zIndexInt: 3,
+          onTap: count > 0
+              ? () => _showGroupedMealSheet(place.name, logs)
+              : null,
+          infoWindow: count == 0 ? InfoWindow(title: place.name) : InfoWindow.noText,
+        ),
+      );
+    }
+
+    // グルーピングされなかった食事記録を個別マーカーで表示
+    for (final item in ungroupedLogs) {
+      final lat = item.log.latitude;
+      final lng = item.log.longitude;
+      final photoWithLocation = item.photos.cast<MealPhoto?>().firstWhere(
         (p) => p!.latitude != null && p.longitude != null,
         orElse: () => null,
       );
-      if (photoWithLocation == null) continue;
+      final pos = lat != null && lng != null
+          ? LatLng(lat, lng)
+          : photoWithLocation != null
+              ? LatLng(photoWithLocation.latitude!, photoWithLocation.longitude!)
+              : null;
+      if (pos == null) continue;
 
-      final hue = switch (log.mealType) {
+      final hue = switch (item.log.mealType) {
         MealType.eatingOut => BitmapDescriptor.hueOrange,
         MealType.homeCooking => BitmapDescriptor.hueGreen,
         MealType.delivery => BitmapDescriptor.hueBlue,
@@ -106,28 +200,114 @@ class _MapTabState extends ConsumerState<MapTab> {
 
       markers.add(
         Marker(
-          markerId: MarkerId('meal_${log.id}'),
-          position: LatLng(photoWithLocation.latitude!, photoWithLocation.longitude!),
+          markerId: MarkerId('meal_${item.log.id}'),
+          position: pos,
           icon: BitmapDescriptor.defaultMarkerWithHue(hue),
           zIndexInt: 2,
-          onTap: () => _showMealSheet(log, photos),
-        ),
-      );
-    }
-
-    for (final place in savedPlaces) {
-      markers.add(
-        Marker(
-          markerId: MarkerId('saved_${place.id}'),
-          position: LatLng(place.latitude, place.longitude),
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueViolet),
-          zIndexInt: 3,
-          infoWindow: InfoWindow(title: place.name),
+          onTap: () => _showMealSheet(item.log, item.photos),
         ),
       );
     }
 
     if (mounted) setState(() => _mealMarkers = markers);
+  }
+
+  static double _distanceBetween(double lat1, double lng1, double lat2, double lng2) {
+    const p = 0.017453292519943295; // pi / 180
+    final a = 0.5 -
+        math.cos((lat2 - lat1) * p) / 2 +
+        math.cos(lat1 * p) * math.cos(lat2 * p) *
+            (1 - math.cos((lng2 - lng1) * p)) / 2;
+    return 12742000 * math.asin(math.sqrt(a)); // 2 * R * asin (meters)
+  }
+
+  /// 件数バッジ付きマーカーを生成
+  Future<BitmapDescriptor> _createCountBadgeMarker(IconData icon, int count) async {
+    final dpr = MediaQuery.of(context).devicePixelRatio;
+    final size = 48.0 * dpr;
+    final badgeSize = 18.0 * dpr;
+
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder, Rect.fromLTWH(0, 0, size, size));
+
+    // 背景円
+    canvas.drawCircle(
+      Offset(size / 2, size / 2),
+      size / 2 - 2 * dpr,
+      Paint()..color = const Color(0xFF7C4DFF),
+    );
+    canvas.drawCircle(
+      Offset(size / 2, size / 2),
+      size / 2 - 2 * dpr,
+      Paint()
+        ..color = Colors.white
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2 * dpr,
+    );
+
+    // アイコン
+    final iconPainter = TextPainter(
+      text: TextSpan(
+        text: String.fromCharCode(icon.codePoint),
+        style: TextStyle(
+          fontSize: 20 * dpr,
+          fontFamily: icon.fontFamily,
+          package: icon.fontPackage,
+          color: Colors.white,
+        ),
+      ),
+      textDirection: ui.TextDirection.ltr,
+    )..layout();
+    iconPainter.paint(
+      canvas,
+      Offset((size - iconPainter.width) / 2, (size - iconPainter.height) / 2),
+    );
+
+    // バッジ（右上）
+    if (count > 0) {
+      final badgeCenter = Offset(size - badgeSize / 2, badgeSize / 2);
+      canvas.drawCircle(badgeCenter, badgeSize / 2, Paint()..color = const Color(0xFFE53935));
+      canvas.drawCircle(
+        badgeCenter,
+        badgeSize / 2,
+        Paint()
+          ..color = Colors.white
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5 * dpr,
+      );
+
+      final badgeText = TextPainter(
+        text: TextSpan(
+          text: count > 99 ? '99+' : '$count',
+          style: TextStyle(
+            fontSize: (count > 99 ? 7 : 9) * dpr,
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        textDirection: ui.TextDirection.ltr,
+      )..layout();
+      badgeText.paint(
+        canvas,
+        Offset(badgeCenter.dx - badgeText.width / 2, badgeCenter.dy - badgeText.height / 2),
+      );
+    }
+
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(size.ceil(), size.ceil());
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+
+    return BitmapDescriptor.bytes(
+      bytes!.buffer.asUint8List(),
+      imagePixelRatio: dpr,
+    );
+  }
+
+  void _showGroupedMealSheet(String placeName, List<_MealLogWithPhotos> items) {
+    setState(() {
+      _sheetContent = _SheetContent(groupName: placeName, groupedMeals: items);
+      _sheetVisible = true;
+    });
   }
 
   /// カスタムラベル付きマーカーを生成
@@ -731,6 +911,8 @@ class _MapTabState extends ConsumerState<MapTab> {
             ),
             if (content == null)
               const SizedBox.shrink()
+            else if (content.groupName != null)
+              _buildGroupedMealContent(content.groupName!, content.groupedMeals)
             else if (content.mealLog != null)
               _buildMealContent(content.mealLog!, content.photos)
             else if (content.place != null)
@@ -738,6 +920,82 @@ class _MapTabState extends ConsumerState<MapTab> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildGroupedMealContent(String placeName, List<_MealLogWithPhotos> items) {
+    final dateFormat = DateFormat('M/d (E) HH:mm', 'ja');
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          child: Row(
+            children: [
+              Text(
+                placeName,
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${items.length}件',
+                style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(
+          height: 180,
+          child: ListView.builder(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            itemCount: items.length,
+            itemBuilder: (context, index) {
+              final item = items[index];
+              final firstPhoto = item.photos.isNotEmpty ? item.photos.first : null;
+              final menuName = item.photos
+                  .where((p) => p.displayName != null)
+                  .map((p) => p.displayName!)
+                  .join('、');
+
+              return ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                leading: ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: firstPhoto != null && File(firstPhoto.localPath).existsSync()
+                      ? Image.file(
+                          File(firstPhoto.localPath),
+                          width: 48,
+                          height: 48,
+                          fit: BoxFit.cover,
+                        )
+                      : Container(
+                          width: 48,
+                          height: 48,
+                          color: Colors.grey[300],
+                          child: const Icon(Icons.restaurant, size: 24, color: Colors.grey),
+                        ),
+                ),
+                title: Text(
+                  menuName.isNotEmpty ? menuName : item.log.mealType.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 14),
+                ),
+                subtitle: Text(
+                  dateFormat.format(item.log.eatenAt),
+                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                ),
+                trailing: const Icon(Icons.chevron_right, size: 20),
+                onTap: () {
+                  _closeSheet();
+                  context.push('/meal/${item.log.id}');
+                },
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
@@ -891,8 +1149,23 @@ class _SheetContent {
   final MealLog? mealLog;
   final List<MealPhoto> photos;
   final PlaceInfo? place;
+  final String? groupName;
+  final List<_MealLogWithPhotos> groupedMeals;
 
-  _SheetContent({this.mealLog, this.photos = const [], this.place});
+  _SheetContent({
+    this.mealLog,
+    this.photos = const [],
+    this.place,
+    this.groupName,
+    this.groupedMeals = const [],
+  });
+}
+
+class _MealLogWithPhotos {
+  final MealLog log;
+  final List<MealPhoto> photos;
+
+  _MealLogWithPhotos(this.log, this.photos);
 }
 
 class _PlaceSlot {
