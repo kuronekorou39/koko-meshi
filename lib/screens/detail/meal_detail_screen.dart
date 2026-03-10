@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -7,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../../database/local_database.dart';
 import '../../providers/meal_providers.dart';
 import '../../models/meal_photo.dart';
+import '../../widgets/cached_photo_image.dart';
 
 class MealDetailScreen extends ConsumerStatefulWidget {
   final String mealLogId;
@@ -150,22 +150,13 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
   }
 
   Widget _buildFullPhoto(MealPhoto photo) {
-    final file = File(photo.localPath);
-    if (!file.existsSync()) {
-      return Container(
-        height: 300,
-        color: Colors.grey[300],
-        child: const Center(
-          child: Icon(Icons.broken_image, size: 48, color: Colors.grey),
-        ),
-      );
-    }
-
-    return Image.file(
-      file,
+    return CachedPhotoImage(
+      localPath: photo.localPath,
+      thumbnailPath: photo.thumbnailUrl,
+      originalUrl: photo.originalUrl,
       height: 300,
       width: double.infinity,
-      fit: BoxFit.cover,
+      fullQuality: true,
     );
   }
 

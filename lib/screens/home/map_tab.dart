@@ -19,6 +19,7 @@ import '../../models/saved_place.dart';
 import '../../providers/meal_providers.dart';
 import '../../services/location_service.dart';
 import '../../services/places_service.dart';
+import '../../widgets/cached_photo_image.dart';
 
 const double _searchRadiusMeters = 500;
 
@@ -962,12 +963,13 @@ class _MapTabState extends ConsumerState<MapTab> {
                 contentPadding: const EdgeInsets.symmetric(horizontal: 4),
                 leading: ClipRRect(
                   borderRadius: BorderRadius.circular(6),
-                  child: firstPhoto != null && File(firstPhoto.localPath).existsSync()
-                      ? Image.file(
-                          File(firstPhoto.localPath),
+                  child: firstPhoto != null
+                      ? CachedPhotoImage(
+                          localPath: firstPhoto.localPath,
+                          thumbnailPath: firstPhoto.thumbnailUrl,
+                          originalUrl: firstPhoto.originalUrl,
                           width: 48,
                           height: 48,
-                          fit: BoxFit.cover,
                         )
                       : Container(
                           width: 48,
@@ -1013,17 +1015,18 @@ class _MapTabState extends ConsumerState<MapTab> {
               padding: const EdgeInsets.symmetric(horizontal: 12),
               itemCount: photos.length,
               itemBuilder: (context, index) {
-                final file = File(photos[index].localPath);
+                final photo = photos[index];
                 return Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(8),
-                    child: file.existsSync()
-                        ? Image.file(file, width: 120, height: 120, fit: BoxFit.cover)
-                        : Container(
-                            width: 120, color: Colors.grey[300],
-                            child: const Icon(Icons.broken_image),
-                          ),
+                    child: CachedPhotoImage(
+                      localPath: photo.localPath,
+                      thumbnailPath: photo.thumbnailUrl,
+                      originalUrl: photo.originalUrl,
+                      width: 120,
+                      height: 120,
+                    ),
                   ),
                 );
               },

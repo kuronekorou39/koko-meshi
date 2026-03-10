@@ -7,6 +7,7 @@ import '../../database/local_database.dart';
 import '../../models/saved_place.dart';
 import '../../providers/auth_providers.dart';
 import '../../services/ai_rate_limit_service.dart';
+import '../../services/app_settings_service.dart';
 import '../../services/auth_service.dart';
 import '../../services/sync_service.dart';
 
@@ -161,6 +162,38 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             _buildLoggedInSection(profileAsync)
           else
             _buildLoggedOutSection(),
+          const Divider(),
+
+          // 写真・ストレージ
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            child: Text(
+              '写真・ストレージ',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.grey[600]),
+            ),
+          ),
+          SwitchListTile(
+            secondary: const Icon(Icons.photo_library),
+            title: const Text('カメラロールにも保存'),
+            subtitle: const Text('撮影した写真を端末のギャラリーにも保存'),
+            value: AppSettings.saveToCameraRoll,
+            onChanged: (value) async {
+              await AppSettings.setSaveToCameraRoll(value);
+              setState(() {});
+            },
+          ),
+          SwitchListTile(
+            secondary: const Icon(Icons.cloud_done),
+            title: const Text('クラウド保存後にオリジナルを削除'),
+            subtitle: const Text('アップロード後にローカルの原寸写真を削除（サムネは残す）'),
+            value: AppSettings.deleteAfterUpload,
+            onChanged: isLoggedIn
+                ? (value) async {
+                    await AppSettings.setDeleteAfterUpload(value);
+                    setState(() {});
+                  }
+                : null,
+          ),
           const Divider(),
 
           // AI解析の使用状況

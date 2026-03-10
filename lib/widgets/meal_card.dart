@@ -1,10 +1,10 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../models/meal_log.dart';
 import '../models/meal_photo.dart';
 import '../models/meal_type.dart';
+import 'cached_photo_image.dart';
 
 class MealCard extends StatelessWidget {
   final MealLog mealLog;
@@ -137,18 +137,10 @@ class MealCard extends StatelessWidget {
   }
 
   Widget _photoImage(MealPhoto photo) {
-    final file = File(photo.localPath);
-
-    if (!file.existsSync()) {
-      return Container(
-        color: Colors.grey[300],
-        child: const Icon(Icons.broken_image, color: Colors.grey),
-      );
-    }
-
-    return Image.file(
-      file,
-      fit: BoxFit.cover,
+    return CachedPhotoImage(
+      localPath: photo.localPath,
+      thumbnailPath: photo.thumbnailUrl,
+      originalUrl: photo.originalUrl,
     );
   }
 

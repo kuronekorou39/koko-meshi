@@ -7,7 +7,9 @@ import '../config/env.dart';
 import '../database/local_database.dart';
 import '../models/meal_log.dart';
 import '../models/meal_photo.dart';
+import '../services/app_settings_service.dart';
 import '../services/auth_service.dart';
+import '../services/photo_service.dart';
 
 class SyncService {
   SyncService._();
@@ -143,6 +145,11 @@ class SyncService {
 
     // Supabase DBの写真メタデータも更新
     await _syncPhotoMetadata(updated, userId);
+
+    // 設定が有効なら、ローカルのオリジナルを削除（サムネは残す）
+    if (AppSettings.deleteAfterUpload) {
+      await PhotoService.deleteOriginal(photo.localPath);
+    }
   }
 
   /// 保存場所を同期
