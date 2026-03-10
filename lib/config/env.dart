@@ -16,4 +16,15 @@ class Env {
   /// AI解析に使用するプロバイダー ('gemini' or 'claude')
   static String get aiProvider =>
       dotenv.env['AI_PROVIDER'] ?? 'gemini';
+
+  static String get googleOAuthClientId =>
+      dotenv.env['GOOGLE_OAUTH_CLIENT_ID'] ?? '';
+
+  static String get supabaseUrl =>
+      dotenv.env['SUPABASE_URL'] ??
+      dotenv.env['NEXT_PUBLIC_SUPABASE_URL'] ?? '';
+
+  static String get supabaseAnonKey =>
+      dotenv.env['SUPABASE_ANON_KEY'] ??
+      dotenv.env['NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY'] ?? '';
 }

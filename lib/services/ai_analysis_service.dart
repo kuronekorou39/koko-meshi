@@ -8,6 +8,7 @@ import 'package:image/image.dart' as img;
 import '../config/env.dart';
 import '../database/local_database.dart';
 import '../models/meal_photo.dart';
+import 'ai_rate_limit_service.dart';
 
 class AiAnalysisResult {
   final String menuName;
@@ -72,6 +73,13 @@ class AiAnalysisService {
     debugPrint('[AI] Processing ${photos.length} pending photos (provider: $provider)');
 
     for (final photo in photos) {
+      // レート制限チェック
+      final canUse = await AiRateLimitService.canAnalyze();
+      if (!canUse) {
+        debugPrint('[AI] Rate limit exceeded, stopping analysis');
+        break;
+      }
+
       await _analyzePhoto(photo, apiKey, provider, modelName);
     }
   }
@@ -126,6 +134,7 @@ class AiAnalysisService {
           aiModel: modelName,
         );
         await LocalDatabase.updateMealPhoto(updated);
+        await AiRateLimitService.recordUsage();
         debugPrint('[AI] Completed: ${result.menuName} (${result.estimatedPrice}円, ${result.estimatedCalories}kcal)');
       } else {
         await LocalDatabase.updateMealPhoto(photo.copyWith(aiStatus: 'failed'));

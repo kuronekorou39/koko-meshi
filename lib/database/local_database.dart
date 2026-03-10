@@ -21,7 +21,7 @@ class LocalDatabase {
 
     return openDatabase(
       path,
-      version: 4,
+      version: 6,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -76,6 +76,7 @@ class LocalDatabase {
         user_corrected_price INTEGER,
         user_corrected_calories INTEGER,
         upload_status TEXT NOT NULL DEFAULT 'pending',
+        skip_ai INTEGER NOT NULL DEFAULT 0,
         shot_at TEXT NOT NULL,
         latitude REAL,
         longitude REAL,
@@ -84,6 +85,7 @@ class LocalDatabase {
       )
     ''');
     await _createSavedPlacesTable(db);
+    await _createAiUsageLogTable(db);
   }
 
   static Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -98,6 +100,12 @@ class LocalDatabase {
       await db.execute('ALTER TABLE meal_logs ADD COLUMN latitude REAL');
       await db.execute('ALTER TABLE meal_logs ADD COLUMN longitude REAL');
     }
+    if (oldVersion < 5) {
+      await _createAiUsageLogTable(db);
+    }
+    if (oldVersion < 6) {
+      await db.execute('ALTER TABLE meal_photos ADD COLUMN skip_ai INTEGER NOT NULL DEFAULT 0');
+    }
   }
 
   static Future<void> _createSavedPlacesTable(Database db) async {
@@ -111,6 +119,45 @@ class LocalDatabase {
         created_at TEXT NOT NULL
       )
     ''');
+  }
+
+  static Future<void> _createAiUsageLogTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS ai_usage_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        used_at TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT 'normal'
+      )
+    ''');
+  }
+
+  // --- AI Usage Log ---
+
+  static Future<void> insertAiUsage() async {
+    final db = await database;
+    await db.insert('ai_usage_log', {
+      'used_at': DateTime.now().toIso8601String(),
+      'source': 'normal',
+    });
+  }
+
+  static Future<int> getAiUsageCount(Duration window) async {
+    final db = await database;
+    final since = DateTime.now().subtract(window).toIso8601String();
+    final result = await db.rawQuery(
+      'SELECT COUNT(*) as cnt FROM ai_usage_log WHERE used_at > ?',
+      [since],
+    );
+    return Sqflite.firstIntValue(result) ?? 0;
+  }
+
+  static Future<void> addBonusAiUsage(int count) async {
+    final db = await database;
+    // ボーナス: 最も古い使用ログをcount件削除（枠を回復）
+    await db.rawDelete(
+      'DELETE FROM ai_usage_log WHERE id IN (SELECT id FROM ai_usage_log ORDER BY used_at ASC LIMIT ?)',
+      [count],
+    );
   }
 
   // --- MealLog CRUD ---
@@ -166,7 +213,7 @@ class LocalDatabase {
     final db = await database;
     final maps = await db.query(
       'meal_photos',
-      where: 'ai_status = ?',
+      where: 'ai_status = ? AND skip_ai = 0',
       whereArgs: ['pending'],
     );
     return maps.map((m) => MealPhoto.fromMap(m)).toList();
@@ -176,7 +223,7 @@ class LocalDatabase {
     final db = await database;
     final maps = await db.query(
       'meal_photos',
-      where: 'ai_status = ?',
+      where: 'ai_status = ? AND skip_ai = 0',
       whereArgs: ['failed'],
     );
     return maps.map((m) => MealPhoto.fromMap(m)).toList();

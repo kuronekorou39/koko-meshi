@@ -13,8 +13,12 @@ import '../../models/meal_photo.dart';
 import '../../models/meal_type.dart';
 import '../../providers/meal_providers.dart';
 import '../../services/ai_analysis_service.dart';
+import '../../services/ai_rate_limit_service.dart';
+import '../../services/auth_service.dart';
 import '../../services/location_service.dart';
 import '../../services/photo_service.dart';
+import '../../services/sync_service.dart';
+import '../../widgets/ai_limit_dialog.dart';
 
 class CaptureScreen extends ConsumerStatefulWidget {
   const CaptureScreen({super.key});
@@ -23,10 +27,16 @@ class CaptureScreen extends ConsumerStatefulWidget {
   ConsumerState<CaptureScreen> createState() => _CaptureScreenState();
 }
 
+class _SelectedPhoto {
+  final XFile file;
+  bool skipAi;
+  _SelectedPhoto(this.file, {this.skipAi = false});
+}
+
 class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   static const _uuid = Uuid();
   MealType _selectedType = MealType.eatingOut;
-  final List<XFile> _selectedPhotos = [];
+  final List<_SelectedPhoto> _selectedPhotos = [];
   bool _saving = false;
 
   // GPS・日時
@@ -229,16 +239,31 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       ),
       itemCount: _selectedPhotos.length,
       itemBuilder: (context, index) {
+        final item = _selectedPhotos[index];
         return Stack(
           fit: StackFit.expand,
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: Image.file(
-                File(_selectedPhotos[index].path),
+                File(item.file.path),
                 fit: BoxFit.cover,
               ),
             ),
+            // AI解析スキップ表示
+            if (item.skipAi)
+              Positioned.fill(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.black26,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Center(
+                    child: Icon(Icons.visibility_off, color: Colors.white70, size: 28),
+                  ),
+                ),
+              ),
+            // 削除ボタン
             Positioned(
               top: 4,
               right: 4,
@@ -253,6 +278,38 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                   ),
                   padding: const EdgeInsets.all(4),
                   child: const Icon(Icons.close, size: 16, color: Colors.white),
+                ),
+              ),
+            ),
+            // AI解析スキップ切り替え
+            Positioned(
+              bottom: 4,
+              left: 4,
+              child: GestureDetector(
+                onTap: () {
+                  setState(() => item.skipAi = !item.skipAi);
+                },
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: item.skipAi ? Colors.orange : Colors.black54,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        item.skipAi ? Icons.visibility_off : Icons.auto_awesome,
+                        size: 12,
+                        color: Colors.white,
+                      ),
+                      const SizedBox(width: 2),
+                      Text(
+                        item.skipAi ? 'AI off' : 'AI',
+                        style: const TextStyle(fontSize: 10, color: Colors.white),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -294,14 +351,14 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   Future<void> _takePhoto() async {
     final photo = await PhotoService.takePhoto();
     if (photo != null) {
-      setState(() => _selectedPhotos.add(photo));
+      setState(() => _selectedPhotos.add(_SelectedPhoto(photo)));
     }
   }
 
   Future<void> _pickFromLibrary() async {
     final photos = await PhotoService.pickPhotos();
     if (photos.isNotEmpty) {
-      setState(() => _selectedPhotos.addAll(photos));
+      setState(() => _selectedPhotos.addAll(photos.map((p) => _SelectedPhoto(p))));
     }
   }
 
@@ -347,8 +404,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       await LocalDatabase.insertMealLog(mealLog);
 
       // 写真を保存
-      for (final xFile in _selectedPhotos) {
-        final localPath = await PhotoService.saveToLocal(xFile);
+      for (final item in _selectedPhotos) {
+        final localPath = await PhotoService.saveToLocal(item.file);
         final thumbnailPath = await PhotoService.generateThumbnail(localPath);
 
         final photo = MealPhoto(
@@ -356,6 +413,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
           mealLogId: mealLogId,
           localPath: localPath,
           thumbnailUrl: thumbnailPath,
+          skipAi: item.skipAi,
+          aiStatus: item.skipAi ? 'skipped' : 'pending',
           shotAt: _capturedAt,
           latitude: _position?.latitude,
           longitude: _position?.longitude,
@@ -367,10 +426,30 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       // 一覧を更新
       ref.read(mealLogsProvider.notifier).refresh();
 
-      // AI解析をバックグラウンドで実行（結果を待たない）
-      AiAnalysisService.processPendingPhotos().then((_) {
-        if (mounted) ref.read(mealLogsProvider.notifier).refresh();
-      });
+      // AI解析のレート制限チェック
+      final rateLimitStatus = await AiRateLimitService.getStatus();
+      if (rateLimitStatus.canUse) {
+        // AI解析をバックグラウンドで実行（結果を待たない）
+        AiAnalysisService.processPendingPhotos().then((_) {
+          if (mounted) ref.read(mealLogsProvider.notifier).refresh();
+          if (AuthService.isLoggedIn) SyncService.syncAll();
+        });
+      } else if (mounted) {
+        // 上限到達を通知
+        final recovered = await showAiLimitDialog(context, rateLimitStatus);
+        if (recovered == true) {
+          // 広告で回復した場合、解析を実行
+          AiAnalysisService.processPendingPhotos().then((_) {
+            if (mounted) ref.read(mealLogsProvider.notifier).refresh();
+            if (AuthService.isLoggedIn) SyncService.syncAll();
+          });
+        }
+      }
+
+      // ログイン中ならクラウドに同期（バックグラウンド）
+      if (AuthService.isLoggedIn) {
+        SyncService.syncAll();
+      }
 
       if (mounted) context.pop();
     } catch (e) {

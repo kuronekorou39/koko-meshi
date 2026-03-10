@@ -14,6 +14,7 @@ class MealPhoto {
   final int? userCorrectedPrice;
   final int? userCorrectedCalories;
   final String uploadStatus; // pending / uploaded
+  final bool skipAi; // AI解析をスキップ（顔写真など）
   final DateTime shotAt;
   final double? latitude;
   final double? longitude;
@@ -35,6 +36,7 @@ class MealPhoto {
     this.userCorrectedPrice,
     this.userCorrectedCalories,
     this.uploadStatus = 'pending',
+    this.skipAi = false,
     required this.shotAt,
     this.latitude,
     this.longitude,
@@ -67,6 +69,7 @@ class MealPhoto {
       'user_corrected_price': userCorrectedPrice,
       'user_corrected_calories': userCorrectedCalories,
       'upload_status': uploadStatus,
+      'skip_ai': skipAi ? 1 : 0,
       'shot_at': shotAt.toIso8601String(),
       'latitude': latitude,
       'longitude': longitude,
@@ -91,6 +94,7 @@ class MealPhoto {
       userCorrectedPrice: map['user_corrected_price'] as int?,
       userCorrectedCalories: map['user_corrected_calories'] as int?,
       uploadStatus: map['upload_status'] as String? ?? 'pending',
+      skipAi: (map['skip_ai'] as int?) == 1,
       shotAt: DateTime.parse(map['shot_at'] as String),
       latitude: map['latitude'] as double?,
       longitude: map['longitude'] as double?,
@@ -111,6 +115,7 @@ class MealPhoto {
     int? userCorrectedPrice,
     int? userCorrectedCalories,
     String? uploadStatus,
+    bool? skipAi,
   }) {
     return MealPhoto(
       id: id,
@@ -128,6 +133,7 @@ class MealPhoto {
       userCorrectedPrice: userCorrectedPrice ?? this.userCorrectedPrice,
       userCorrectedCalories: userCorrectedCalories ?? this.userCorrectedCalories,
       uploadStatus: uploadStatus ?? this.uploadStatus,
+      skipAi: skipAi ?? this.skipAi,
       shotAt: shotAt,
       latitude: latitude,
       longitude: longitude,

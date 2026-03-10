@@ -172,6 +172,7 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
   Widget _buildAiResults(BuildContext context, List<MealPhoto> photos) {
     final analyzed = photos.where((p) => p.aiStatus == 'completed').toList();
     final pending = photos.where((p) => p.aiStatus == 'pending' || p.aiStatus == 'processing').toList();
+    final skipped = photos.where((p) => p.skipAi || p.aiStatus == 'skipped').toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -202,7 +203,15 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
               ],
             ),
           ),
-        if (analyzed.isEmpty && pending.isEmpty)
+        if (skipped.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              '${skipped.length}枚の写真はAI解析をスキップ',
+              style: TextStyle(color: Colors.grey[500], fontSize: 14),
+            ),
+          ),
+        if (analyzed.isEmpty && pending.isEmpty && skipped.isEmpty)
           Text(
             'AI解析はまだ実行されていません',
             style: TextStyle(color: Colors.grey[500], fontSize: 14),

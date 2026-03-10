@@ -1,28 +1,42 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geocoding/geocoding.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../database/local_database.dart';
 import '../../models/saved_place.dart';
+import '../../providers/auth_providers.dart';
+import '../../services/ai_rate_limit_service.dart';
+import '../../services/auth_service.dart';
+import '../../services/sync_service.dart';
 
-class SettingsScreen extends StatefulWidget {
+class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
 
   @override
-  State<SettingsScreen> createState() => _SettingsScreenState();
+  ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> {
+class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   List<SavedPlace> _savedPlaces = [];
+  bool _syncing = false;
+  AiRateLimitStatus? _aiStatus;
 
   @override
   void initState() {
     super.initState();
     _loadSavedPlaces();
+    _loadAiStatus();
   }
 
   Future<void> _loadSavedPlaces() async {
     final places = await LocalDatabase.getSavedPlaces();
     if (mounted) setState(() => _savedPlaces = places);
+  }
+
+  Future<void> _loadAiStatus() async {
+    final status = await AiRateLimitService.getStatus();
+    if (mounted) setState(() => _aiStatus = status);
   }
 
   Future<void> _deleteSavedPlace(SavedPlace place) async {
@@ -70,15 +84,99 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _handleSync() async {
+    setState(() => _syncing = true);
+    try {
+      final result = await SyncService.syncAll();
+      await SyncService.syncSavedPlaces();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              result.hasErrors
+                  ? '${result.synced}件同期、${result.failed}件失敗'
+                  : '${result.synced}件を同期しました',
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('同期エラー: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _syncing = false);
+    }
+  }
+
+  Future<void> _handleLogout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('ログアウト'),
+        content: const Text('ログアウトしますか？\nローカルのデータはそのまま残ります。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('ログアウト'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await AuthService.signOut();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('ログアウトしました')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isLoggedIn = ref.watch(isLoggedInProvider);
+    final profileAsync = ref.watch(userProfileProvider);
+
     return Scaffold(
       appBar: AppBar(title: const Text('設定')),
       body: ListView(
         children: [
-          // 保存した場所
+          // アカウント
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Text(
+              'アカウント',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.grey[600]),
+            ),
+          ),
+          if (isLoggedIn)
+            _buildLoggedInSection(profileAsync)
+          else
+            _buildLoggedOutSection(),
+          const Divider(),
+
+          // AI解析の使用状況
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            child: Text(
+              'AI解析の使用状況',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.grey[600]),
+            ),
+          ),
+          if (_aiStatus != null) _buildAiUsageSection(_aiStatus!),
+          const Divider(),
+
+          // 保存した場所
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
             child: Text(
               '保存した場所',
               style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.grey[600]),
@@ -112,30 +210,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
             )),
           const Divider(),
 
-          // アカウント連携
-          ListTile(
-            leading: const Icon(Icons.person),
-            title: const Text('アカウント連携'),
-            subtitle: const Text('ログインしてクラウドにバックアップ'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              // TODO: ログイン画面
-            },
-          ),
-          const Divider(),
-
-          // 同期状況
-          ListTile(
-            leading: const Icon(Icons.cloud_upload),
-            title: const Text('同期状況'),
-            subtitle: const Text('未ログイン'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              // TODO: 同期状況の詳細
-            },
-          ),
-          const Divider(),
-
           // アプリ情報
           const ListTile(
             leading: Icon(Icons.info),
@@ -144,6 +218,118 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildAiUsageSection(AiRateLimitStatus status) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Column(
+        children: [
+          _buildUsageRow('1時間', status.hourly),
+          const SizedBox(height: 8),
+          _buildUsageRow('1日', status.daily),
+          const SizedBox(height: 8),
+          _buildUsageRow('1ヶ月', status.monthly),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUsageRow(String label, AiRateLimit limit) {
+    final color = limit.exceeded
+        ? Colors.red
+        : limit.ratio > 0.8
+            ? Colors.orange
+            : Theme.of(context).colorScheme.primary;
+
+    return Row(
+      children: [
+        SizedBox(
+          width: 50,
+          child: Text(label, style: const TextStyle(fontSize: 13)),
+        ),
+        Expanded(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: limit.ratio.clamp(0.0, 1.0),
+              backgroundColor: Colors.grey[200],
+              color: color,
+              minHeight: 8,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          '${limit.used}/${limit.limit}',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: limit.exceeded ? Colors.red : Colors.grey[600],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLoggedOutSection() {
+    return Column(
+      children: [
+        ListTile(
+          leading: const Icon(Icons.person_outline),
+          title: const Text('ログイン / アカウント作成'),
+          subtitle: const Text('クラウドにバックアップ・デバイス間同期'),
+          trailing: const Icon(Icons.chevron_right),
+          onTap: () => context.push('/login'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLoggedInSection(AsyncValue<Map<String, dynamic>?> profileAsync) {
+    final user = AuthService.currentUser;
+    final email = user?.email ?? '';
+
+    return Column(
+      children: [
+        ListTile(
+          leading: CircleAvatar(
+            backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+            child: Icon(
+              Icons.person,
+              color: Theme.of(context).colorScheme.onPrimaryContainer,
+            ),
+          ),
+          title: profileAsync.when(
+            data: (profile) => Text(
+              profile?['display_name'] ?? email.split('@').first,
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            loading: () => const Text('...'),
+            error: (_, _) => Text(email.split('@').first),
+          ),
+          subtitle: Text(email, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+        ),
+        ListTile(
+          leading: Icon(_syncing ? Icons.cloud_sync : Icons.cloud_done),
+          title: Text(_syncing ? '同期中...' : 'クラウド同期'),
+          subtitle: const Text('タップして今すぐ同期'),
+          trailing: _syncing
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.sync),
+          onTap: _syncing ? null : _handleSync,
+        ),
+        ListTile(
+          leading: Icon(Icons.logout, color: Colors.red[400]),
+          title: Text('ログアウト', style: TextStyle(color: Colors.red[400])),
+          onTap: _handleLogout,
+        ),
+      ],
     );
   }
 }
