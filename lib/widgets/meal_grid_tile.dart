@@ -1,10 +1,10 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../models/meal_log.dart';
 import '../models/meal_photo.dart';
 import '../models/meal_type.dart';
+import 'cached_photo_image.dart';
 
 class MealGridTile extends StatelessWidget {
   final MealLog mealLog;
@@ -83,15 +83,13 @@ class MealGridTile extends StatelessWidget {
       );
     }
 
-    final file = File(photos.first.localPath);
-    if (!file.existsSync()) {
-      return Container(
-        color: Colors.grey[200],
-        child: const Icon(Icons.broken_image, color: Colors.grey),
-      );
-    }
-
-    return Image.file(file, fit: BoxFit.cover);
+    final photo = photos.first;
+    return CachedPhotoImage(
+      localPath: photo.localPath,
+      thumbnailPath: photo.thumbnailUrl,
+      originalUrl: photo.originalUrl,
+      fit: BoxFit.cover,
+    );
   }
 
   IconData _mealTypeIcon(MealType mealType) {

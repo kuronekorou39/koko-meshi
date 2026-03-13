@@ -14,24 +14,20 @@ class PhotoCacheService {
     required String? localPath,
     required String? thumbnailPath,
     required String? originalUrl,
-    bool fullQuality = false,
+    bool fullQuality = true,
   }) async {
-    // 1. ローカルのオリジナルが存在すればそれを返す
+    // 1. ローカルのオリジナルが存在すればそれを返す（常に最優先）
     if (localPath != null && File(localPath).existsSync()) {
       return localPath;
     }
 
-    // 2. サムネイルが存在し、フル画質不要ならサムネを返す
-    if (!fullQuality && thumbnailPath != null && File(thumbnailPath).existsSync()) {
-      return thumbnailPath;
-    }
-
-    // 3. クラウドURLがあればダウンロードしてキャッシュ
+    // 2. クラウドURLがあればダウンロードしてキャッシュ（オリジナル画質）
     if (originalUrl != null && originalUrl.isNotEmpty) {
-      return _downloadAndCache(originalUrl);
+      final cached = await _downloadAndCache(originalUrl);
+      if (cached != null) return cached;
     }
 
-    // 4. サムネイルをフォールバック
+    // 3. サムネイルを最終フォールバック
     if (thumbnailPath != null && File(thumbnailPath).existsSync()) {
       return thumbnailPath;
     }

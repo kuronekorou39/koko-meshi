@@ -34,6 +34,52 @@ class PlacesService {
     return 'https://places.googleapis.com/v1/$photoName/media?maxWidthPx=200&key=$apiKey';
   }
 
+  /// テキストで場所を検索（住所、施設名など）
+  static Future<List<PlaceInfo>> searchByText(String query) async {
+    final apiKey = Env.googleMapsApiKey;
+    if (apiKey.isEmpty || query.trim().isEmpty) return [];
+
+    final url = Uri.parse('https://places.googleapis.com/v1/places:searchText');
+
+    final body = jsonEncode({
+      'textQuery': query,
+      'languageCode': 'ja',
+      'maxResultCount': 10,
+    });
+
+    try {
+      final response = await http.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': apiKey,
+          'X-Goog-FieldMask':
+              'places.id,places.displayName,places.formattedAddress,places.location',
+        },
+        body: body,
+      );
+
+      if (response.statusCode != 200) return [];
+
+      final data = jsonDecode(response.body);
+      final places = data['places'] as List<dynamic>? ?? [];
+
+      return places.map((p) {
+        final location = p['location'] as Map<String, dynamic>;
+        final displayName = p['displayName'] as Map<String, dynamic>?;
+        return PlaceInfo(
+          id: p['id'] as String,
+          name: displayName?['text'] as String? ?? '不明',
+          address: p['formattedAddress'] as String?,
+          latitude: (location['latitude'] as num).toDouble(),
+          longitude: (location['longitude'] as num).toDouble(),
+        );
+      }).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
   /// 周辺のレストラン・飲食店を検索
   static Future<List<PlaceInfo>> searchNearbyRestaurants({
     required double latitude,

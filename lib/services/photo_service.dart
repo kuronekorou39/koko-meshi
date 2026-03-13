@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:exif/exif.dart';
 import 'package:flutter/foundation.dart';
 import 'package:gal/gal.dart';
 import 'package:image/image.dart' as img;
@@ -10,15 +11,26 @@ import 'package:uuid/uuid.dart';
 import '../config/constants.dart';
 import 'app_settings_service.dart';
 
+/// EXIF から取得したメタデータ
+class PhotoExifData {
+  final DateTime? dateTime;
+  final double? latitude;
+  final double? longitude;
+
+  const PhotoExifData({this.dateTime, this.latitude, this.longitude});
+
+  bool get hasLocation => latitude != null && longitude != null;
+  bool get hasDateTime => dateTime != null;
+}
+
 class PhotoService {
   static final _picker = ImagePicker();
   static const _uuid = Uuid();
 
-  /// カメラで撮影（最高画質）
+  /// カメラで撮影（オリジナル画質をそのまま保持）
   static Future<XFile?> takePhoto() async {
     return _picker.pickImage(
       source: ImageSource.camera,
-      imageQuality: 100,
     );
   }
 
@@ -44,6 +56,16 @@ class PhotoService {
       }
     }
 
+    return savedPath;
+  }
+
+  /// ファイルパスからアプリのローカルディレクトリにコピーして保存
+  static Future<String> saveToLocalFromPath(String filePath) async {
+    final dir = await _getPhotoDir();
+    final ext = p.extension(filePath).isEmpty ? '.jpg' : p.extension(filePath);
+    final fileName = '${_uuid.v4()}$ext';
+    final savedPath = p.join(dir.path, fileName);
+    await File(filePath).copy(savedPath);
     return savedPath;
   }
 
@@ -74,6 +96,68 @@ class PhotoService {
     ));
 
     return thumbPath;
+  }
+
+  /// 画像ファイルからEXIFメタデータを読み取る
+  static Future<PhotoExifData> readExifData(String filePath) async {
+    try {
+      final bytes = await File(filePath).readAsBytes();
+      final tags = await readExifFromBytes(bytes);
+      if (tags.isEmpty) return const PhotoExifData();
+
+      return PhotoExifData(
+        dateTime: _parseExifDateTime(tags),
+        latitude: _parseExifGpsCoord(tags, 'GPS GPSLatitude', 'GPS GPSLatitudeRef'),
+        longitude: _parseExifGpsCoord(tags, 'GPS GPSLongitude', 'GPS GPSLongitudeRef'),
+      );
+    } catch (e) {
+      debugPrint('[Photo] EXIF read error: $e');
+      return const PhotoExifData();
+    }
+  }
+
+  static DateTime? _parseExifDateTime(Map<String, IfdTag> tags) {
+    final dateTag = tags['EXIF DateTimeOriginal'] ??
+        tags['EXIF DateTimeDigitized'] ??
+        tags['Image DateTime'];
+    if (dateTag == null) return null;
+
+    try {
+      // EXIF format: "2024:03:15 14:30:00"
+      final str = dateTag.printable;
+      final parts = str.split(' ');
+      if (parts.length != 2) return null;
+      final datePart = parts[0].replaceAll(':', '-');
+      return DateTime.tryParse('${datePart}T${parts[1]}');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static double? _parseExifGpsCoord(
+    Map<String, IfdTag> tags,
+    String coordKey,
+    String refKey,
+  ) {
+    final coord = tags[coordKey];
+    final ref = tags[refKey];
+    if (coord == null) return null;
+
+    try {
+      final values = coord.values as IfdRatios;
+      final degrees = values.ratios[0].numerator / values.ratios[0].denominator;
+      final minutes = values.ratios[1].numerator / values.ratios[1].denominator;
+      final seconds = values.ratios[2].numerator / values.ratios[2].denominator;
+      var result = degrees + minutes / 60.0 + seconds / 3600.0;
+
+      final refStr = ref?.printable ?? '';
+      if (refStr == 'S' || refStr == 'W') {
+        result = -result;
+      }
+      return result;
+    } catch (_) {
+      return null;
+    }
   }
 
   static Future<Directory> _getPhotoDir() async {

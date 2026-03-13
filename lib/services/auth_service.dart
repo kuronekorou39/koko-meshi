@@ -61,7 +61,8 @@ class AuthService {
   }
 
   /// Googleアカウントでログイン
-  static Future<AuthResponse> signInWithGoogle() async {
+  /// ユーザーがキャンセルした場合はnullを返す
+  static Future<AuthResponse?> signInWithGoogle() async {
     final client = _client;
     if (client == null) throw Exception('Supabaseが設定されていません');
 
@@ -73,9 +74,16 @@ class AuthService {
     final gsi = GoogleSignIn.instance;
     await gsi.initialize(serverClientId: webClientId);
 
-    final account = await gsi.authenticate();
-    final idToken = account.authentication.idToken;
+    final GoogleSignInAccount account;
+    try {
+      account = await gsi.authenticate();
+    } on GoogleSignInException catch (e) {
+      debugPrint('[Auth] Google Sign-In exception: $e');
+      // ユーザーキャンセルはnullを返す
+      return null;
+    }
 
+    final idToken = account.authentication.idToken;
     if (idToken == null) {
       throw Exception('Google IDトークンの取得に失敗しました');
     }

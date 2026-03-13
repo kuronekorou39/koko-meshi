@@ -1,10 +1,12 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../database/local_database.dart';
@@ -18,19 +20,31 @@ import '../../services/auth_service.dart';
 import '../../services/location_service.dart';
 import '../../services/photo_service.dart';
 import '../../services/sync_service.dart';
-import '../../widgets/ai_limit_dialog.dart';
+import 'photo_editor_screen.dart';
 
 class CaptureScreen extends ConsumerStatefulWidget {
-  const CaptureScreen({super.key});
+  final List<XFile>? initialPhotos;
+
+  const CaptureScreen({super.key, this.initialPhotos});
 
   @override
   ConsumerState<CaptureScreen> createState() => _CaptureScreenState();
 }
 
 class _SelectedPhoto {
-  final XFile file;
-  bool skipAi;
-  _SelectedPhoto(this.file, {this.skipAi = false});
+  final XFile originalFile; // 常にオリジナルを保持
+  bool skipAi = false;
+  PhotoEditResult? editParams; // 編集パラメータ（nullなら未編集）
+  DateTime? exifDateTime;
+  double? exifLatitude;
+  double? exifLongitude;
+  _SelectedPhoto(this.originalFile);
+
+  /// 表示用パス（クロップがあればクロップ済み、なければオリジナル）
+  String get displayPath => editParams?.croppedPath ?? originalFile.path;
+
+  /// 保存用のソースパス（クロップ優先）
+  String get sourcePathForSave => editParams?.croppedPath ?? originalFile.path;
 }
 
 class _CaptureScreenState extends ConsumerState<CaptureScreen> {
@@ -41,6 +55,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
 
   // GPS・日時
   Position? _position;
+  ({double lat, double lng})? _exifPosition; // EXIFからのGPS（Positionがない場合）
   String? _address;
   bool _loadingLocation = true;
   late DateTime _capturedAt;
@@ -50,6 +65,41 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     super.initState();
     _capturedAt = DateTime.now();
     _fetchLocation();
+    if (widget.initialPhotos != null && widget.initialPhotos!.isNotEmpty) {
+      for (final photo in widget.initialPhotos!) {
+        _selectedPhotos.add(_SelectedPhoto(photo));
+      }
+      _readExifForInitialPhotos();
+    }
+  }
+
+  Future<void> _readExifForInitialPhotos() async {
+    for (final item in _selectedPhotos) {
+      final exif = await PhotoService.readExifData(item.originalFile.path);
+      if (exif.hasDateTime) item.exifDateTime = exif.dateTime;
+      if (exif.hasLocation) {
+        item.exifLatitude = exif.latitude;
+        item.exifLongitude = exif.longitude;
+      }
+    }
+
+    final firstWithDate = _selectedPhotos.where((i) => i.exifDateTime != null).firstOrNull;
+    final firstWithGps = _selectedPhotos.where((i) => i.exifLatitude != null).firstOrNull;
+
+    if (mounted) {
+      setState(() {
+        if (firstWithDate != null && firstWithDate.exifDateTime!.isBefore(DateTime.now())) {
+          _capturedAt = firstWithDate.exifDateTime!;
+        }
+        if (_position == null && firstWithGps != null) {
+          _exifPosition = (lat: firstWithGps.exifLatitude!, lng: firstWithGps.exifLongitude!);
+          _loadingLocation = true;
+        }
+      });
+      if (firstWithGps != null && _position == null) {
+        _fetchAddressFromCoords(firstWithGps.exifLatitude!, firstWithGps.exifLongitude!);
+      }
+    }
   }
 
   Future<void> _fetchLocation() async {
@@ -69,6 +119,28 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
           _loadingLocation = false;
         });
       }
+    }
+  }
+
+  Future<void> _fetchAddressFromCoords(double lat, double lng) async {
+    final pos = Position(
+      latitude: lat,
+      longitude: lng,
+      timestamp: DateTime.now(),
+      accuracy: 0,
+      altitude: 0,
+      altitudeAccuracy: 0,
+      heading: 0,
+      headingAccuracy: 0,
+      speed: 0,
+      speedAccuracy: 0,
+    );
+    final addr = await LocationService.getAddressFromPosition(pos);
+    if (mounted) {
+      setState(() {
+        _address = addr;
+        _loadingLocation = false;
+      });
     }
   }
 
@@ -184,9 +256,11 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                     height: 12,
                     child: CircularProgressIndicator(strokeWidth: 1.5),
                   )
-                : _position != null
+                : (_position != null || _exifPosition != null)
                     ? Text(
-                        _address ?? '${_position!.latitude.toStringAsFixed(4)}, ${_position!.longitude.toStringAsFixed(4)}',
+                        _address ??
+                            '${(_position?.latitude ?? _exifPosition?.lat)?.toStringAsFixed(4)}, '
+                            '${(_position?.longitude ?? _exifPosition?.lng)?.toStringAsFixed(4)}',
                         style: TextStyle(fontSize: 12, color: Colors.grey[700]),
                         overflow: TextOverflow.ellipsis,
                       )
@@ -245,11 +319,22 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
-              child: Image.file(
-                File(item.file.path),
-                fit: BoxFit.cover,
-              ),
+              child: _buildPhotoThumbnail(item),
             ),
+            // 編集済みバッジ
+            if (item.editParams?.hasEdits == true)
+              Positioned(
+                bottom: 4,
+                right: 4,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.orange,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  child: const Icon(Icons.tune, size: 12, color: Colors.white),
+                ),
+              ),
             // AI解析スキップ表示
             if (item.skipAi)
               Positioned.fill(
@@ -278,6 +363,22 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                   ),
                   padding: const EdgeInsets.all(4),
                   child: const Icon(Icons.close, size: 16, color: Colors.white),
+                ),
+              ),
+            ),
+            // 編集ボタン
+            Positioned(
+              top: 4,
+              left: 4,
+              child: GestureDetector(
+                onTap: () => _editPhoto(index),
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: Colors.black54,
+                    shape: BoxShape.circle,
+                  ),
+                  padding: const EdgeInsets.all(4),
+                  child: const Icon(Icons.tune, size: 16, color: Colors.white),
                 ),
               ),
             ),
@@ -319,6 +420,30 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     );
   }
 
+  Widget _buildPhotoThumbnail(_SelectedPhoto item) {
+    final image = Image.file(
+      File(item.displayPath),
+      fit: BoxFit.cover,
+      gaplessPlayback: true,
+    );
+
+    final params = item.editParams;
+    if (params == null || !params.hasEdits) return image;
+
+    // フィルター調整があればColorFilteredで反映
+    final hasFilterEdits = params.brightness != 0 ||
+        params.contrast != 0 ||
+        params.saturation != 0 ||
+        params.warmth != 0;
+
+    if (!hasFilterEdits) return image;
+
+    return ColorFiltered(
+      colorFilter: ColorFilter.matrix(buildEditColorMatrix(params)),
+      child: image,
+    );
+  }
+
   void _showPickerChoice() {
     showModalBottomSheet(
       context: context,
@@ -357,8 +482,55 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
 
   Future<void> _pickFromLibrary() async {
     final photos = await PhotoService.pickPhotos();
-    if (photos.isNotEmpty) {
-      setState(() => _selectedPhotos.addAll(photos.map((p) => _SelectedPhoto(p))));
+    if (photos.isEmpty) return;
+
+    final items = <_SelectedPhoto>[];
+    for (final photo in photos) {
+      final item = _SelectedPhoto(photo);
+      // EXIFからメタデータを読み取る
+      final exif = await PhotoService.readExifData(photo.path);
+      item.exifDateTime = exif.dateTime;
+      item.exifLatitude = exif.latitude;
+      item.exifLongitude = exif.longitude;
+      items.add(item);
+    }
+
+    // 最初のEXIF情報でメタデータを補完（GPSや日時が未取得の場合）
+    final firstWithDate = items.where((i) => i.exifDateTime != null).firstOrNull;
+    final firstWithGps = items.where((i) => i.exifLatitude != null).firstOrNull;
+
+    setState(() {
+      _selectedPhotos.addAll(items);
+
+      // ライブラリ画像のEXIF日時を使用（現在の日時より過去なら採用）
+      if (firstWithDate != null && firstWithDate.exifDateTime!.isBefore(DateTime.now())) {
+        _capturedAt = firstWithDate.exifDateTime!;
+      }
+
+      // GPS未取得時にEXIFのGPSを使用
+      if (_position == null && firstWithGps != null) {
+        _exifPosition = (lat: firstWithGps.exifLatitude!, lng: firstWithGps.exifLongitude!);
+        _loadingLocation = true;
+        _fetchAddressFromCoords(firstWithGps.exifLatitude!, firstWithGps.exifLongitude!);
+      }
+    });
+  }
+
+  Future<void> _editPhoto(int index) async {
+    final item = _selectedPhotos[index];
+    final result = await Navigator.push<PhotoEditResult>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PhotoEditorScreen(
+          filePath: item.originalFile.path,
+          initialParams: item.editParams,
+        ),
+      ),
+    );
+    if (result != null && mounted) {
+      setState(() {
+        item.editParams = result;
+      });
     }
   }
 
@@ -368,27 +540,25 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     try {
       final mealLogId = _uuid.v4();
 
+      // 位置情報: GPS > EXIF の優先順
+      final lat = _position?.latitude ?? _exifPosition?.lat;
+      final lng = _position?.longitude ?? _exifPosition?.lng;
+
       // 自宅判定: GPSと保存済み場所を比較
       String? locationTag;
-      if (_position != null) {
+      if (lat != null && lng != null) {
         final savedPlaces = await LocalDatabase.getSavedPlaces();
-        debugPrint('[Location] GPS: ${_position!.latitude}, ${_position!.longitude}, SavedPlaces: ${savedPlaces.length}');
         for (final place in savedPlaces) {
           final distance = Geolocator.distanceBetween(
-            _position!.latitude,
-            _position!.longitude,
+            lat, lng,
             place.latitude,
             place.longitude,
           );
-          debugPrint('[Location] ${place.name}(${place.iconType}): ${distance.toStringAsFixed(0)}m');
           if (distance <= 100) {
             locationTag = place.iconType == 'home' ? 'home' : place.id;
             break;
           }
         }
-        debugPrint('[Location] Tag: $locationTag');
-      } else {
-        debugPrint('[Location] No GPS position available');
       }
 
       // 食事記録を作成
@@ -396,17 +566,51 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         id: mealLogId,
         mealType: _selectedType,
         eatenAt: _capturedAt,
-        latitude: _position?.latitude,
-        longitude: _position?.longitude,
+        latitude: lat,
+        longitude: lng,
         locationTag: locationTag,
         createdAt: DateTime.now(),
       );
       await LocalDatabase.insertMealLog(mealLog);
 
-      // 写真を保存
+      // 写真を保存（編集がある場合は先にisolateで処理してから保存）
       for (final item in _selectedPhotos) {
-        final localPath = await PhotoService.saveToLocal(item.file);
+        String fileToSave = item.sourcePathForSave;
+
+        // フィルター編集がある場合、先にisolateで処理
+        if (item.editParams != null && item.editParams!.hasEdits == true) {
+          final params = item.editParams!;
+          final hasFilterEdits = params.brightness != 0 ||
+              params.contrast != 0 ||
+              params.saturation != 0 ||
+              params.warmth != 0 ||
+              params.vignette != 0;
+
+          if (hasFilterEdits) {
+            final tmpDir = await getTemporaryDirectory();
+            final outputPath = '${tmpDir.path}/edit_${DateTime.now().millisecondsSinceEpoch}_${_selectedPhotos.indexOf(item)}.jpg';
+            final processed = await compute(processEditedImage, ImageProcessParams(
+              inputPath: fileToSave,
+              outputPath: outputPath,
+              brightness: params.brightness,
+              contrast: params.contrast,
+              saturation: params.saturation,
+              warmth: params.warmth,
+              vignette: params.vignette,
+            ));
+            if (processed != null) {
+              fileToSave = processed;
+            }
+          }
+        }
+
+        // 編集済み（or 未編集）ファイルを保存
+        final localPath = await PhotoService.saveToLocal(XFile(fileToSave));
         final thumbnailPath = await PhotoService.generateThumbnail(localPath);
+
+        final photoLat = item.exifLatitude ?? lat;
+        final photoLng = item.exifLongitude ?? lng;
+        final photoShotAt = item.exifDateTime ?? _capturedAt;
 
         final photo = MealPhoto(
           id: _uuid.v4(),
@@ -415,43 +619,30 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
           thumbnailUrl: thumbnailPath,
           skipAi: item.skipAi,
           aiStatus: item.skipAi ? 'skipped' : 'pending',
-          shotAt: _capturedAt,
-          latitude: _position?.latitude,
-          longitude: _position?.longitude,
+          shotAt: photoShotAt,
+          latitude: photoLat,
+          longitude: photoLng,
           createdAt: DateTime.now(),
         );
         await LocalDatabase.insertMealPhoto(photo);
       }
 
-      // 一覧を更新
+      // 一覧を更新して画面を閉じる
       ref.read(mealLogsProvider.notifier).refresh();
+      if (mounted) context.pop();
 
-      // AI解析のレート制限チェック
+      // --- 以下バックグラウンド処理（画面はすでに閉じている） ---
+
+      // AI解析
       final rateLimitStatus = await AiRateLimitService.getStatus();
       if (rateLimitStatus.canUse) {
-        // AI解析をバックグラウンドで実行（結果を待たない）
-        AiAnalysisService.processPendingPhotos().then((_) {
-          if (mounted) ref.read(mealLogsProvider.notifier).refresh();
-          if (AuthService.isLoggedIn) SyncService.syncAll();
-        });
-      } else if (mounted) {
-        // 上限到達を通知
-        final recovered = await showAiLimitDialog(context, rateLimitStatus);
-        if (recovered == true) {
-          // 広告で回復した場合、解析を実行
-          AiAnalysisService.processPendingPhotos().then((_) {
-            if (mounted) ref.read(mealLogsProvider.notifier).refresh();
-            if (AuthService.isLoggedIn) SyncService.syncAll();
-          });
-        }
+        await AiAnalysisService.processPendingPhotos();
       }
 
-      // ログイン中ならクラウドに同期（バックグラウンド）
+      // ログイン中ならクラウドに同期
       if (AuthService.isLoggedIn) {
         SyncService.syncAll();
       }
-
-      if (mounted) context.pop();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

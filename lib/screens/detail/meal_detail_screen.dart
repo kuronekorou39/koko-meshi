@@ -1,12 +1,22 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import 'package:flutter/foundation.dart';
+import 'package:path/path.dart' as path;
+import 'package:path_provider/path_provider.dart';
+
 import '../../database/local_database.dart';
 import '../../providers/meal_providers.dart';
 import '../../models/meal_photo.dart';
+import '../../services/ai_analysis_service.dart';
+import '../../services/ai_rate_limit_service.dart';
+import '../../services/photo_service.dart';
 import '../../widgets/cached_photo_image.dart';
+import '../capture/photo_editor_screen.dart';
+import 'photo_viewer_screen.dart';
 
 class MealDetailScreen extends ConsumerStatefulWidget {
   final String mealLogId;
@@ -135,7 +145,7 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
     }
 
     if (photos.length == 1) {
-      return _buildFullPhoto(photos.first);
+      return _buildFullPhoto(photos, 0);
     }
 
     return SizedBox(
@@ -143,27 +153,143 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
       child: PageView.builder(
         itemCount: photos.length,
         itemBuilder: (context, index) {
-          return _buildFullPhoto(photos[index]);
+          return _buildFullPhoto(photos, index);
         },
       ),
     );
   }
 
-  Widget _buildFullPhoto(MealPhoto photo) {
-    return CachedPhotoImage(
-      localPath: photo.localPath,
-      thumbnailPath: photo.thumbnailUrl,
-      originalUrl: photo.originalUrl,
-      height: 300,
-      width: double.infinity,
-      fullQuality: true,
+  Widget _buildFullPhoto(List<MealPhoto> photos, int index) {
+    final photo = photos[index];
+    return Stack(
+      children: [
+        GestureDetector(
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => PhotoViewerScreen(
+                photos: photos,
+                initialIndex: index,
+              ),
+            ),
+          ),
+          child: CachedPhotoImage(
+            localPath: photo.localPath,
+            thumbnailPath: photo.thumbnailUrl,
+            originalUrl: photo.originalUrl,
+            height: 300,
+            width: double.infinity,
+            fullQuality: true,
+          ),
+        ),
+        // 編集ボタン
+        Positioned(
+          right: 8,
+          bottom: 8,
+          child: Material(
+            color: Colors.black54,
+            borderRadius: BorderRadius.circular(20),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(20),
+              onTap: () => _editPhoto(photo),
+              child: const Padding(
+                padding: EdgeInsets.all(8),
+                child: Icon(Icons.tune, color: Colors.white, size: 20),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
+  }
+
+  Future<void> _editPhoto(MealPhoto photo) async {
+    final filePath = photo.localPath;
+    if (!File(filePath).existsSync()) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('写真ファイルが見つかりません')),
+        );
+      }
+      return;
+    }
+
+    final result = await Navigator.push<PhotoEditResult>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PhotoEditorScreen(filePath: filePath),
+      ),
+    );
+
+    if (result == null || !result.hasEdits || !mounted) return;
+
+    // 編集を適用してファイルを上書き
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('写真を処理中...')),
+    );
+
+    final dir = await getTemporaryDirectory();
+    final outputPath = path.join(
+      dir.path,
+      'edit_${DateTime.now().millisecondsSinceEpoch}.jpg',
+    );
+
+    // ソースパス（クロップがあればクロップ済み、なければオリジナル）
+    final sourcePath = result.croppedPath ?? filePath;
+
+    final hasFilters = result.brightness != 0 ||
+        result.contrast != 0 ||
+        result.saturation != 0 ||
+        result.warmth != 0 ||
+        result.vignette != 0;
+
+    String? finalPath;
+    if (hasFilters) {
+      finalPath = await compute(processEditedImage, ImageProcessParams(
+        inputPath: sourcePath,
+        outputPath: outputPath,
+        brightness: result.brightness,
+        contrast: result.contrast,
+        saturation: result.saturation,
+        warmth: result.warmth,
+        vignette: result.vignette,
+      ));
+    } else {
+      // クロップのみ
+      finalPath = sourcePath;
+    }
+
+    if (finalPath == null || !mounted) return;
+
+    // ローカルパスを更新
+    final newLocalPath = await PhotoService.saveToLocalFromPath(finalPath);
+    final newThumbPath = await PhotoService.generateThumbnail(newLocalPath);
+
+    final updated = photo.copyWith(
+      localPath: newLocalPath,
+      thumbnailUrl: newThumbPath,
+    );
+    await LocalDatabase.updateMealPhoto(updated);
+    ref.invalidate(mealPhotosProvider(widget.mealLogId));
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('写真を更新しました')),
+      );
+    }
   }
 
   Widget _buildAiResults(BuildContext context, List<MealPhoto> photos) {
     final analyzed = photos.where((p) => p.aiStatus == 'completed').toList();
     final pending = photos.where((p) => p.aiStatus == 'pending' || p.aiStatus == 'processing').toList();
+    final failed = photos.where((p) => p.aiStatus == 'failed').toList();
     final skipped = photos.where((p) => p.skipAi || p.aiStatus == 'skipped').toList();
+
+    // リトライ可能な写真（スキップ・失敗・未実行）
+    final retryable = photos.where((p) =>
+      p.aiStatus == 'skipped' || p.aiStatus == 'failed' || (p.skipAi && p.aiStatus != 'completed'),
+    ).toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -194,6 +320,14 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
               ],
             ),
           ),
+        if (failed.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              '${failed.length}枚の写真は解析に失敗',
+              style: TextStyle(color: Colors.red[300], fontSize: 14),
+            ),
+          ),
         if (skipped.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(top: 8),
@@ -202,13 +336,51 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
               style: TextStyle(color: Colors.grey[500], fontSize: 14),
             ),
           ),
-        if (analyzed.isEmpty && pending.isEmpty && skipped.isEmpty)
+        if (analyzed.isEmpty && pending.isEmpty && failed.isEmpty && skipped.isEmpty)
           Text(
             'AI解析はまだ実行されていません',
             style: TextStyle(color: Colors.grey[500], fontSize: 14),
           ),
+        // リトライボタン
+        if (retryable.isNotEmpty && pending.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: OutlinedButton.icon(
+              onPressed: () => _retryAiAnalysis(retryable),
+              icon: const Icon(Icons.auto_awesome, size: 18),
+              label: Text('${retryable.length}枚をAI解析する'),
+            ),
+          ),
       ],
     );
+  }
+
+  Future<void> _retryAiAnalysis(List<MealPhoto> photos) async {
+    // レート制限チェック
+    final status = await AiRateLimitService.getStatus();
+    if (!status.canUse) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('AI解析の回数上限に達しています')),
+        );
+      }
+      return;
+    }
+
+    // 対象写真のステータスをpendingに変更
+    for (final photo in photos) {
+      final updated = photo.copyWith(aiStatus: 'pending', skipAi: false);
+      await LocalDatabase.updateMealPhoto(updated);
+    }
+    ref.invalidate(mealPhotosProvider(widget.mealLogId));
+
+    // バックグラウンドで解析実行
+    AiAnalysisService.processPendingPhotos().then((_) {
+      if (mounted) {
+        ref.invalidate(mealPhotosProvider(widget.mealLogId));
+        ref.read(mealLogsProvider.notifier).refresh();
+      }
+    });
   }
 
   Widget _buildMenuTile(BuildContext context, MealPhoto photo) {

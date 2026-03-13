@@ -103,6 +103,7 @@ class MealPhoto {
   }
 
   MealPhoto copyWith({
+    String? localPath,
     String? originalUrl,
     String? thumbnailUrl,
     String? aiStatus,
@@ -120,7 +121,7 @@ class MealPhoto {
     return MealPhoto(
       id: id,
       mealLogId: mealLogId,
-      localPath: localPath,
+      localPath: localPath ?? this.localPath,
       originalUrl: originalUrl ?? this.originalUrl,
       thumbnailUrl: thumbnailUrl ?? this.thumbnailUrl,
       aiStatus: aiStatus ?? this.aiStatus,

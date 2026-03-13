@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -8,7 +7,6 @@ import 'package:table_calendar/table_calendar.dart';
 import '../../database/local_database.dart';
 import '../../models/meal_log.dart';
 import '../../models/meal_photo.dart';
-import '../../models/meal_type.dart';
 import '../../providers/meal_providers.dart';
 import '../../widgets/meal_card.dart';
 import '../../widgets/meal_grid_tile.dart';
@@ -27,7 +25,7 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
 
   // カレンダー用
   DateTime _focusedDay = DateTime.now();
-  DateTime? _selectedDay;
+  DateTime? _selectedDay = DateTime.now();
 
   @override
   Widget build(BuildContext context) {
@@ -93,6 +91,7 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
         itemCount: mealLogs.length,
         itemBuilder: (context, index) {
           return _MealLogItem(
+            key: ValueKey(mealLogs[index].id),
             mealLog: mealLogs[index],
             onTap: () => context.push('/meal/${mealLogs[index].id}'),
           );
@@ -115,6 +114,7 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
         itemCount: mealLogs.length,
         itemBuilder: (context, index) {
           return _MealLogGridItem(
+            key: ValueKey(mealLogs[index].id),
             mealLog: mealLogs[index],
             onTap: () => context.push('/meal/${mealLogs[index].id}'),
           );
@@ -198,6 +198,7 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
                   itemCount: selectedLogs.length,
                   itemBuilder: (context, index) {
                     return _MealLogItem(
+                      key: ValueKey(selectedLogs[index].id),
                       mealLog: selectedLogs[index],
                       onTap: () => context.push('/meal/${selectedLogs[index].id}'),
                     );
@@ -236,7 +237,7 @@ class _MealLogItem extends StatefulWidget {
   final MealLog mealLog;
   final VoidCallback onTap;
 
-  const _MealLogItem({required this.mealLog, required this.onTap});
+  const _MealLogItem({super.key, required this.mealLog, required this.onTap});
 
   @override
   State<_MealLogItem> createState() => _MealLogItemState();
@@ -271,7 +272,7 @@ class _MealLogGridItem extends StatefulWidget {
   final MealLog mealLog;
   final VoidCallback onTap;
 
-  const _MealLogGridItem({required this.mealLog, required this.onTap});
+  const _MealLogGridItem({super.key, required this.mealLog, required this.onTap});
 
   @override
   State<_MealLogGridItem> createState() => _MealLogGridItemState();

@@ -14,6 +14,6 @@ class AppConstants {
   /// AI解析用の画像リサイズ最大幅
   static const aiImageMaxWidth = 1080;
 
-  /// サムネイルの最大幅
-  static const thumbnailMaxWidth = 200;
+  /// サムネイルの最大幅（フォールバック表示用に十分な品質を確保）
+  static const thumbnailMaxWidth = 600;
 }

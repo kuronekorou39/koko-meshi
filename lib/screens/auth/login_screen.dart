@@ -70,15 +70,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     });
 
     try {
-      await AuthService.signInWithGoogle();
-      if (mounted) context.pop();
-    } catch (e) {
-      final msg = e.toString();
-      if (msg.contains('キャンセル')) {
-        // ユーザーキャンセルは無視
-      } else {
-        setState(() => _error = _parseError(msg));
+      final response = await AuthService.signInWithGoogle();
+      if (response == null) {
+        // ユーザーがキャンセルした場合 → 何もしない
+      } else if (mounted) {
+        context.pop();
       }
+    } catch (e, st) {
+      debugPrint('[Auth] Google Sign-In error: $e');
+      debugPrint('[Auth] Stack trace: $st');
+      setState(() => _error = _parseError(e.toString()));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -100,7 +101,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     if (error.contains('Email not confirmed')) {
       return 'メールアドレスの確認が必要です。メールを確認してください';
     }
-    return 'エラーが発生しました: $error';
+    if (error.contains('AuthRetryableFetchException') ||
+        error.contains('SocketException') ||
+        error.contains('ClientException')) {
+      return 'ネットワークエラーです。接続を確認してもう一度お試しください';
+    }
+    if (error.contains('500') || error.contains('Internal Server Error')) {
+      return 'サーバーエラーが発生しました。しばらく後にお試しください';
+    }
+    if (error.contains('Email rate limit exceeded')) {
+      return '送信制限に達しました。しばらく後にお試しください';
+    }
+    if (error.contains('Signup is disabled')) {
+      return '現在新規登録は無効になっています';
+    }
+    return 'エラーが発生しました。もう一度お試しください';
   }
 
   @override

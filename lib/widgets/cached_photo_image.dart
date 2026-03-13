@@ -21,7 +21,7 @@ class CachedPhotoImage extends StatefulWidget {
     this.width,
     this.height,
     this.fit = BoxFit.cover,
-    this.fullQuality = false,
+    this.fullQuality = true,
   });
 
   @override

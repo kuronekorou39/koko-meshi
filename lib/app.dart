@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 
 import 'screens/auth/login_screen.dart';
 import 'screens/home/home_screen.dart';
@@ -16,7 +17,9 @@ final _router = GoRouter(
     ),
     GoRoute(
       path: '/capture',
-      builder: (context, state) => const CaptureScreen(),
+      builder: (context, state) => CaptureScreen(
+        initialPhotos: state.extra as List<XFile>?,
+      ),
     ),
     GoRoute(
       path: '/meal/:id',

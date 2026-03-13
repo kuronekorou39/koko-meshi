@@ -3,7 +3,6 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../config/env.dart';
 import '../database/local_database.dart';
 import '../models/meal_log.dart';
 import '../models/meal_photo.dart';

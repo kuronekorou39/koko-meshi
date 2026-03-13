@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
@@ -9,8 +8,6 @@ import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:uuid/uuid.dart';
-
 import '../../database/local_database.dart';
 import '../../models/meal_log.dart';
 import '../../models/meal_photo.dart';
@@ -20,6 +17,7 @@ import '../../providers/meal_providers.dart';
 import '../../services/location_service.dart';
 import '../../services/places_service.dart';
 import '../../widgets/cached_photo_image.dart';
+import 'place_editor_screen.dart';
 
 const double _searchRadiusMeters = 500;
 
@@ -52,6 +50,9 @@ class _MapTabState extends ConsumerState<MapTab> {
   // ボトムシート
   _SheetContent? _sheetContent;
   bool _sheetVisible = false;
+
+  // フィルタ
+  _MapFilter _filter = const _MapFilter();
 
   @override
   void initState() {
@@ -97,6 +98,9 @@ class _MapTabState extends ConsumerState<MapTab> {
 
     for (final log in mealLogs) {
       final photos = await LocalDatabase.getPhotosForMealLog(log.id);
+
+      // フィルタ適用
+      if (!_filter.matches(log, photos)) continue;
 
       // MealLog自体にlocationTagがあればそれを使う
       if (log.locationTag != null) {
@@ -548,94 +552,40 @@ class _MapTabState extends ConsumerState<MapTab> {
                 );
               },
             ),
-          // 現在のマップ中心を設定
+          // 場所編集画面を開く
           IconButton(
             icon: Icon(
               isSet ? Icons.edit_location_alt : Icons.add_location_alt,
               size: 22,
             ),
-            tooltip: 'マップ中央を設定',
+            tooltip: isSet ? '場所を編集' : '場所を追加',
             onPressed: () async {
-              // 上書き確認
-              if (isSet) {
-                final confirmed = await showDialog<bool>(
-                  context: sheetContext,
-                  builder: (context) => AlertDialog(
-                    title: const Text('場所を更新'),
-                    content: Text('「${slot.place!.name}」を現在のマップ位置に更新しますか？'),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context, false),
-                        child: const Text('キャンセル'),
-                      ),
-                      FilledButton(
-                        onPressed: () => Navigator.pop(context, true),
-                        child: const Text('更新'),
-                      ),
-                    ],
+              Navigator.pop(sheetContext);
+              final result = await Navigator.push<SavedPlace>(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => PlaceEditorScreen(
+                    initialPosition: isSet
+                        ? LatLng(slot.place!.latitude, slot.place!.longitude)
+                        : null,
+                    initialName: isSet ? slot.place!.name : slot.label,
+                    iconType: slot.iconType,
+                    existingId: slot.place?.id,
                   ),
-                );
-                if (confirmed != true) return;
-              }
+                ),
+              );
+              if (result == null) return;
 
-              // 名前入力（新規の場合）
-              String name = slot.place?.name ?? slot.label;
-              if (!isSet) {
-                if (!sheetContext.mounted) return;
-                final inputName = await showDialog<String>(
-                  context: sheetContext,
-                  builder: (context) {
-                    final controller = TextEditingController(text: slot.label);
-                    return AlertDialog(
-                      title: const Text('場所の名前'),
-                      content: TextField(
-                        controller: controller,
-                        autofocus: true,
-                        decoration: const InputDecoration(
-                          hintText: '例: 自宅、よく行くカフェ',
-                        ),
-                      ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text('キャンセル'),
-                        ),
-                        FilledButton(
-                          onPressed: () => Navigator.pop(
-                            context,
-                            controller.text.trim().isEmpty
-                                ? slot.label
-                                : controller.text.trim(),
-                          ),
-                          child: const Text('OK'),
-                        ),
-                      ],
-                    );
-                  },
-                );
-                if (inputName == null) return;
-                name = inputName;
-              }
-
-              // 保存
+              // 既存を削除して新規保存
               if (slot.place != null) {
                 await LocalDatabase.deleteSavedPlace(slot.place!.id);
               }
-              final newPlace = SavedPlace(
-                id: slot.place?.id ?? const Uuid().v4(),
-                name: name,
-                latitude: _currentCenter.latitude,
-                longitude: _currentCenter.longitude,
-                iconType: slot.iconType,
-                createdAt: DateTime.now(),
-              );
-              await LocalDatabase.insertSavedPlace(newPlace);
+              await LocalDatabase.insertSavedPlace(result);
               _loadMealMarkers();
 
-              if (sheetContext.mounted) Navigator.pop(sheetContext);
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('「${newPlace.name}」を保存しました')),
+                  SnackBar(content: Text('「${result.name}」を保存しました')),
                 );
               }
             },
@@ -675,6 +625,16 @@ class _MapTabState extends ConsumerState<MapTab> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('グルメマップ'),
+        actions: [
+          IconButton(
+            icon: Badge(
+              isLabelVisible: _filter.isActive,
+              child: const Icon(Icons.filter_list),
+            ),
+            tooltip: 'フィルタ',
+            onPressed: _showFilterSheet,
+          ),
+        ],
       ),
       body: _loadingPosition
           ? const Center(child: CircularProgressIndicator())
@@ -1139,6 +1099,146 @@ class _MapTabState extends ConsumerState<MapTab> {
     );
   }
 
+  Future<void> _showFilterSheet() async {
+    var tempFilter = _filter;
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetCtx) => StatefulBuilder(
+        builder: (context, setSheetState) {
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Text('フィルタ',
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      const Spacer(),
+                      if (tempFilter.isActive)
+                        TextButton(
+                          onPressed: () {
+                            setSheetState(() => tempFilter = const _MapFilter());
+                          },
+                          child: const Text('リセット'),
+                        ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                  const Divider(),
+
+                  // 期間
+                  const Text('期間', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      _filterChip('全期間', tempFilter.dateRange == null, () {
+                        setSheetState(() => tempFilter = tempFilter.copyWith(clearDateRange: true));
+                      }),
+                      _filterChip('1週間', tempFilter.dateRangeLabel == '1w', () {
+                        final now = DateTime.now();
+                        setSheetState(() => tempFilter = tempFilter.copyWith(
+                          dateFrom: now.subtract(const Duration(days: 7)),
+                          dateTo: now,
+                          dateRangeLabel: '1w',
+                        ));
+                      }),
+                      _filterChip('1ヶ月', tempFilter.dateRangeLabel == '1m', () {
+                        final now = DateTime.now();
+                        setSheetState(() => tempFilter = tempFilter.copyWith(
+                          dateFrom: DateTime(now.year, now.month - 1, now.day),
+                          dateTo: now,
+                          dateRangeLabel: '1m',
+                        ));
+                      }),
+                      _filterChip('3ヶ月', tempFilter.dateRangeLabel == '3m', () {
+                        final now = DateTime.now();
+                        setSheetState(() => tempFilter = tempFilter.copyWith(
+                          dateFrom: DateTime(now.year, now.month - 3, now.day),
+                          dateTo: now,
+                          dateRangeLabel: '3m',
+                        ));
+                      }),
+                      ActionChip(
+                        label: Text(tempFilter.dateRangeLabel == 'custom'
+                            ? '${DateFormat('M/d').format(tempFilter.dateFrom!)}〜${DateFormat('M/d').format(tempFilter.dateTo!)}'
+                            : 'カスタム'),
+                        avatar: const Icon(Icons.calendar_today, size: 16),
+                        onPressed: () async {
+                          final range = await showDateRangePicker(
+                            context: context,
+                            firstDate: DateTime(2020),
+                            lastDate: DateTime.now(),
+                            locale: const Locale('ja'),
+                          );
+                          if (range != null) {
+                            setSheetState(() => tempFilter = tempFilter.copyWith(
+                              dateFrom: range.start,
+                              dateTo: range.end,
+                              dateRangeLabel: 'custom',
+                            ));
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+
+                  // テキスト検索
+                  const Text('キーワード', style: TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: TextEditingController(text: tempFilter.keyword),
+                    decoration: const InputDecoration(
+                      hintText: 'メニュー名で検索',
+                      prefixIcon: Icon(Icons.search, size: 20),
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (v) {
+                      tempFilter = tempFilter.copyWith(keyword: v);
+                    },
+                  ),
+                  const SizedBox(height: 16),
+
+                  // 適用ボタン
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        setState(() => _filter = tempFilter);
+                        _loadMealMarkers();
+                      },
+                      child: const Text('適用'),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _filterChip(String label, bool selected, VoidCallback onTap) {
+    return FilterChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: (_) => onTap(),
+    );
+  }
+
   Widget _placeholderImage() {
     return Container(
       width: 80, height: 80,
@@ -1183,4 +1283,66 @@ class _PlaceSlot {
     required this.iconType,
     this.place,
   });
+}
+
+class _MapFilter {
+  final DateTime? dateFrom;
+  final DateTime? dateTo;
+  final String? dateRangeLabel;
+  final String? keyword;
+
+  const _MapFilter({
+    this.dateFrom,
+    this.dateTo,
+    this.dateRangeLabel,
+    this.keyword,
+  });
+
+  bool get isActive =>
+      dateFrom != null || (keyword != null && keyword!.isNotEmpty);
+
+  DateTimeRange? get dateRange =>
+      dateFrom != null && dateTo != null
+          ? DateTimeRange(start: dateFrom!, end: dateTo!)
+          : null;
+
+  bool matches(MealLog log, List<MealPhoto> photos) {
+    // 日付フィルタ
+    if (dateFrom != null && log.eatenAt.isBefore(dateFrom!)) return false;
+    if (dateTo != null && log.eatenAt.isAfter(dateTo!.add(const Duration(days: 1)))) return false;
+
+    // キーワード
+    if (keyword != null && keyword!.isNotEmpty) {
+      final kw = keyword!.toLowerCase();
+      final menuNames = photos
+          .where((p) => p.displayName != null)
+          .map((p) => p.displayName!.toLowerCase());
+      final genres = photos
+          .where((p) => p.aiCuisineGenre != null)
+          .map((p) => p.aiCuisineGenre!.toLowerCase());
+      final note = log.note?.toLowerCase() ?? '';
+
+      final matched = menuNames.any((n) => n.contains(kw)) ||
+          genres.any((g) => g.contains(kw)) ||
+          note.contains(kw);
+      if (!matched) return false;
+    }
+
+    return true;
+  }
+
+  _MapFilter copyWith({
+    DateTime? dateFrom,
+    DateTime? dateTo,
+    String? dateRangeLabel,
+    String? keyword,
+    bool clearDateRange = false,
+  }) {
+    return _MapFilter(
+      dateFrom: clearDateRange ? null : (dateFrom ?? this.dateFrom),
+      dateTo: clearDateRange ? null : (dateTo ?? this.dateTo),
+      dateRangeLabel: clearDateRange ? null : (dateRangeLabel ?? this.dateRangeLabel),
+      keyword: keyword ?? this.keyword,
+    );
+  }
 }
