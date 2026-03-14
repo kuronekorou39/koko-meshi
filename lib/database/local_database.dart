@@ -229,6 +229,17 @@ class LocalDatabase {
     return maps.map((m) => MealPhoto.fromMap(m)).toList();
   }
 
+  /// processing状態で止まっている写真を取得（中断されたもの）
+  static Future<List<MealPhoto>> getStuckAiPhotos() async {
+    final db = await database;
+    final maps = await db.query(
+      'meal_photos',
+      where: 'ai_status = ? AND skip_ai = 0',
+      whereArgs: ['processing'],
+    );
+    return maps.map((m) => MealPhoto.fromMap(m)).toList();
+  }
+
   static Future<List<MealPhoto>> getPendingUploadPhotos() async {
     final db = await database;
     final maps = await db.query(

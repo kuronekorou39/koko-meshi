@@ -46,3 +46,7 @@ app.*.map.json
 
 # 環境変数
 .env
+
+# Android release keystore
+android/app/*.keystore
+android/key.properties

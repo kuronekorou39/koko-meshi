@@ -15,7 +15,7 @@ import '../../models/meal_photo.dart';
 import '../../models/meal_type.dart';
 import '../../providers/meal_providers.dart';
 import '../../services/ai_analysis_service.dart';
-import '../../services/ai_rate_limit_service.dart';
+import '../../app.dart';
 import '../../services/auth_service.dart';
 import '../../services/location_service.dart';
 import '../../services/photo_service.dart';
@@ -633,10 +633,38 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
 
       // --- 以下バックグラウンド処理（画面はすでに閉じている） ---
 
-      // AI解析
-      final rateLimitStatus = await AiRateLimitService.getStatus();
-      if (rateLimitStatus.canUse) {
-        await AiAnalysisService.processPendingPhotos();
+      // AI解析（Edge Function経由）
+      AiAnalysisService.anonymousLimitReached = false;
+      await AiAnalysisService.processPendingPhotos();
+
+      // 匿名ユーザーのAI解析上限に達した場合、ログイン促進ダイアログを表示
+      if (AiAnalysisService.anonymousLimitReached) {
+        final ctx = navigatorKey.currentContext;
+        if (ctx != null) {
+          showDialog(
+            context: ctx,
+            builder: (dialogCtx) => AlertDialog(
+              title: const Text('AI解析の上限に達しました'),
+              content: const Text(
+                'お試し3回分のAI解析を使い切りました。\n'
+                'ログインすると月90回までAI解析が使えます。',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogCtx),
+                  child: const Text('後で'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    Navigator.pop(dialogCtx);
+                    GoRouter.of(ctx).push('/login');
+                  },
+                  child: const Text('ログイン'),
+                ),
+              ],
+            ),
+          );
+        }
       }
 
       // ログイン中ならクラウドに同期

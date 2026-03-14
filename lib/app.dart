@@ -8,7 +8,10 @@ import 'screens/capture/capture_screen.dart';
 import 'screens/detail/meal_detail_screen.dart';
 import 'screens/settings/settings_screen.dart';
 
+final navigatorKey = GlobalKey<NavigatorState>();
+
 final _router = GoRouter(
+  navigatorKey: navigatorKey,
   initialLocation: '/',
   routes: [
     GoRoute(
