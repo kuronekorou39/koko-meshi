@@ -24,8 +24,9 @@ import 'photo_editor_screen.dart';
 
 class CaptureScreen extends ConsumerStatefulWidget {
   final List<XFile>? initialPhotos;
+  final bool fromLibrary;
 
-  const CaptureScreen({super.key, this.initialPhotos});
+  const CaptureScreen({super.key, this.initialPhotos, this.fromLibrary = false});
 
   @override
   ConsumerState<CaptureScreen> createState() => _CaptureScreenState();
@@ -166,40 +167,27 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
               ),
               const SizedBox(height: 12),
 
-              // 写真追加ボタン
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _takePhoto,
-                      icon: const Icon(Icons.camera_alt),
-                      label: const Text('撮影'),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: _pickFromLibrary,
-                      icon: const Icon(Icons.photo_library),
-                      label: const Text('ライブラリ'),
-                    ),
-                  ),
-                ],
+              // 写真追加ボタン（入り方で出し分け）
+              OutlinedButton.icon(
+                onPressed: widget.fromLibrary ? _pickFromLibrary : _takePhoto,
+                icon: Icon(widget.fromLibrary ? Icons.photo_library : Icons.add_a_photo),
+                label: Text(widget.fromLibrary ? 'ライブラリから追加' : '追加撮影'),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
 
               // 食事種別選択
-              SegmentedButton<MealType>(
-                segments: MealType.values
-                    .map((type) => ButtonSegment(
-                          value: type,
-                          label: Text(type.label),
-                        ))
-                    .toList(),
-                selected: {_selectedType},
-                onSelectionChanged: (selected) {
-                  setState(() => _selectedType = selected.first);
-                },
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: MealType.values.map((type) {
+                  final selected = type == _selectedType;
+                  return ChoiceChip(
+                    label: Text(type.label),
+                    selected: selected,
+                    onSelected: (_) => setState(() => _selectedType = type),
+                    visualDensity: VisualDensity.compact,
+                  );
+                }).toList(),
               ),
               const SizedBox(height: 12),
 
@@ -229,7 +217,29 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     );
   }
 
+  bool _locationCleared = false;
+
+  void _clearLocation() {
+    setState(() {
+      _position = null;
+      _exifPosition = null;
+      _address = null;
+      _loadingLocation = false;
+      _locationCleared = true;
+    });
+  }
+
+  void _refetchLocation() {
+    setState(() {
+      _loadingLocation = true;
+      _locationCleared = false;
+    });
+    _fetchLocation();
+  }
+
   Widget _buildMetadataBar(DateFormat dateFormat) {
+    final hasLocation = _position != null || _exifPosition != null;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
@@ -247,7 +257,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
           ),
           const SizedBox(width: 12),
           // 位置情報
-          Icon(Icons.location_on, size: 16, color: Colors.grey[600]),
+          Icon(Icons.location_on, size: 16,
+            color: hasLocation ? Colors.grey[600] : Colors.grey[400]),
           const SizedBox(width: 4),
           Expanded(
             child: _loadingLocation
@@ -256,7 +267,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                     height: 12,
                     child: CircularProgressIndicator(strokeWidth: 1.5),
                   )
-                : (_position != null || _exifPosition != null)
+                : hasLocation
                     ? Text(
                         _address ??
                             '${(_position?.latitude ?? _exifPosition?.lat)?.toStringAsFixed(4)}, '
@@ -265,16 +276,25 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                         overflow: TextOverflow.ellipsis,
                       )
                     : GestureDetector(
-                        onTap: () {
+                        onTap: _locationCleared ? _refetchLocation : () {
                           setState(() => _loadingLocation = true);
                           _fetchLocation();
                         },
                         child: Text(
-                          '取得できません (タップで再取得)',
+                          _locationCleared ? '位置情報なし (タップで再取得)' : '取得できません (タップで再取得)',
                           style: TextStyle(fontSize: 12, color: Colors.grey[500]),
                         ),
                       ),
           ),
+          // 位置情報クリア/再取得
+          if (hasLocation && !_loadingLocation)
+            GestureDetector(
+              onTap: _clearLocation,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 4),
+                child: Icon(Icons.close, size: 16, color: Colors.grey[500]),
+              ),
+            ),
         ],
       ),
     );
@@ -321,10 +341,33 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
               borderRadius: BorderRadius.circular(8),
               child: _buildPhotoThumbnail(item),
             ),
+            // EXIF日時（ライブラリ写真で日時がある場合）
+            if (item.exifDateTime != null)
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.bottomCenter,
+                      end: Alignment.topCenter,
+                      colors: [Colors.black54, Colors.transparent],
+                    ),
+                    borderRadius: const BorderRadius.vertical(bottom: Radius.circular(8)),
+                  ),
+                  padding: const EdgeInsets.fromLTRB(6, 16, 6, 4),
+                  child: Text(
+                    DateFormat('M/d HH:mm').format(item.exifDateTime!),
+                    style: const TextStyle(color: Colors.white, fontSize: 10),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
             // 編集済みバッジ
             if (item.editParams?.hasEdits == true)
               Positioned(
-                bottom: 4,
+                bottom: item.exifDateTime != null ? 20 : 4,
                 right: 4,
                 child: Container(
                   decoration: BoxDecoration(
@@ -384,7 +427,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
             ),
             // AI解析スキップ切り替え
             Positioned(
-              bottom: 4,
+              bottom: item.exifDateTime != null ? 20 : 4,
               left: 4,
               child: GestureDetector(
                 onTap: () {
@@ -575,10 +618,16 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
 
       // 写真を保存（編集がある場合は先にisolateで処理してから保存）
       for (final item in _selectedPhotos) {
+        // まずオリジナル（未編集）画像を保存
+        final originalPath = await PhotoService.saveToLocalFromPath(
+          item.originalFile.path,
+        );
+
         String fileToSave = item.sourcePathForSave;
+        final hasEdits = item.editParams != null && item.editParams!.hasEdits == true;
 
         // フィルター編集がある場合、先にisolateで処理
-        if (item.editParams != null && item.editParams!.hasEdits == true) {
+        if (hasEdits) {
           final params = item.editParams!;
           final hasFilterEdits = params.brightness != 0 ||
               params.contrast != 0 ||
@@ -605,7 +654,13 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         }
 
         // 編集済み（or 未編集）ファイルを保存
-        final localPath = await PhotoService.saveToLocal(XFile(fileToSave));
+        final String localPath;
+        if (hasEdits) {
+          localPath = await PhotoService.saveToLocalFromPath(fileToSave);
+        } else {
+          // 編集なし: オリジナルと同じパス
+          localPath = originalPath;
+        }
         final thumbnailPath = await PhotoService.generateThumbnail(localPath);
 
         final photoLat = item.exifLatitude ?? lat;
@@ -616,6 +671,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
           id: _uuid.v4(),
           mealLogId: mealLogId,
           localPath: localPath,
+          originalLocalPath: originalPath,
           thumbnailUrl: thumbnailPath,
           skipAi: item.skipAi,
           aiStatus: item.skipAi ? 'skipped' : 'pending',

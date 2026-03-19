@@ -6,7 +6,6 @@ import 'package:go_router/go_router.dart';
 import '../../database/local_database.dart';
 import '../../models/saved_place.dart';
 import '../../providers/auth_providers.dart';
-import '../../services/ai_rate_limit_service.dart';
 import '../../services/app_settings_service.dart';
 import '../../services/auth_service.dart';
 import '../../services/sync_service.dart';
@@ -21,23 +20,16 @@ class SettingsScreen extends ConsumerStatefulWidget {
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   List<SavedPlace> _savedPlaces = [];
   bool _syncing = false;
-  AiRateLimitStatus? _aiStatus;
 
   @override
   void initState() {
     super.initState();
     _loadSavedPlaces();
-    _loadAiStatus();
   }
 
   Future<void> _loadSavedPlaces() async {
     final places = await LocalDatabase.getSavedPlaces();
     if (mounted) setState(() => _savedPlaces = places);
-  }
-
-  Future<void> _loadAiStatus() async {
-    final status = await AiRateLimitService.getStatus();
-    if (mounted) setState(() => _aiStatus = status);
   }
 
   Future<void> _deleteSavedPlace(SavedPlace place) async {
@@ -196,17 +188,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           const Divider(),
 
-          // AI解析の使用状況
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-            child: Text(
-              'AI解析の使用状況',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.grey[600]),
-            ),
-          ),
-          if (_aiStatus != null) _buildAiUsageSection(_aiStatus!),
-          const Divider(),
-
           // 保存した場所
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -251,58 +232,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildAiUsageSection(AiRateLimitStatus status) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: Column(
-        children: [
-          _buildUsageRow('1時間', status.hourly),
-          const SizedBox(height: 8),
-          _buildUsageRow('1日', status.daily),
-          const SizedBox(height: 8),
-          _buildUsageRow('1ヶ月', status.monthly),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildUsageRow(String label, AiRateLimit limit) {
-    final color = limit.exceeded
-        ? Colors.red
-        : limit.ratio > 0.8
-            ? Colors.orange
-            : Theme.of(context).colorScheme.primary;
-
-    return Row(
-      children: [
-        SizedBox(
-          width: 50,
-          child: Text(label, style: const TextStyle(fontSize: 13)),
-        ),
-        Expanded(
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: limit.ratio.clamp(0.0, 1.0),
-              backgroundColor: Colors.grey[200],
-              color: color,
-              minHeight: 8,
-            ),
-          ),
-        ),
-        const SizedBox(width: 8),
-        Text(
-          '${limit.used}/${limit.limit}',
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-            color: limit.exceeded ? Colors.red : Colors.grey[600],
-          ),
-        ),
-      ],
     );
   }
 

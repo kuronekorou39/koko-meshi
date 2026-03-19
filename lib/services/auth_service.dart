@@ -16,7 +16,18 @@ class AuthService {
   }
 
   static User? get currentUser => _client?.auth.currentUser;
-  static bool get isLoggedIn => currentUser != null;
+
+  /// 匿名ユーザーかどうか判定
+  static bool get isAnonymousUser {
+    final user = currentUser;
+    if (user == null) return false;
+    // isAnonymousフラグで判定、fallbackとしてemailの有無も確認
+    if (user.isAnonymous) return true;
+    return user.email == null || user.email!.isEmpty;
+  }
+
+  /// 実際にログインしているか（匿名ユーザーは除外）
+  static bool get isLoggedIn => currentUser != null && !isAnonymousUser;
 
   static Stream<AuthState> get authStateChanges {
     if (_client == null) return const Stream.empty();

@@ -29,6 +29,7 @@ class MealDetailScreen extends ConsumerStatefulWidget {
 
 class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
   Timer? _refreshTimer;
+  int _selectedPhotoIndex = 0;
 
   @override
   void dispose() {
@@ -54,7 +55,13 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
     final photosAsync = ref.watch(mealPhotosProvider(widget.mealLogId));
 
     // pending写真がある場合、自動リフレッシュ
-    photosAsync.whenData(_startAutoRefresh);
+    photosAsync.whenData((photos) {
+      _startAutoRefresh(photos);
+      // indexが範囲外にならないように
+      if (_selectedPhotoIndex >= photos.length && photos.isNotEmpty) {
+        _selectedPhotoIndex = photos.length - 1;
+      }
+    });
 
     return Scaffold(
       appBar: AppBar(
@@ -89,7 +96,7 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
                     height: 300,
                     child: Center(child: Text('写真の読み込みに失敗: $e')),
                   ),
-                  data: (photos) => _buildPhotoGallery(photos),
+                  data: (photos) => _buildPhotoSection(photos),
                 ),
 
                 Padding(
@@ -118,13 +125,6 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 16),
-
-                      photosAsync.when(
-                        loading: () => const SizedBox.shrink(),
-                        error: (_, _) => const SizedBox.shrink(),
-                        data: (photos) => _buildAiResults(context, photos),
-                      ),
                     ],
                   ),
                 ),
@@ -136,7 +136,8 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
     );
   }
 
-  Widget _buildPhotoGallery(List<MealPhoto> photos) {
+  /// 写真セクション: 選択写真 + サムネ一覧 + AI結果
+  Widget _buildPhotoSection(List<MealPhoto> photos) {
     if (photos.isEmpty) {
       return const SizedBox(
         height: 200,
@@ -144,253 +145,238 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
       );
     }
 
-    if (photos.length == 1) {
-      return _buildFullPhoto(photos, 0);
-    }
+    final selectedPhoto = photos[_selectedPhotoIndex];
 
-    return SizedBox(
-      height: 300,
-      child: PageView.builder(
-        itemCount: photos.length,
-        itemBuilder: (context, index) {
-          return _buildFullPhoto(photos, index);
-        },
-      ),
-    );
-  }
-
-  Widget _buildFullPhoto(List<MealPhoto> photos, int index) {
-    final photo = photos[index];
-    return Stack(
+    return Column(
       children: [
-        GestureDetector(
-          onTap: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => PhotoViewerScreen(
-                photos: photos,
-                initialIndex: index,
+        // 選択中の写真を大きく表示
+        Stack(
+          children: [
+            GestureDetector(
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => PhotoViewerScreen(
+                    photos: photos,
+                    initialIndex: _selectedPhotoIndex,
+                  ),
+                ),
+              ),
+              child: CachedPhotoImage(
+                localPath: selectedPhoto.localPath,
+                thumbnailPath: selectedPhoto.thumbnailUrl,
+                originalUrl: selectedPhoto.originalUrl,
+                height: 300,
+                width: double.infinity,
+                fullQuality: true,
               ),
             ),
-          ),
-          child: CachedPhotoImage(
-            localPath: photo.localPath,
-            thumbnailPath: photo.thumbnailUrl,
-            originalUrl: photo.originalUrl,
-            height: 300,
-            width: double.infinity,
-            fullQuality: true,
-          ),
+            // 編集ボタン
+            Positioned(
+              right: 8,
+              bottom: 8,
+              child: Material(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(20),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(20),
+                  onTap: () => _editPhoto(selectedPhoto),
+                  child: const Padding(
+                    padding: EdgeInsets.all(8),
+                    child: Icon(Icons.tune, color: Colors.white, size: 20),
+                  ),
+                ),
+              ),
+            ),
+            // 枚数表示
+            if (photos.length > 1)
+              Positioned(
+                left: 8,
+                bottom: 8,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '${_selectedPhotoIndex + 1} / ${photos.length}',
+                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                  ),
+                ),
+              ),
+          ],
         ),
-        // 編集ボタン
-        Positioned(
-          right: 8,
-          bottom: 8,
-          child: Material(
-            color: Colors.black54,
-            borderRadius: BorderRadius.circular(20),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(20),
-              onTap: () => _editPhoto(photo),
-              child: const Padding(
-                padding: EdgeInsets.all(8),
-                child: Icon(Icons.tune, color: Colors.white, size: 20),
-              ),
+
+        // サムネイル一覧（2枚以上の場合）
+        if (photos.length > 1)
+          Container(
+            height: 72,
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              itemCount: photos.length,
+              itemBuilder: (context, index) {
+                final photo = photos[index];
+                final isSelected = index == _selectedPhotoIndex;
+                return GestureDetector(
+                  onTap: () => setState(() => _selectedPhotoIndex = index),
+                  child: Container(
+                    width: 56,
+                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: isSelected
+                            ? Theme.of(context).colorScheme.primary
+                            : Colors.transparent,
+                        width: 2,
+                      ),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: CachedPhotoImage(
+                        localPath: photo.localPath,
+                        thumbnailPath: photo.thumbnailUrl,
+                        originalUrl: photo.originalUrl,
+                        height: 56,
+                        width: 56,
+                      ),
+                    ),
+                  ),
+                );
+              },
             ),
           ),
+
+        // 選択中の写真のAI解析結果
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _buildPhotoAiResult(selectedPhoto),
         ),
       ],
     );
   }
 
-  Future<void> _editPhoto(MealPhoto photo) async {
-    final filePath = photo.localPath;
-    if (!File(filePath).existsSync()) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('写真ファイルが見つかりません')),
-        );
-      }
-      return;
-    }
-
-    final result = await Navigator.push<PhotoEditResult>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => PhotoEditorScreen(filePath: filePath),
-      ),
-    );
-
-    if (result == null || !result.hasEdits || !mounted) return;
-
-    // 編集を適用してファイルを上書き
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('写真を処理中...')),
-    );
-
-    final dir = await getTemporaryDirectory();
-    final outputPath = path.join(
-      dir.path,
-      'edit_${DateTime.now().millisecondsSinceEpoch}.jpg',
-    );
-
-    // ソースパス（クロップがあればクロップ済み、なければオリジナル）
-    final sourcePath = result.croppedPath ?? filePath;
-
-    final hasFilters = result.brightness != 0 ||
-        result.contrast != 0 ||
-        result.saturation != 0 ||
-        result.warmth != 0 ||
-        result.vignette != 0;
-
-    String? finalPath;
-    if (hasFilters) {
-      finalPath = await compute(processEditedImage, ImageProcessParams(
-        inputPath: sourcePath,
-        outputPath: outputPath,
-        brightness: result.brightness,
-        contrast: result.contrast,
-        saturation: result.saturation,
-        warmth: result.warmth,
-        vignette: result.vignette,
-      ));
-    } else {
-      // クロップのみ
-      finalPath = sourcePath;
-    }
-
-    if (finalPath == null || !mounted) return;
-
-    // ローカルパスを更新
-    final newLocalPath = await PhotoService.saveToLocalFromPath(finalPath);
-    final newThumbPath = await PhotoService.generateThumbnail(newLocalPath);
-
-    final updated = photo.copyWith(
-      localPath: newLocalPath,
-      thumbnailUrl: newThumbPath,
-    );
-    await LocalDatabase.updateMealPhoto(updated);
-    ref.invalidate(mealPhotosProvider(widget.mealLogId));
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('写真を更新しました')),
-      );
-    }
-  }
-
-  Widget _buildAiResults(BuildContext context, List<MealPhoto> photos) {
-    final analyzed = photos.where((p) => p.aiStatus == 'completed').toList();
-    final pending = photos.where((p) => p.aiStatus == 'pending' || p.aiStatus == 'processing').toList();
-    final failed = photos.where((p) => p.aiStatus == 'failed').toList();
-    final skipped = photos.where((p) => p.skipAi || p.aiStatus == 'skipped').toList();
-
-    // リトライ可能な写真（スキップ・失敗・未実行）
-    final retryable = photos.where((p) =>
-      p.aiStatus == 'skipped' || p.aiStatus == 'failed' || (p.skipAi && p.aiStatus != 'completed'),
-    ).toList();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (analyzed.isNotEmpty) ...[
-          const Text(
-            'メニュー',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+  /// 個別写真のAI解析結果
+  Widget _buildPhotoAiResult(MealPhoto photo) {
+    switch (photo.aiStatus) {
+      case 'completed':
+        return _buildCompletedResult(photo);
+      case 'pending':
+      case 'processing':
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Row(
+            children: [
+              const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'AI解析中...',
+                style: TextStyle(color: Colors.grey[500], fontSize: 14),
+              ),
+            ],
           ),
-          const SizedBox(height: 8),
-          ...analyzed.map((photo) => _buildMenuTile(context, photo)),
-        ],
-        if (pending.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
+        );
+      case 'failed':
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Row(
+            children: [
+              Icon(Icons.error_outline, size: 16, color: Colors.red[300]),
+              const SizedBox(width: 6),
+              Text(
+                '解析に失敗',
+                style: TextStyle(color: Colors.red[300], fontSize: 14),
+              ),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: () => _retryForPhoto(photo),
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('再解析'),
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+            ],
+          ),
+        );
+      case 'skipped':
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Row(
+            children: [
+              Icon(Icons.visibility_off, size: 16, color: Colors.grey[400]),
+              const SizedBox(width: 6),
+              Text(
+                'AI解析スキップ',
+                style: TextStyle(color: Colors.grey[500], fontSize: 14),
+              ),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: () => _retryForPhoto(photo),
+                icon: const Icon(Icons.auto_awesome, size: 16),
+                label: const Text('解析する'),
+                style: TextButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+            ],
+          ),
+        );
+      default:
+        // skipAiがtrueでstatusがcompletedでない場合
+        if (photo.skipAi) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
             child: Row(
               children: [
-                const SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-                const SizedBox(width: 8),
+                Icon(Icons.visibility_off, size: 16, color: Colors.grey[400]),
+                const SizedBox(width: 6),
                 Text(
-                  '${pending.length}枚の写真を解析中...',
+                  'AI解析スキップ',
                   style: TextStyle(color: Colors.grey[500], fontSize: 14),
+                ),
+                const Spacer(),
+                TextButton.icon(
+                  onPressed: () => _retryForPhoto(photo),
+                  icon: const Icon(Icons.auto_awesome, size: 16),
+                  label: const Text('解析する'),
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                  ),
                 ),
               ],
             ),
-          ),
-        if (failed.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Text(
-              '${failed.length}枚の写真は解析に失敗',
-              style: TextStyle(color: Colors.red[300], fontSize: 14),
-            ),
-          ),
-        if (skipped.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Text(
-              '${skipped.length}枚の写真はAI解析をスキップ',
-              style: TextStyle(color: Colors.grey[500], fontSize: 14),
-            ),
-          ),
-        if (analyzed.isEmpty && pending.isEmpty && failed.isEmpty && skipped.isEmpty)
-          Text(
-            'AI解析はまだ実行されていません',
+          );
+        }
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Text(
+            'AI解析未実行',
             style: TextStyle(color: Colors.grey[500], fontSize: 14),
           ),
-        // リトライボタン
-        if (retryable.isNotEmpty && pending.isEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: OutlinedButton.icon(
-              onPressed: () => _retryAiAnalysis(retryable),
-              icon: const Icon(Icons.auto_awesome, size: 18),
-              label: Text('${retryable.length}枚をAI解析する'),
-            ),
-          ),
-      ],
-    );
-  }
-
-  Future<void> _retryAiAnalysis(List<MealPhoto> photos) async {
-    // レート制限チェック
-    final status = await AiRateLimitService.getStatus();
-    if (!status.canUse) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('AI解析の回数上限に達しています')),
         );
-      }
-      return;
     }
-
-    // 対象写真のステータスをpendingに変更
-    for (final photo in photos) {
-      final updated = photo.copyWith(aiStatus: 'pending', skipAi: false);
-      await LocalDatabase.updateMealPhoto(updated);
-    }
-    ref.invalidate(mealPhotosProvider(widget.mealLogId));
-
-    // バックグラウンドで解析実行
-    AiAnalysisService.processPendingPhotos().then((_) {
-      if (mounted) {
-        ref.invalidate(mealPhotosProvider(widget.mealLogId));
-        ref.read(mealLogsProvider.notifier).refresh();
-      }
-    });
   }
 
-  Widget _buildMenuTile(BuildContext context, MealPhoto photo) {
+  /// 解析完了時の結果表示
+  Widget _buildCompletedResult(MealPhoto photo) {
     final isUserCorrected = photo.userCorrectedName != null ||
         photo.userCorrectedPrice != null ||
         photo.userCorrectedCalories != null;
 
     return ListTile(
       contentPadding: EdgeInsets.zero,
-      title: Text(photo.displayName ?? '不明'),
+      title: Text(
+        photo.displayName ?? '不明',
+        style: const TextStyle(fontWeight: FontWeight.bold),
+      ),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -429,6 +415,174 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
         onPressed: () => _showEditDialog(context, photo),
       ),
     );
+  }
+
+  /// 個別写真のAI解析リトライ
+  Future<void> _retryForPhoto(MealPhoto photo) async {
+    final status = await AiRateLimitService.getStatus();
+    if (!status.canUse) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('AI解析の回数上限に達しています')),
+        );
+      }
+      return;
+    }
+
+    final updated = photo.copyWith(aiStatus: 'pending', skipAi: false);
+    await LocalDatabase.updateMealPhoto(updated);
+    ref.invalidate(mealPhotosProvider(widget.mealLogId));
+
+    AiAnalysisService.processPendingPhotos().then((_) {
+      if (mounted) {
+        ref.invalidate(mealPhotosProvider(widget.mealLogId));
+        ref.read(mealLogsProvider.notifier).refresh();
+      }
+    });
+  }
+
+  /// 編集用のファイルパスを取得（localPath → originalLocalPath → thumbnailUrl の順で試行）
+  String? _findEditableFile(MealPhoto photo) {
+    if (File(photo.localPath).existsSync()) return photo.localPath;
+    if (photo.originalLocalPath != null && File(photo.originalLocalPath!).existsSync()) {
+      return photo.originalLocalPath!;
+    }
+    if (photo.thumbnailUrl != null && File(photo.thumbnailUrl!).existsSync()) {
+      return photo.thumbnailUrl!;
+    }
+    return null;
+  }
+
+  Future<void> _editPhoto(MealPhoto photo) async {
+    final filePath = _findEditableFile(photo);
+    if (filePath == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('写真ファイルが見つかりません')),
+        );
+      }
+      return;
+    }
+
+    // オリジナルが存在する場合、リセットオプション付きのダイアログを表示
+    final hasOriginal = photo.originalLocalPath != null &&
+        File(photo.originalLocalPath!).existsSync() &&
+        photo.originalLocalPath != photo.localPath;
+
+    if (hasOriginal) {
+      final action = await showModalBottomSheet<String>(
+        context: context,
+        builder: (_) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.tune),
+                title: const Text('写真を編集'),
+                onTap: () => Navigator.pop(context, 'edit'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.restore),
+                title: const Text('オリジナルに戻す'),
+                subtitle: const Text('撮影時の元画像に復元します'),
+                onTap: () => Navigator.pop(context, 'reset'),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      if (action == null || !mounted) return;
+
+      if (action == 'reset') {
+        await _resetToOriginal(photo);
+        return;
+      }
+    }
+
+    final result = await Navigator.push<PhotoEditResult>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PhotoEditorScreen(filePath: filePath),
+      ),
+    );
+
+    if (result == null || !result.hasEdits || !mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('写真を処理中...')),
+    );
+
+    final dir = await getTemporaryDirectory();
+    final outputPath = path.join(
+      dir.path,
+      'edit_${DateTime.now().millisecondsSinceEpoch}.jpg',
+    );
+
+    final sourcePath = result.croppedPath ?? filePath;
+
+    final hasFilters = result.brightness != 0 ||
+        result.contrast != 0 ||
+        result.saturation != 0 ||
+        result.warmth != 0 ||
+        result.vignette != 0;
+
+    String? finalPath;
+    if (hasFilters) {
+      finalPath = await compute(processEditedImage, ImageProcessParams(
+        inputPath: sourcePath,
+        outputPath: outputPath,
+        brightness: result.brightness,
+        contrast: result.contrast,
+        saturation: result.saturation,
+        warmth: result.warmth,
+        vignette: result.vignette,
+      ));
+    } else {
+      finalPath = sourcePath;
+    }
+
+    if (finalPath == null || !mounted) return;
+
+    final newLocalPath = await PhotoService.saveToLocalFromPath(finalPath);
+    final newThumbPath = await PhotoService.generateThumbnail(newLocalPath);
+
+    // originalLocalPathが未設定なら現在のlocalPathをオリジナルとして保存
+    final originalPath = photo.originalLocalPath ?? photo.localPath;
+
+    final updated = photo.copyWith(
+      localPath: newLocalPath,
+      originalLocalPath: originalPath,
+      thumbnailUrl: newThumbPath,
+    );
+    await LocalDatabase.updateMealPhoto(updated);
+    ref.invalidate(mealPhotosProvider(widget.mealLogId));
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('写真を更新しました')),
+      );
+    }
+  }
+
+  /// オリジナル画像に復元
+  Future<void> _resetToOriginal(MealPhoto photo) async {
+    final originalPath = photo.originalLocalPath!;
+    final newThumbPath = await PhotoService.generateThumbnail(originalPath);
+
+    final updated = photo.copyWith(
+      localPath: originalPath,
+      thumbnailUrl: newThumbPath,
+    );
+    await LocalDatabase.updateMealPhoto(updated);
+    ref.invalidate(mealPhotosProvider(widget.mealLogId));
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('オリジナル画像に復元しました')),
+      );
+    }
   }
 
   Future<void> _showEditDialog(BuildContext context, MealPhoto photo) async {

@@ -8,6 +8,7 @@ import '../../database/local_database.dart';
 import '../../models/meal_log.dart';
 import '../../models/meal_photo.dart';
 import '../../providers/meal_providers.dart';
+import '../../widgets/ai_usage_sheet.dart';
 import '../../widgets/meal_card.dart';
 import '../../widgets/meal_grid_tile.dart';
 
@@ -40,6 +41,12 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
             icon: Icon(_viewModeIcon),
             onPressed: _cycleViewMode,
             tooltip: _viewModeLabel,
+          ),
+          // AI使用状況
+          IconButton(
+            icon: const Icon(Icons.auto_awesome),
+            onPressed: () => showAiUsageSheet(context),
+            tooltip: 'AI使用状況',
           ),
           IconButton(
             icon: const Icon(Icons.settings),

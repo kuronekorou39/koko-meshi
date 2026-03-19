@@ -111,7 +111,19 @@ class AiAnalysisService {
         },
       );
 
-      final data = response.data as Map<String, dynamic>;
+      // response.dataはMap or Stringの場合がある
+      final rawData = response.data;
+      final Map<String, dynamic> data;
+      if (rawData is Map<String, dynamic>) {
+        data = rawData;
+      } else if (rawData is String) {
+        debugPrint('[AI] Response is String, decoding JSON...');
+        data = jsonDecode(rawData) as Map<String, dynamic>;
+      } else {
+        debugPrint('[AI] Unexpected response type: ${rawData.runtimeType}');
+        await LocalDatabase.updateMealPhoto(photo.copyWith(aiStatus: 'failed'));
+        return true;
+      }
       final result = AiAnalysisResult.fromJson(data);
       final model = data['model'] as String? ?? 'unknown';
 

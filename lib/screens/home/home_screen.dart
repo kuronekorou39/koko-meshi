@@ -82,18 +82,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Future<void> _onCameraPressed() async {
     final photo = await PhotoService.takePhoto();
     if (photo == null || !mounted) return;
-    await _handleNewPhotos([photo]);
+    await _handleNewPhotos([photo], fromLibrary: false);
   }
 
   /// ライブラリから選択
   Future<void> _onLibraryPressed() async {
     final photos = await PhotoService.pickPhotos();
     if (photos.isEmpty || !mounted) return;
-    await _handleNewPhotos(photos);
+    await _handleNewPhotos(photos, fromLibrary: true);
   }
 
   /// 新しい写真を処理: マージ判定 → マージ or 新規記録
-  Future<void> _handleNewPhotos(List<XFile> photos) async {
+  Future<void> _handleNewPhotos(List<XFile> photos, {required bool fromLibrary}) async {
     final mealLogs = ref.read(mealLogsProvider).valueOrNull ?? [];
     final recentMeal = mealLogs.isNotEmpty ? mealLogs.first : null;
 
@@ -111,7 +111,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       }
     }
 
-    if (mounted) context.push('/capture', extra: photos);
+    if (mounted) {
+      context.push('/capture', extra: {
+        'photos': photos,
+        'fromLibrary': fromLibrary,
+      });
+    }
   }
 
   /// マージダイアログ
@@ -164,6 +169,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
 
     ref.read(mealLogsProvider.notifier).refresh();
+    ref.invalidate(mealPhotosProvider(mealLogId));
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(

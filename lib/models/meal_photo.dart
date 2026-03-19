@@ -2,6 +2,7 @@ class MealPhoto {
   final String id;
   final String mealLogId;
   final String localPath;
+  final String? originalLocalPath; // 編集前のオリジナル画像パス
   final String? originalUrl;
   final String? thumbnailUrl;
   final String aiStatus; // pending / processing / completed / failed
@@ -24,6 +25,7 @@ class MealPhoto {
     required this.id,
     required this.mealLogId,
     required this.localPath,
+    this.originalLocalPath,
     this.originalUrl,
     this.thumbnailUrl,
     this.aiStatus = 'pending',
@@ -57,6 +59,7 @@ class MealPhoto {
       'id': id,
       'meal_log_id': mealLogId,
       'local_path': localPath,
+      'original_local_path': originalLocalPath,
       'original_url': originalUrl,
       'thumbnail_url': thumbnailUrl,
       'ai_status': aiStatus,
@@ -82,6 +85,7 @@ class MealPhoto {
       id: map['id'] as String,
       mealLogId: map['meal_log_id'] as String,
       localPath: map['local_path'] as String,
+      originalLocalPath: map['original_local_path'] as String?,
       originalUrl: map['original_url'] as String?,
       thumbnailUrl: map['thumbnail_url'] as String?,
       aiStatus: map['ai_status'] as String? ?? 'pending',
@@ -104,6 +108,7 @@ class MealPhoto {
 
   MealPhoto copyWith({
     String? localPath,
+    String? originalLocalPath,
     String? originalUrl,
     String? thumbnailUrl,
     String? aiStatus,
@@ -122,6 +127,7 @@ class MealPhoto {
       id: id,
       mealLogId: mealLogId,
       localPath: localPath ?? this.localPath,
+      originalLocalPath: originalLocalPath ?? this.originalLocalPath,
       originalUrl: originalUrl ?? this.originalUrl,
       thumbnailUrl: thumbnailUrl ?? this.thumbnailUrl,
       aiStatus: aiStatus ?? this.aiStatus,

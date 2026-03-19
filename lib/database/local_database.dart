@@ -21,7 +21,7 @@ class LocalDatabase {
 
     return openDatabase(
       path,
-      version: 6,
+      version: 7,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -64,6 +64,7 @@ class LocalDatabase {
         id TEXT PRIMARY KEY,
         meal_log_id TEXT NOT NULL,
         local_path TEXT NOT NULL,
+        original_local_path TEXT,
         original_url TEXT,
         thumbnail_url TEXT,
         ai_status TEXT NOT NULL DEFAULT 'pending',
@@ -105,6 +106,9 @@ class LocalDatabase {
     }
     if (oldVersion < 6) {
       await db.execute('ALTER TABLE meal_photos ADD COLUMN skip_ai INTEGER NOT NULL DEFAULT 0');
+    }
+    if (oldVersion < 7) {
+      await db.execute('ALTER TABLE meal_photos ADD COLUMN original_local_path TEXT');
     }
   }
 
@@ -149,6 +153,18 @@ class LocalDatabase {
       [since],
     );
     return Sqflite.firstIntValue(result) ?? 0;
+  }
+
+  /// 指定ウィンドウ内の最も古いAI使用ログのタイムスタンプを取得
+  static Future<DateTime?> getOldestAiUsageInWindow(Duration window) async {
+    final db = await database;
+    final since = DateTime.now().subtract(window).toIso8601String();
+    final result = await db.rawQuery(
+      'SELECT MIN(used_at) as oldest FROM ai_usage_log WHERE used_at > ?',
+      [since],
+    );
+    final oldest = result.first['oldest'] as String?;
+    return oldest != null ? DateTime.parse(oldest) : null;
   }
 
   static Future<void> addBonusAiUsage(int count) async {

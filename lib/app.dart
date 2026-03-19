@@ -20,9 +20,19 @@ final _router = GoRouter(
     ),
     GoRoute(
       path: '/capture',
-      builder: (context, state) => CaptureScreen(
-        initialPhotos: state.extra as List<XFile>?,
-      ),
+      builder: (context, state) {
+        final extra = state.extra;
+        if (extra is Map<String, dynamic>) {
+          return CaptureScreen(
+            initialPhotos: extra['photos'] as List<XFile>?,
+            fromLibrary: extra['fromLibrary'] as bool? ?? false,
+          );
+        }
+        // 後方互換
+        return CaptureScreen(
+          initialPhotos: extra as List<XFile>?,
+        );
+      },
     ),
     GoRoute(
       path: '/meal/:id',

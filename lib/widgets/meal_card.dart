@@ -148,7 +148,10 @@ class MealCard extends StatelessWidget {
     return switch (mealType) {
       MealType.eatingOut => Icons.store,
       MealType.homeCooking => Icons.home,
+      MealType.takeout => Icons.shopping_bag,
       MealType.delivery => Icons.delivery_dining,
+      MealType.snack => Icons.coffee,
+      MealType.other => Icons.restaurant,
     };
   }
 }

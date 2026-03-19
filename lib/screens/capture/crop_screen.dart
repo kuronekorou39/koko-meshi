@@ -61,6 +61,8 @@ class _CropScreenState extends State<CropScreen> {
   double _startImageScale = 1.0;
   Offset _startImageOffset = Offset.zero;
   Offset _startFocalPoint = Offset.zero;
+  double _gestureStartRotation = 0.0;
+  bool _isPinching = false;
 
   // クロップ枠（画面座標）
   Rect _cropRect = Rect.zero;
@@ -168,46 +170,71 @@ class _CropScreenState extends State<CropScreen> {
     _cropInitialized = true;
   }
 
+
   // -----------------------------------------------------------------------
-  // 回転時にクロップ枠を自動調整
+  // 画像のスクリーン上バウンディングボックス
   // -----------------------------------------------------------------------
 
-  void _autoFitCropAfterRotation() {
-    if (_image == null || _canvasSize == Size.zero) return;
-
+  Rect _getImageScreenBounds() {
+    if (_image == null || _canvasSize == Size.zero) return Rect.zero;
     final fitScale = _baseFitScale();
+    final totalScale = fitScale * _imageScale;
     final imgW = _image!.width.toDouble();
     final imgH = _image!.height.toDouble();
 
-    // 回転後の画像バウンディングボックス（画面座標）
-    final abscos = math.cos(_rotation).abs();
-    final abssin = math.sin(_rotation).abs();
-    final rotW = (imgW * abscos + imgH * abssin) * fitScale * _imageScale;
-    final rotH = (imgW * abssin + imgH * abscos) * fitScale * _imageScale;
+    final cx = _canvasSize.width / 2 + _imageOffset.dx;
+    final cy = _canvasSize.height / 2 + _imageOffset.dy;
 
-    // クロップ枠が画像からはみ出さないように調整
-    final center = _cropRect.center;
-    var w = _cropRect.width;
-    var h = _cropRect.height;
+    final halfW = imgW * totalScale / 2;
+    final halfH = imgH * totalScale / 2;
 
-    // 画像サイズより大きくならないように
-    if (w > rotW) w = rotW;
-    if (h > rotH) h = rotH;
+    final corners = [
+      Offset(-halfW, -halfH),
+      Offset(halfW, -halfH),
+      Offset(-halfW, halfH),
+      Offset(halfW, halfH),
+    ];
 
-    // アスペクト比を維持
-    if (_aspectPreset.ratio != null) {
-      final ratio = _aspectPreset.ratio!;
-      if (w / h > ratio) {
-        w = h * ratio;
-      } else {
-        h = w / ratio;
-      }
+    final cosR = math.cos(_rotation);
+    final sinR = math.sin(_rotation);
+
+    double minX = double.infinity, maxX = double.negativeInfinity;
+    double minY = double.infinity, maxY = double.negativeInfinity;
+
+    for (final c in corners) {
+      final rx = c.dx * cosR - c.dy * sinR + cx;
+      final ry = c.dx * sinR + c.dy * cosR + cy;
+      minX = math.min(minX, rx);
+      maxX = math.max(maxX, rx);
+      minY = math.min(minY, ry);
+      maxY = math.max(maxY, ry);
     }
 
-    // 再センタリング
-    final newLeft = (center.dx - w / 2).clamp(0.0, _canvasSize.width - w);
-    final newTop = (center.dy - h / 2).clamp(0.0, _canvasSize.height - h);
-    _cropRect = Rect.fromLTWH(newLeft, newTop, w, h);
+    return Rect.fromLTRB(minX, minY, maxX, maxY);
+  }
+
+  /// 切り抜き枠が画像バウンディングボックスと最低限重なるように制約
+  void _constrainCropToImage() {
+    final imgBounds = _getImageScreenBounds();
+    if (imgBounds.isEmpty) return;
+
+    // 枠が完全に画像の外に出ないようにする（最低_minCropSize分の重なり）
+    final overlap = _minCropSize;
+    var l = _cropRect.left;
+    var t = _cropRect.top;
+    final w = _cropRect.width;
+    final h = _cropRect.height;
+
+    // 右端が画像左端+overlapより左 → 押し戻す
+    if (l + w < imgBounds.left + overlap) l = imgBounds.left + overlap - w;
+    // 左端が画像右端-overlapより右 → 押し戻す
+    if (l > imgBounds.right - overlap) l = imgBounds.right - overlap;
+    // 下端が画像上端+overlapより上 → 押し戻す
+    if (t + h < imgBounds.top + overlap) t = imgBounds.top + overlap - h;
+    // 上端が画像下端-overlapより下 → 押し戻す
+    if (t > imgBounds.bottom - overlap) t = imgBounds.bottom - overlap;
+
+    _cropRect = Rect.fromLTWH(l, t, w, h);
   }
 
   // -----------------------------------------------------------------------
@@ -230,10 +257,8 @@ class _CropScreenState extends State<CropScreen> {
     if (_nearEdge(point, r.topLeft, r.bottomLeft, s)) return _DragHandle.left;
     if (_nearEdge(point, r.topRight, r.bottomRight, s)) return _DragHandle.right;
 
-    // 内部 → 画像移動
-    if (r.contains(point)) return _DragHandle.move;
-
-    return _DragHandle.none;
+    // 内部 or 外部 → 画像移動
+    return _DragHandle.move;
   }
 
   bool _nearEdge(Offset point, Offset a, Offset b, double threshold) {
@@ -250,26 +275,67 @@ class _CropScreenState extends State<CropScreen> {
   // クロップ枠のドラッグ
   // -----------------------------------------------------------------------
 
-  void _onCropDragStart(DragStartDetails details) {
-    final handle = _hitTest(details.localPosition);
-    setState(() {
-      _activeHandle = handle;
-      _startCropRect = _cropRect;
-      _dragStartPoint = details.localPosition;
-    });
+  // -----------------------------------------------------------------------
+  // 統合ジェスチャー（ピンチズーム + クロップ枠ドラッグ）
+  // -----------------------------------------------------------------------
+
+  void _onGestureStart(ScaleStartDetails details) {
+    if (details.pointerCount >= 2) {
+      // ピンチズーム+回転開始
+      _isPinching = true;
+      _startImageScale = _imageScale;
+      _startImageOffset = _imageOffset;
+      _startFocalPoint = details.localFocalPoint;
+      _gestureStartRotation = _rotation;
+      _activeHandle = _DragHandle.none;
+    } else {
+      // シングルタッチ: クロップ枠操作
+      _isPinching = false;
+      final handle = _hitTest(details.localFocalPoint);
+      setState(() {
+        _activeHandle = handle;
+        _startCropRect = _cropRect;
+        _dragStartPoint = details.localFocalPoint;
+        _startImageOffset = _imageOffset;
+        _startFocalPoint = details.localFocalPoint;
+      });
+    }
   }
 
-  void _onCropDragUpdate(DragUpdateDetails details) {
+  void _onGestureUpdate(ScaleUpdateDetails details) {
+    // 途中で2本指になったらピンチモードに切り替え
+    if (details.pointerCount >= 2 && !_isPinching) {
+      _isPinching = true;
+      _startImageScale = _imageScale;
+      _startImageOffset = _imageOffset;
+      _startFocalPoint = details.localFocalPoint;
+      _gestureStartRotation = _rotation;
+      _activeHandle = _DragHandle.none;
+    }
+
+    if (_isPinching) {
+      setState(() {
+        _imageScale = (_startImageScale * details.scale).clamp(0.5, 10.0);
+        _imageOffset = _startImageOffset +
+            (details.localFocalPoint - _startFocalPoint);
+        _rotation = _gestureStartRotation + details.rotation;
+        _constrainCropToImage();
+      });
+      return;
+    }
+
+    // シングルタッチ: クロップ枠操作
     if (_activeHandle == _DragHandle.none) return;
 
-    final dx = details.localPosition.dx - _dragStartPoint.dx;
-    final dy = details.localPosition.dy - _dragStartPoint.dy;
+    final dx = details.localFocalPoint.dx - _dragStartPoint.dx;
+    final dy = details.localFocalPoint.dy - _dragStartPoint.dy;
     final r = _startCropRect;
 
     setState(() {
       if (_activeHandle == _DragHandle.move) {
-        // 画像をパン
-        _imageOffset = _imageOffset + details.delta;
+        final delta = details.localFocalPoint - _startFocalPoint;
+        _imageOffset = _startImageOffset + delta;
+        _constrainCropToImage();
         return;
       }
 
@@ -347,6 +413,7 @@ class _CropScreenState extends State<CropScreen> {
       }
 
       _cropRect = Rect.fromLTRB(newLeft, newTop, newRight, newBottom);
+      _constrainCropToImage();
     });
   }
 
@@ -415,27 +482,13 @@ class _CropScreenState extends State<CropScreen> {
     newTop = newTop.clamp(0.0, _canvasSize.height - newH);
 
     _cropRect = Rect.fromLTWH(newLeft, newTop, newW, newH);
+    _constrainCropToImage();
   }
 
-  void _onCropDragEnd(DragEndDetails details) {
-    setState(() => _activeHandle = _DragHandle.none);
-  }
-
-  // -----------------------------------------------------------------------
-  // 画像ピンチズーム（枠外のジェスチャー）
-  // -----------------------------------------------------------------------
-
-  void _onImageScaleStart(ScaleStartDetails details) {
-    _startImageScale = _imageScale;
-    _startImageOffset = _imageOffset;
-    _startFocalPoint = details.localFocalPoint;
-  }
-
-  void _onImageScaleUpdate(ScaleUpdateDetails details) {
+  void _onGestureEnd(ScaleEndDetails details) {
     setState(() {
-      _imageScale = (_startImageScale * details.scale).clamp(0.5, 10.0);
-      _imageOffset = _startImageOffset +
-          (details.localFocalPoint - _startFocalPoint);
+      _activeHandle = _DragHandle.none;
+      _isPinching = false;
     });
   }
 
@@ -450,12 +503,36 @@ class _CropScreenState extends State<CropScreen> {
 
   void _onRulerDragUpdate(DragUpdateDetails details) {
     final dx = details.localPosition.dx - _rulerStartX;
-    // 感度: 画面幅全体で45度
-    final sensitivity = math.pi / 4 / _canvasSize.width;
+    // 感度: 画面幅全体で90度
+    final sensitivity = math.pi / 2 / _canvasSize.width;
     setState(() {
-      _rotation = (_rulerStartRotation + dx * sensitivity)
-          .clamp(-math.pi / 4, math.pi / 4);
-      _autoFitCropAfterRotation();
+      _rotation = _rulerStartRotation + dx * sensitivity;
+      _constrainCropToImage();
+    });
+  }
+
+  void _onRulerDragEnd(DragEndDetails details) {
+    final velocity = details.velocity.pixelsPerSecond.dx.abs();
+    final degrees = _rotation * 180 / math.pi;
+
+    double snappedDegrees;
+    if (velocity > 300) {
+      // 速いジェスチャー: 5度刻みにスナップ
+      snappedDegrees = (degrees / 5).round() * 5.0;
+    } else {
+      // ゆっくり: 1度刻みにスナップ
+      snappedDegrees = degrees.roundToDouble();
+    }
+
+    // 90度の倍数に近ければスナップ
+    final nearest90 = (snappedDegrees / 90).round() * 90.0;
+    if ((snappedDegrees - nearest90).abs() < 2.0) {
+      snappedDegrees = nearest90;
+    }
+
+    setState(() {
+      _rotation = snappedDegrees * math.pi / 180;
+      _constrainCropToImage();
     });
   }
 
@@ -465,12 +542,11 @@ class _CropScreenState extends State<CropScreen> {
 
   void _rotate90() {
     setState(() {
-      _rotation = 0;
-      // 90度回転はisolate側でやるのではなく、画像自体の向き概念を変える
-      // 簡易実装: 回転値を0にリセットして画像を再ロードする代わりに
-      // _permanentRotation を追加するか、ルーラー範囲外として扱う
-      // ここでは単純にルーラーをリセット
-      _autoFitCropAfterRotation();
+      // 現在の角度を最も近い90度の倍数に丸めてから+90度
+      final currentDeg = _rotation * 180 / math.pi;
+      final snapped = (currentDeg / 90).round() * 90 + 90;
+      _rotation = snapped * math.pi / 180;
+      _constrainCropToImage();
     });
   }
 
@@ -664,8 +740,10 @@ class _CropScreenState extends State<CropScreen> {
     }
 
     return GestureDetector(
-      onScaleStart: _onImageScaleStart,
-      onScaleUpdate: _onImageScaleUpdate,
+      behavior: HitTestBehavior.opaque,
+      onScaleStart: _onGestureStart,
+      onScaleUpdate: _onGestureUpdate,
+      onScaleEnd: _onGestureEnd,
       child: Stack(
         children: [
           // 変換された画像
@@ -689,11 +767,7 @@ class _CropScreenState extends State<CropScreen> {
           ),
           // 暗いオーバーレイ + 枠 + ハンドル
           Positioned.fill(
-            child: GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onPanStart: _onCropDragStart,
-              onPanUpdate: _onCropDragUpdate,
-              onPanEnd: _onCropDragEnd,
+            child: IgnorePointer(
               child: CustomPaint(
                 painter: _CropOverlayPainter(
                   cropRect: _cropRect,
@@ -711,14 +785,25 @@ class _CropScreenState extends State<CropScreen> {
   // 回転ルーラー
   // -----------------------------------------------------------------------
 
+  /// 表示用に度数を正規化 (-180 ~ 180)
+  double _normalizedDegrees() {
+    final deg = _rotation * 180 / math.pi;
+    final normalized = deg % 360;
+    if (normalized > 180) return normalized - 360;
+    if (normalized < -180) return normalized + 360;
+    return normalized;
+  }
+
   Widget _buildRotationRuler() {
-    final degrees = (_rotation * 180 / math.pi);
+    final degrees = _rotation * 180 / math.pi;
+    final displayDeg = _normalizedDegrees();
     return Container(
       height: 56,
       color: Colors.black,
       child: GestureDetector(
         onHorizontalDragStart: _onRulerDragStart,
         onHorizontalDragUpdate: _onRulerDragUpdate,
+        onHorizontalDragEnd: _onRulerDragEnd,
         child: CustomPaint(
           size: Size(_canvasSize.width, 56),
           painter: _RulerPainter(
@@ -727,7 +812,7 @@ class _CropScreenState extends State<CropScreen> {
           ),
           child: Center(
             child: Text(
-              '${degrees.toStringAsFixed(1)}°',
+              '${displayDeg.toStringAsFixed(1)}°',
               style: const TextStyle(
                 color: Colors.orange,
                 fontSize: 12,
@@ -864,17 +949,26 @@ class _RulerPainter extends CustomPainter {
       ..color = Colors.grey[400]!
       ..strokeWidth = 1.5;
 
+    final zeroTickPaint = Paint()
+      ..color = Colors.orange.withValues(alpha: 0.5)
+      ..strokeWidth = 2;
+
     // 1度ごとのtick、10ピクセルごと
     const pixPerDeg = 10.0;
-    final offsetPx = degrees * pixPerDeg;
 
-    for (double d = -45; d <= 45; d += 1) {
-      final x = center + (d * pixPerDeg) - offsetPx;
+    // 画面に表示される度数の範囲を計算
+    final halfRange = (size.width / 2 / pixPerDeg).ceil() + 1;
+    final degFloor = degrees.floor();
+
+    for (int i = -halfRange; i <= halfRange; i++) {
+      final d = degFloor + i;
+      final x = center + (d - degrees) * pixPerDeg;
       if (x < 0 || x > size.width) continue;
 
       final isMajor = d % 5 == 0;
-      final tickH = isMajor ? 16.0 : 8.0;
-      final paint = isMajor ? majorTickPaint : tickPaint;
+      final is90 = d % 90 == 0;
+      final tickH = is90 ? 20.0 : isMajor ? 16.0 : 8.0;
+      final paint = is90 ? zeroTickPaint : isMajor ? majorTickPaint : tickPaint;
 
       canvas.drawLine(
         Offset(x, size.height - tickH - 4),

@@ -27,10 +27,14 @@ final authStateProvider = StreamProvider<User?>((ref) {
   return controller.stream;
 });
 
-/// ログイン中かどうか
+/// ログイン中かどうか（匿名ユーザーは除外）
 final isLoggedInProvider = Provider<bool>((ref) {
-  final authState = ref.watch(authStateProvider);
-  return authState.valueOrNull != null;
+  final user = ref.watch(authStateProvider).valueOrNull;
+  if (user == null) return false;
+  // 匿名ユーザーはログインしていないとみなす
+  if (user.isAnonymous) return false;
+  if (user.email == null || user.email!.isEmpty) return false;
+  return true;
 });
 
 /// ユーザープロフィール
