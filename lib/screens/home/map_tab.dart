@@ -198,6 +198,7 @@ class _MapTabState extends ConsumerState<MapTab> {
       if (pos == null) continue;
 
       final hue = switch (item.log.mealType) {
+        MealType.unset => BitmapDescriptor.hueViolet,
         MealType.eatingOut => BitmapDescriptor.hueOrange,
         MealType.homeCooking => BitmapDescriptor.hueGreen,
         MealType.takeout => BitmapDescriptor.hueYellow,

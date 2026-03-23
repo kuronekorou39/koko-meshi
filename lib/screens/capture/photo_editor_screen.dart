@@ -354,15 +354,15 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
   // -----------------------------------------------------------------------
 
   Future<void> _crop() async {
-    final croppedPath = await Navigator.push<String>(
+    final result = await Navigator.push<CropResult>(
       context,
       MaterialPageRoute(
         builder: (_) => CropScreen(filePath: _currentPath),
       ),
     );
 
-    if (croppedPath != null && mounted) {
-      setState(() => _currentPath = croppedPath);
+    if (result != null && mounted) {
+      setState(() => _currentPath = result.croppedPath);
     }
   }
 

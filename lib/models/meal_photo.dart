@@ -16,6 +16,7 @@ class MealPhoto {
   final int? userCorrectedCalories;
   final String uploadStatus; // pending / uploaded
   final bool skipAi; // AI解析をスキップ（顔写真など）
+  final String? editParamsJson; // 切り抜き編集パラメータ（JSON）
   final DateTime shotAt;
   final double? latitude;
   final double? longitude;
@@ -39,6 +40,7 @@ class MealPhoto {
     this.userCorrectedCalories,
     this.uploadStatus = 'pending',
     this.skipAi = false,
+    this.editParamsJson,
     required this.shotAt,
     this.latitude,
     this.longitude,
@@ -73,6 +75,7 @@ class MealPhoto {
       'user_corrected_calories': userCorrectedCalories,
       'upload_status': uploadStatus,
       'skip_ai': skipAi ? 1 : 0,
+      'edit_params': editParamsJson,
       'shot_at': shotAt.toIso8601String(),
       'latitude': latitude,
       'longitude': longitude,
@@ -99,6 +102,7 @@ class MealPhoto {
       userCorrectedCalories: map['user_corrected_calories'] as int?,
       uploadStatus: map['upload_status'] as String? ?? 'pending',
       skipAi: (map['skip_ai'] as int?) == 1,
+      editParamsJson: map['edit_params'] as String?,
       shotAt: DateTime.parse(map['shot_at'] as String),
       latitude: map['latitude'] as double?,
       longitude: map['longitude'] as double?,
@@ -122,6 +126,8 @@ class MealPhoto {
     int? userCorrectedCalories,
     String? uploadStatus,
     bool? skipAi,
+    String? editParamsJson,
+    bool clearEditParams = false,
   }) {
     return MealPhoto(
       id: id,
@@ -141,6 +147,7 @@ class MealPhoto {
       userCorrectedCalories: userCorrectedCalories ?? this.userCorrectedCalories,
       uploadStatus: uploadStatus ?? this.uploadStatus,
       skipAi: skipAi ?? this.skipAi,
+      editParamsJson: clearEditParams ? null : (editParamsJson ?? this.editParamsJson),
       shotAt: shotAt,
       latitude: latitude,
       longitude: longitude,

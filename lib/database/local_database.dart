@@ -21,7 +21,7 @@ class LocalDatabase {
 
     return openDatabase(
       path,
-      version: 7,
+      version: 8,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -78,6 +78,7 @@ class LocalDatabase {
         user_corrected_calories INTEGER,
         upload_status TEXT NOT NULL DEFAULT 'pending',
         skip_ai INTEGER NOT NULL DEFAULT 0,
+        edit_params TEXT,
         shot_at TEXT NOT NULL,
         latitude REAL,
         longitude REAL,
@@ -109,6 +110,9 @@ class LocalDatabase {
     }
     if (oldVersion < 7) {
       await db.execute('ALTER TABLE meal_photos ADD COLUMN original_local_path TEXT');
+    }
+    if (oldVersion < 8) {
+      await db.execute('ALTER TABLE meal_photos ADD COLUMN edit_params TEXT');
     }
   }
 

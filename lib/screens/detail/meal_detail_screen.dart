@@ -15,6 +15,8 @@ import '../../services/ai_analysis_service.dart';
 import '../../services/ai_rate_limit_service.dart';
 import '../../services/photo_service.dart';
 import '../../widgets/cached_photo_image.dart';
+import 'dart:convert';
+import '../capture/crop_screen.dart';
 import '../capture/photo_editor_screen.dart';
 import 'photo_viewer_screen.dart';
 
@@ -454,115 +456,105 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
   }
 
   Future<void> _editPhoto(MealPhoto photo) async {
-    final filePath = _findEditableFile(photo);
-    if (filePath == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('写真ファイルが見つかりません')),
-        );
+    // 常にオリジナル画像を編集対象にする
+    final originalPath = photo.originalLocalPath ?? photo.localPath;
+    if (!File(originalPath).existsSync()) {
+      // フォールバック
+      final fallback = _findEditableFile(photo);
+      if (fallback == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('写真ファイルが見つかりません')),
+          );
+        }
+        return;
       }
-      return;
     }
 
-    // オリジナルが存在する場合、リセットオプション付きのダイアログを表示
+    final editSource = File(originalPath).existsSync() ? originalPath : photo.localPath;
+
+    // 保存済み編集パラメータを復元
+    CropEditParams? savedParams;
+    if (photo.editParamsJson != null) {
+      try {
+        savedParams = CropEditParams.fromJson(
+          jsonDecode(photo.editParamsJson!) as Map<String, dynamic>,
+        );
+      } catch (_) {}
+    }
+
+    // 編集メニュー
     final hasOriginal = photo.originalLocalPath != null &&
         File(photo.originalLocalPath!).existsSync() &&
         photo.originalLocalPath != photo.localPath;
 
-    if (hasOriginal) {
-      final action = await showModalBottomSheet<String>(
-        context: context,
-        builder: (_) => SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.tune),
-                title: const Text('写真を編集'),
-                onTap: () => Navigator.pop(context, 'edit'),
-              ),
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.crop),
+              title: const Text('切り抜き・回転'),
+              subtitle: savedParams != null ? const Text('前回の編集状態から再開') : null,
+              onTap: () => Navigator.pop(context, 'crop'),
+            ),
+            if (hasOriginal)
               ListTile(
                 leading: const Icon(Icons.restore),
                 title: const Text('オリジナルに戻す'),
                 subtitle: const Text('撮影時の元画像に復元します'),
                 onTap: () => Navigator.pop(context, 'reset'),
               ),
-            ],
+          ],
+        ),
+      ),
+    );
+
+    if (action == null || !mounted) return;
+
+    if (action == 'reset') {
+      await _resetToOriginal(photo);
+      return;
+    }
+
+    if (action == 'crop') {
+      // CropScreenを開く（オリジナル画像 + 保存済みパラメータ）
+      final result = await Navigator.push<CropResult>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CropScreen(
+            filePath: editSource,
+            initialParams: savedParams,
           ),
         ),
       );
 
-      if (action == null || !mounted) return;
+      if (result == null || !mounted) return;
 
-      if (action == 'reset') {
-        await _resetToOriginal(photo);
-        return;
-      }
-    }
-
-    final result = await Navigator.push<PhotoEditResult>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => PhotoEditorScreen(filePath: filePath),
-      ),
-    );
-
-    if (result == null || !result.hasEdits || !mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('写真を処理中...')),
-    );
-
-    final dir = await getTemporaryDirectory();
-    final outputPath = path.join(
-      dir.path,
-      'edit_${DateTime.now().millisecondsSinceEpoch}.jpg',
-    );
-
-    final sourcePath = result.croppedPath ?? filePath;
-
-    final hasFilters = result.brightness != 0 ||
-        result.contrast != 0 ||
-        result.saturation != 0 ||
-        result.warmth != 0 ||
-        result.vignette != 0;
-
-    String? finalPath;
-    if (hasFilters) {
-      finalPath = await compute(processEditedImage, ImageProcessParams(
-        inputPath: sourcePath,
-        outputPath: outputPath,
-        brightness: result.brightness,
-        contrast: result.contrast,
-        saturation: result.saturation,
-        warmth: result.warmth,
-        vignette: result.vignette,
-      ));
-    } else {
-      finalPath = sourcePath;
-    }
-
-    if (finalPath == null || !mounted) return;
-
-    final newLocalPath = await PhotoService.saveToLocalFromPath(finalPath);
-    final newThumbPath = await PhotoService.generateThumbnail(newLocalPath);
-
-    // originalLocalPathが未設定なら現在のlocalPathをオリジナルとして保存
-    final originalPath = photo.originalLocalPath ?? photo.localPath;
-
-    final updated = photo.copyWith(
-      localPath: newLocalPath,
-      originalLocalPath: originalPath,
-      thumbnailUrl: newThumbPath,
-    );
-    await LocalDatabase.updateMealPhoto(updated);
-    ref.invalidate(mealPhotosProvider(widget.mealLogId));
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('写真を更新しました')),
+        const SnackBar(content: Text('写真を処理中...')),
       );
+
+      final newLocalPath = await PhotoService.saveToLocalFromPath(result.croppedPath);
+      final newThumbPath = await PhotoService.generateThumbnail(newLocalPath);
+
+      final updated = photo.copyWith(
+        localPath: newLocalPath,
+        originalLocalPath: editSource,
+        thumbnailUrl: newThumbPath,
+        editParamsJson: jsonEncode(result.editParams.toJson()),
+      );
+      await LocalDatabase.updateMealPhoto(updated);
+      ref.invalidate(mealPhotosProvider(widget.mealLogId));
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('写真を更新しました')),
+        );
+      }
     }
   }
 
@@ -574,6 +566,7 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
     final updated = photo.copyWith(
       localPath: originalPath,
       thumbnailUrl: newThumbPath,
+      clearEditParams: true,
     );
     await LocalDatabase.updateMealPhoto(updated);
     ref.invalidate(mealPhotosProvider(widget.mealLogId));

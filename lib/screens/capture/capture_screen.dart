@@ -50,9 +50,10 @@ class _SelectedPhoto {
 
 class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   static const _uuid = Uuid();
-  MealType _selectedType = MealType.eatingOut;
+  MealType _selectedType = MealType.unset;
   final List<_SelectedPhoto> _selectedPhotos = [];
   bool _saving = false;
+  bool _aiEnabled = true; // AI解析ON/OFF
 
   // GPS・日時
   Position? _position;
@@ -195,20 +196,65 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
               _buildMetadataBar(dateFormat),
               const SizedBox(height: 12),
 
-              // 保存ボタン
-              FilledButton.icon(
-                onPressed: _selectedPhotos.isEmpty || _saving ? null : _save,
-                icon: _saving
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.check),
-                label: Text(_saving ? '保存中...' : '保存'),
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size.fromHeight(56),
-                ),
+              // 保存ボタン + AI解析トグル
+              Row(
+                children: [
+                  // AI解析ON/OFFトグル
+                  Material(
+                    color: _aiEnabled
+                        ? Theme.of(context).colorScheme.primaryContainer
+                        : Theme.of(context).colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(12),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () => setState(() => _aiEnabled = !_aiEnabled),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _aiEnabled ? Icons.auto_awesome : Icons.auto_awesome_outlined,
+                              size: 20,
+                              color: _aiEnabled
+                                  ? Theme.of(context).colorScheme.primary
+                                  : Colors.grey,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              'AI',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: _aiEnabled
+                                    ? Theme.of(context).colorScheme.primary
+                                    : Colors.grey,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  // 保存ボタン
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: _selectedPhotos.isEmpty || _saving ? null : _save,
+                      icon: _saving
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.check),
+                      label: Text(_saving ? '保存中...' : '保存'),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size.fromHeight(56),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -673,8 +719,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
           localPath: localPath,
           originalLocalPath: originalPath,
           thumbnailUrl: thumbnailPath,
-          skipAi: item.skipAi,
-          aiStatus: item.skipAi ? 'skipped' : 'pending',
+          skipAi: item.skipAi || !_aiEnabled,
+          aiStatus: (item.skipAi || !_aiEnabled) ? 'skipped' : 'pending',
           shotAt: photoShotAt,
           latitude: photoLat,
           longitude: photoLng,

@@ -9,13 +9,15 @@ import '../../models/meal_log.dart';
 import '../../models/meal_photo.dart';
 import '../../providers/meal_providers.dart';
 import '../../widgets/ai_usage_sheet.dart';
+import '../../services/photo_service.dart';
 import '../../widgets/meal_card.dart';
 import '../../widgets/meal_grid_tile.dart';
 
 enum ViewMode { list, grid, calendar }
 
 class TimelineTab extends ConsumerStatefulWidget {
-  const TimelineTab({super.key});
+  final VoidCallback? onLibraryPressed;
+  const TimelineTab({super.key, this.onLibraryPressed});
 
   @override
   ConsumerState<TimelineTab> createState() => _TimelineTabState();
@@ -36,6 +38,12 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
       appBar: AppBar(
         title: const Text('ココメシ'),
         actions: [
+          // ライブラリから追加
+          IconButton(
+            icon: const Icon(Icons.photo_library),
+            tooltip: 'ライブラリから追加',
+            onPressed: widget.onLibraryPressed ?? _defaultLibraryPressed,
+          ),
           // 表示モード切替
           IconButton(
             icon: Icon(_viewModeIcon),
@@ -81,6 +89,15 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
     ViewMode.grid => 'グリッド表示',
     ViewMode.calendar => 'カレンダー表示',
   };
+
+  Future<void> _defaultLibraryPressed() async {
+    final photos = await PhotoService.pickPhotos();
+    if (photos.isEmpty || !mounted) return;
+    context.push('/capture', extra: {
+      'photos': photos,
+      'fromLibrary': true,
+    });
+  }
 
   void _cycleViewMode() {
     setState(() {

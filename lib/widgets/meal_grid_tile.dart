@@ -94,6 +94,7 @@ class MealGridTile extends StatelessWidget {
 
   IconData _mealTypeIcon(MealType mealType) {
     return switch (mealType) {
+      MealType.unset => Icons.help_outline,
       MealType.eatingOut => Icons.store,
       MealType.homeCooking => Icons.home,
       MealType.takeout => Icons.shopping_bag,

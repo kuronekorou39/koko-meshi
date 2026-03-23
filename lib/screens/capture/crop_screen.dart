@@ -8,12 +8,76 @@ import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+// ---------------------------------------------------------------------------
+// 切り抜き編集パラメータ（正規化済み、JSON化可能）
+// ---------------------------------------------------------------------------
+
+class CropEditParams {
+  final double rotation; // ラジアン
+  final double imageScale; // ピンチズーム倍率
+  // オフセットはキャンバスサイズに対する比率で保持
+  final double offsetXRatio;
+  final double offsetYRatio;
+  // クロップ枠もキャンバスサイズに対する比率で保持
+  final double cropLeftRatio;
+  final double cropTopRatio;
+  final double cropWidthRatio;
+  final double cropHeightRatio;
+
+  const CropEditParams({
+    this.rotation = 0,
+    this.imageScale = 1.0,
+    this.offsetXRatio = 0,
+    this.offsetYRatio = 0,
+    this.cropLeftRatio = 0,
+    this.cropTopRatio = 0,
+    this.cropWidthRatio = 1.0,
+    this.cropHeightRatio = 1.0,
+  });
+
+  Map<String, dynamic> toJson() => {
+    'rotation': rotation,
+    'imageScale': imageScale,
+    'offsetXRatio': offsetXRatio,
+    'offsetYRatio': offsetYRatio,
+    'cropLeftRatio': cropLeftRatio,
+    'cropTopRatio': cropTopRatio,
+    'cropWidthRatio': cropWidthRatio,
+    'cropHeightRatio': cropHeightRatio,
+  };
+
+  factory CropEditParams.fromJson(Map<String, dynamic> json) => CropEditParams(
+    rotation: (json['rotation'] as num?)?.toDouble() ?? 0,
+    imageScale: (json['imageScale'] as num?)?.toDouble() ?? 1.0,
+    offsetXRatio: (json['offsetXRatio'] as num?)?.toDouble() ?? 0,
+    offsetYRatio: (json['offsetYRatio'] as num?)?.toDouble() ?? 0,
+    cropLeftRatio: (json['cropLeftRatio'] as num?)?.toDouble() ?? 0,
+    cropTopRatio: (json['cropTopRatio'] as num?)?.toDouble() ?? 0,
+    cropWidthRatio: (json['cropWidthRatio'] as num?)?.toDouble() ?? 1.0,
+    cropHeightRatio: (json['cropHeightRatio'] as num?)?.toDouble() ?? 1.0,
+  );
+
+  bool get hasEdits => rotation != 0 || imageScale != 1.0 ||
+      offsetXRatio != 0 || offsetYRatio != 0;
+}
+
+/// 切り取り結果（加工済みファイルパス + 編集パラメータ）
+class CropResult {
+  final String croppedPath;
+  final CropEditParams editParams;
+
+  const CropResult({required this.croppedPath, required this.editParams});
+}
+
+// ---------------------------------------------------------------------------
+
 /// 切り取り画面。
-/// [filePath] を受け取り、切り取り済み画像のパスを返す。
+/// [filePath] を受け取り、[CropResult] を返す。
 class CropScreen extends StatefulWidget {
   final String filePath;
+  final CropEditParams? initialParams; // 前回の編集パラメータ
 
-  const CropScreen({super.key, required this.filePath});
+  const CropScreen({super.key, required this.filePath, this.initialParams});
 
   @override
   State<CropScreen> createState() => _CropScreenState();
@@ -91,9 +155,16 @@ class _CropScreenState extends State<CropScreen> {
   // ハンドルのタッチ領域
   static const _handleTouchSize = 36.0;
 
+  bool _paramsRestored = false; // 初期パラメータ復元済みフラグ
+
   @override
   void initState() {
     super.initState();
+    // 初期パラメータがあれば回転とスケールを即座に設定
+    if (widget.initialParams != null) {
+      _rotation = widget.initialParams!.rotation;
+      _imageScale = widget.initialParams!.imageScale;
+    }
     _loadImage();
   }
 
@@ -142,6 +213,24 @@ class _CropScreenState extends State<CropScreen> {
 
   void _initCropRect() {
     if (_image == null || _canvasSize == Size.zero) return;
+
+    // 前回の編集パラメータがあれば復元
+    if (widget.initialParams != null && !_paramsRestored) {
+      final p = widget.initialParams!;
+      _imageOffset = Offset(
+        p.offsetXRatio * _canvasSize.width,
+        p.offsetYRatio * _canvasSize.height,
+      );
+      _cropRect = Rect.fromLTWH(
+        p.cropLeftRatio * _canvasSize.width,
+        p.cropTopRatio * _canvasSize.height,
+        p.cropWidthRatio * _canvasSize.width,
+        p.cropHeightRatio * _canvasSize.height,
+      );
+      _paramsRestored = true;
+      _cropInitialized = true;
+      return;
+    }
 
     const padding = 16.0;
     final maxW = _canvasSize.width - padding * 2;
@@ -638,11 +727,25 @@ class _CropScreenState extends State<CropScreen> {
         cropHeight: _cropRect.height,
       );
 
-      final result = await compute(_processCrop, params);
+      final resultPath = await compute(_processCrop, params);
 
       if (mounted) {
-        if (result != null) {
-          Navigator.pop(context, result);
+        if (resultPath != null) {
+          // 編集パラメータを正規化して保存
+          final editParams = CropEditParams(
+            rotation: _rotation,
+            imageScale: _imageScale,
+            offsetXRatio: _imageOffset.dx / _canvasSize.width,
+            offsetYRatio: _imageOffset.dy / _canvasSize.height,
+            cropLeftRatio: _cropRect.left / _canvasSize.width,
+            cropTopRatio: _cropRect.top / _canvasSize.height,
+            cropWidthRatio: _cropRect.width / _canvasSize.width,
+            cropHeightRatio: _cropRect.height / _canvasSize.height,
+          );
+          Navigator.pop(context, CropResult(
+            croppedPath: resultPath,
+            editParams: editParams,
+          ));
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('切り取りに失敗しました')),

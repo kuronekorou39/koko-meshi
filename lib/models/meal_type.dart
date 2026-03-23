@@ -1,5 +1,6 @@
 /// 食事種別
 enum MealType {
+  unset('unset', '未設定'),
   eatingOut('eating_out', '外食'),
   homeCooking('home_cooking', '自炊'),
   takeout('takeout', 'テイクアウト'),
