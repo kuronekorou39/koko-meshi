@@ -9,6 +9,7 @@ import '../../models/saved_place.dart';
 import '../../providers/auth_providers.dart';
 import '../../services/app_settings_service.dart';
 import '../../services/auth_service.dart';
+import '../../services/gemma_ondevice_service.dart';
 import '../../services/sync_service.dart';
 import '../poc/gemma_poc_screen.dart';
 
@@ -24,11 +25,55 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   bool _syncing = false;
   String _appVersion = '';
 
+  // AI解析モード
+  AiAnalysisMode _aiMode = AiAnalysisMode.cloud;
+  bool _e2bInstalled = false;
+  bool _dlBusy = false;
+  int _dlProgress = 0;
+
   @override
   void initState() {
     super.initState();
+    _aiMode = AppSettings.aiMode;
     _loadSavedPlaces();
     _loadVersion();
+    _checkE2b();
+  }
+
+  Future<void> _checkE2b() async {
+    try {
+      final ok = await GemmaOnDeviceService.instance.isInstalled(GemmaModelKind.e2b);
+      if (mounted) setState(() => _e2bInstalled = ok);
+    } catch (_) {}
+  }
+
+  Future<void> _setAiMode(AiAnalysisMode mode) async {
+    await AppSettings.setAiMode(mode);
+    if (mounted) setState(() => _aiMode = mode);
+  }
+
+  Future<void> _downloadModel() async {
+    setState(() {
+      _dlBusy = true;
+      _dlProgress = 0;
+    });
+    try {
+      await GemmaOnDeviceService.instance.install(
+        GemmaModelKind.e2b,
+        onProgress: (p) {
+          if (mounted) setState(() => _dlProgress = p);
+        },
+      );
+      if (mounted) setState(() => _e2bInstalled = true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('モデルのDLに失敗: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _dlBusy = false);
+    }
   }
 
   Future<void> _loadVersion() async {
@@ -165,6 +210,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             _buildLoggedOutSection(),
           const Divider(),
 
+          // AI解析モード
+          _buildAiSection(),
+          const Divider(),
+
           // 写真・ストレージ
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -259,6 +308,95 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             subtitle: Text('ココメシ v$_appVersion'),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildAiSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+          child: Text(
+            'AI解析',
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.grey[600]),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: SizedBox(
+            width: double.infinity,
+            child: SegmentedButton<AiAnalysisMode>(
+              segments: const [
+                ButtonSegment(value: AiAnalysisMode.onDevice, label: Text('端末内')),
+                ButtonSegment(value: AiAnalysisMode.cloud, label: Text('クラウド')),
+                ButtonSegment(value: AiAnalysisMode.off, label: Text('オフ')),
+              ],
+              selected: {_aiMode},
+              onSelectionChanged: (s) => _setAiMode(s.first),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+          child: Text(
+            _aiModeDescription(),
+            style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+          ),
+        ),
+        if (_aiMode == AiAnalysisMode.onDevice) _buildOnDeviceModelTile(),
+      ],
+    );
+  }
+
+  String _aiModeDescription() {
+    switch (_aiMode) {
+      case AiAnalysisMode.onDevice:
+        return _e2bInstalled
+            ? '端末内のGemma 4 E2Bで解析（オフライン・無料・写真は外部送信なし）。'
+            : 'オフラインで解析します。まずモデル（約2.4GB）のダウンロードが必要です。';
+      case AiAnalysisMode.cloud:
+        return 'オンラインでクラウド解析（レガシー）。回数制限あり。';
+      case AiAnalysisMode.off:
+        return 'AI解析を使わず、料理名・価格・カロリーは手動入力します。';
+    }
+  }
+
+  Widget _buildOnDeviceModelTile() {
+    if (_dlBusy) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            LinearProgressIndicator(value: _dlProgress / 100),
+            const SizedBox(height: 4),
+            Text('モデルDL中... $_dlProgress%', style: const TextStyle(fontSize: 12)),
+          ],
+        ),
+      );
+    }
+    if (!_e2bInstalled) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+        child: SizedBox(
+          width: double.infinity,
+          child: FilledButton.tonalIcon(
+            onPressed: _downloadModel,
+            icon: const Icon(Icons.download),
+            label: const Text('モデルをダウンロード（約2.4GB・Wi-Fi推奨）'),
+          ),
+        ),
+      );
+    }
+    return ListTile(
+      leading: const Icon(Icons.speed),
+      title: const Text('この端末で動作テスト'),
+      subtitle: const Text('E2Bがこの端末で快適に動くか確認'),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const GemmaPocScreen()),
       ),
     );
   }

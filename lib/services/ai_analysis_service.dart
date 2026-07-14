@@ -8,6 +8,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../database/local_database.dart';
 import '../models/meal_photo.dart';
 import 'ai_rate_limit_service.dart';
+import 'app_settings_service.dart';
+import 'gemma_ondevice_service.dart';
 
 class AiAnalysisResult {
   final String menuName;
@@ -40,15 +42,29 @@ class AiAnalysisService {
 
   /// pending状態の写真をすべて解析する
   static Future<void> processPendingPhotos() async {
-    // Supabase未初期化の場合は実行不可
+    final mode = AppSettings.aiMode;
+    if (mode == AiAnalysisMode.off) return; // AI解析オフ: 何もしない
+
+    var photos = await LocalDatabase.getPendingAiPhotos();
+    // failed・processing状態の写真もリトライ対象に含める
+    final failedPhotos = await LocalDatabase.getFailedAiPhotos();
+    final stuckPhotos = await LocalDatabase.getStuckAiPhotos();
+    photos = [...photos, ...failedPhotos, ...stuckPhotos];
+    if (photos.isEmpty) return;
+
+    // 端末内AI(オンデバイスGemma)
+    if (mode == AiAnalysisMode.onDevice) {
+      await _processOnDevice(photos);
+      return;
+    }
+
+    // クラウド(Edge Function) — レガシー
     try {
       Supabase.instance.client;
     } catch (_) {
       debugPrint('[AI] Supabase not initialized');
       return;
     }
-
-    // 未認証なら匿名認証を自動実行
     final auth = Supabase.instance.client.auth;
     if (auth.currentUser == null) {
       try {
@@ -60,18 +76,82 @@ class AiAnalysisService {
       }
     }
 
-    var photos = await LocalDatabase.getPendingAiPhotos();
-    // failed・processing状態の写真もリトライ対象に含める
-    final failedPhotos = await LocalDatabase.getFailedAiPhotos();
-    final stuckPhotos = await LocalDatabase.getStuckAiPhotos();
-    photos = [...photos, ...failedPhotos, ...stuckPhotos];
-    if (photos.isEmpty) return;
-
     debugPrint('[AI] Processing ${photos.length} pending photos via Edge Function');
-
     for (final photo in photos) {
       final shouldContinue = await _analyzePhoto(photo);
       if (!shouldContinue) break;
+    }
+  }
+
+  // ─── オンデバイス解析 (端末内 Gemma E2B) ───
+
+  /// 端末内E2Bでバッチ解析する。モデルを1回ロード→全件解析→解放(RAM節約)。
+  static Future<void> _processOnDevice(List<MealPhoto> photos) async {
+    final svc = GemmaOnDeviceService.instance;
+
+    bool installed;
+    try {
+      installed = await svc.isInstalled(GemmaModelKind.e2b);
+    } catch (e) {
+      debugPrint('[AI] on-device init failed: $e');
+      return;
+    }
+    if (!installed) {
+      // モデル未DL: pendingのまま残す(設定画面でDLを促す)
+      debugPrint('[AI] on-device model not installed; leaving photos pending');
+      return;
+    }
+
+    try {
+      await svc.load(GemmaModelKind.e2b);
+    } catch (e) {
+      debugPrint('[AI] on-device load failed: $e');
+      return; // ロード失敗(OOM等)。pendingのまま
+    }
+
+    debugPrint('[AI] Processing ${photos.length} photos on-device (E2B)');
+    try {
+      for (final photo in photos) {
+        await _analyzePhotoOnDevice(photo, svc);
+      }
+    } finally {
+      // バッチ後にモデルを解放して~3GBのRAMを空ける
+      await svc.disposeModel();
+    }
+  }
+
+  static Future<void> _analyzePhotoOnDevice(
+    MealPhoto photo,
+    GemmaOnDeviceService svc,
+  ) async {
+    await LocalDatabase.updateMealPhoto(photo.copyWith(aiStatus: 'processing'));
+    try {
+      final file = File(photo.localPath);
+      if (!await file.exists()) {
+        await LocalDatabase.updateMealPhoto(photo.copyWith(aiStatus: 'failed'));
+        return;
+      }
+      final bytes = await file.readAsBytes();
+      final res = await svc.analyze(bytes);
+      if (res.parsed == null) {
+        debugPrint('[AI] on-device parse failed for ${photo.id}');
+        await LocalDatabase.updateMealPhoto(photo.copyWith(aiStatus: 'failed'));
+        return;
+      }
+      final updated = photo.copyWith(
+        aiStatus: 'completed',
+        aiMenuName: res.menuName,
+        aiEstimatedPrice: res.price,
+        aiEstimatedCalories: res.calories,
+        aiCuisineGenre: res.genre,
+        aiModel: 'Gemma 4 E2B（端末内）',
+      );
+      await LocalDatabase.updateMealPhoto(updated);
+      debugPrint('[AI] on-device completed: ${res.menuName} '
+          '(${res.inferenceMs}ms)');
+    } catch (e) {
+      debugPrint('[AI] on-device analyze error for ${photo.id}: $e');
+      await LocalDatabase.updateMealPhoto(photo.copyWith(aiStatus: 'failed'));
     }
   }
 
