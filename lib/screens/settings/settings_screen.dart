@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:go_router/go_router.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../database/local_database.dart';
 import '../../models/saved_place.dart';
@@ -9,6 +10,7 @@ import '../../providers/auth_providers.dart';
 import '../../services/app_settings_service.dart';
 import '../../services/auth_service.dart';
 import '../../services/sync_service.dart';
+import '../poc/gemma_poc_screen.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -20,11 +22,18 @@ class SettingsScreen extends ConsumerStatefulWidget {
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   List<SavedPlace> _savedPlaces = [];
   bool _syncing = false;
+  String _appVersion = '';
 
   @override
   void initState() {
     super.initState();
     _loadSavedPlaces();
+    _loadVersion();
+  }
+
+  Future<void> _loadVersion() async {
+    final info = await PackageInfo.fromPlatform();
+    if (mounted) setState(() => _appVersion = info.version);
   }
 
   Future<void> _loadSavedPlaces() async {
@@ -224,11 +233,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             )),
           const Divider(),
 
+          // 開発者ツール（PoC）
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+            child: Text(
+              '開発者',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.grey[600]),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.science_outlined),
+            title: const Text('オンデバイスAI PoC (Gemma)'),
+            subtitle: const Text('端末内Gemmaで写真解析・推論速度を実測'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const GemmaPocScreen()),
+            ),
+          ),
+          const Divider(),
+
           // アプリ情報
-          const ListTile(
-            leading: Icon(Icons.info),
-            title: Text('アプリ情報'),
-            subtitle: Text('ココメシ v0.1.0'),
+          ListTile(
+            leading: const Icon(Icons.info),
+            title: const Text('アプリ情報'),
+            subtitle: Text('ココメシ v$_appVersion'),
           ),
         ],
       ),

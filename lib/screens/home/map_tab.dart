@@ -662,9 +662,10 @@ class _MapTabState extends ConsumerState<MapTab> {
                   onMapCreated: (controller) {
                     _mapController = controller;
                     _loadMealMarkers();
-                    // 初回表示時に現在地周辺を自動検索
-                    _searchNearbyRestaurants();
+                    // 費用対策: 自動検索は廃止。マップを開くたびに課金APIが飛ぶのを防ぐ。
+                    // 店舗検索は「このエリアで検索」ボタンの明示タップ時のみ実行する。
                   },
+
                   onCameraMove: (position) {
                     _currentCenter = position.target;
                     final tilted = position.tilt > 10;

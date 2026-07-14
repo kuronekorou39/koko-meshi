@@ -1,8 +1,18 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- flutter_gemma: 大容量モデルの実行時ダウンロード(フォアグラウンドサービス)用 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
-        android:label="ココメシ"
+        android:label="${appLabel}"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
@@ -35,6 +45,19 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <!-- flutter_gemma: GPU(OpenCL)バックエンド用のネイティブライブラリ宣言。
+             無いとWebGPUフォールバックし一部GPUでvisionエンコーダがフリーズする -->
+        <uses-native-library android:name="libOpenCL.so" android:required="false" />
+        <uses-native-library android:name="libOpenCL-car.so" android:required="false" />
+        <uses-native-library android:name="libOpenCL-pixel.so" android:required="false" />
+        <uses-native-library android:name="libvndksupport.so" android:required="false" />
+
+        <!-- flutter_gemma: 大容量モデルDL用フォアグラウンドサービス(API34+で必須) -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

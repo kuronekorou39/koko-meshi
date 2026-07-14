@@ -56,16 +56,28 @@ android {
 
     defaultConfig {
         applicationId = "com.kokomeshi.koko_meshi"
-        minSdk = flutter.minSdkVersion
+        // flutter_gemma (LiteRT-LM) は minSdk 24 以上が必要
+        minSdk = maxOf(24, flutter.minSdkVersion)
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 
         // .env から Google Maps APIキーを注入
         manifestPlaceholders["GOOGLE_MAPS_API_KEY"] = envMap["GOOGLE_MAPS_API_KEY"] ?: ""
+        manifestPlaceholders["appLabel"] = "ココメシ"
+
+        // flutter_gemma (LiteRT-LM/vision) は arm64-v8a のみ対応
+        ndk {
+            abiFilters.add("arm64-v8a")
+        }
     }
 
     buildTypes {
+        debug {
+            // PoC は別アプリとして並列インストール（既存のリリース版とデータを保護）
+            applicationIdSuffix = ".poc"
+            manifestPlaceholders["appLabel"] = "ココメシPoC"
+        }
         release {
             signingConfig = if (keyPropertiesFile.exists()) {
                 signingConfigs.getByName("release")

@@ -123,7 +123,12 @@ class PlacesService {
         headers: {
           'Content-Type': 'application/json',
           'X-Goog-Api-Key': apiKey,
-          'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.types,places.photos',
+          // 費用対策: rating/userRatingCount/photos を外し Nearby Search を
+          // Enterprise(無料1,000/月) → Pro(無料5,000/月・単価も安)ティアに落とす。
+          // photos除外で Place Photo課金($7/1,000)も消える。
+          // rating/写真はUI側でnull時プレースホルダ表示するため機能破綻なし。
+          'X-Goog-FieldMask':
+              'places.id,places.displayName,places.formattedAddress,places.location,places.types',
         },
         body: body,
       );
