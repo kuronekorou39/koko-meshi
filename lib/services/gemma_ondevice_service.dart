@@ -17,7 +17,12 @@ enum GemmaModelKind {
     url:
         'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm',
     approxSize: '約2.4GB',
-    maxTokens: 2048,
+    // visualTokenBudget 1120(画像だけで1120トークン)+プロンプト+出力が
+    // 収まるように確保。KVキャッシュ増は2B級では数十MBで8GB端末でも許容
+    maxTokens: 3072,
+    // 画像1枚の実効解像度を決める(280≈384px相当が既定。1120≈768px相当で
+    // 麺の質感など細部に有利。_maxImageSideの768px入力がほぼ1:1で活きる)
+    visualTokenBudget: 1120,
   ),
   e4b(
     label: 'Gemma 4 E4B',
@@ -26,8 +31,11 @@ enum GemmaModelKind {
     url:
         'https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm',
     approxSize: '約3.4GB',
-    // E4Bはメモリが厳しいのでコンテキスト窓(=KVキャッシュ)を絞る
-    maxTokens: 1024,
+    // E4Bはメモリが厳しいのでコンテキスト窓(=KVキャッシュ)を絞る。ただし
+    // 画像280+プロンプト+出力で~1200トークン使うため1024では溢れる
+    maxTokens: 1536,
+    // メモリ節約のため画像はネイティブ既定と同じ280に据え置く
+    visualTokenBudget: 280,
   );
 
   const GemmaModelKind({
@@ -37,6 +45,7 @@ enum GemmaModelKind {
     required this.url,
     required this.approxSize,
     required this.maxTokens,
+    required this.visualTokenBudget,
   });
 
   final String label;
@@ -45,13 +54,16 @@ enum GemmaModelKind {
   final String url;
   final String approxSize;
   final int maxTokens;
+  final int visualTokenBudget;
 }
 
 enum GemmaInstallSource { localFile, network }
 
 /// オンデバイス Gemma 4 (vision, LiteRT-LM) 実機PoC サービス。
 /// E2B / E4B の両方を個別にインストールでき、どちらをロードするか選べる。
-/// 現行 Edge Function (analyze-meal-photo) と同一プロンプトを使う。
+/// プロンプトは Edge Function (analyze-meal-photo) 版をベースに、小型モデル
+/// 向けの精度対策(ジャンル固定リスト・麺類の観察ヒント)と image_type 判定を
+/// 加えた独自版(クラウド版とは同期していない)。
 class GemmaOnDeviceService {
   GemmaOnDeviceService._();
   static final GemmaOnDeviceService instance = GemmaOnDeviceService._();
@@ -59,22 +71,39 @@ class GemmaOnDeviceService {
   /// AI用に画像を縮小する長辺(px)。プリフィル遅延の支配要因なので小さめに。
   static const _maxImageSide = 768;
 
+  /// cuisine_genreの選択肢。自由記述より固定リストからの選択のほうが
+  /// 小型モデルの細粒度分類に強い(MCQ化)。麺類は誤認しやすいので分割。
+  static const _genreList =
+      'ラーメン、うどん・そば、パスタ、ピザ、寿司、海鮮、和食、丼・定食、カレー、'
+      '中華、イタリアン、フレンチ、洋食、焼肉・ステーキ、韓国料理、エスニック、'
+      'ファストフード、パン・サンドイッチ、カフェ・スイーツ、居酒屋・鍋、'
+      '弁当・惣菜、その他';
+
   static const _prompt = '''この写真を分析して、以下の情報をJSON形式で返してください。
 
-必ず以下のJSON形式のみで回答してください（説明文は不要）:
+必ず以下のJSON形式のみで、すべて日本語で回答してください（説明文は不要）:
 {
+  "image_type": "food",
   "menu_name": "メニュー名（日本語）",
   "estimated_price": 数値（円、整数）,
   "estimated_calories": 数値（kcal、整数）,
-  "cuisine_genre": "料理ジャンル（例: ラーメン、寿司、カフェ、中華、イタリアン等）"
+  "cuisine_genre": "料理ジャンル"
 }
+
+image_typeは次の3つから1つ選んでください:
+- "food": 料理・食べ物・飲み物が写っている
+- "sensitive": 性的・アダルトな写真、裸や下着姿など露出の多い写真
+- "not_food": 上記以外（風景・人物・物など）
 
 注意:
 - menu_nameは具体的な料理名を推定してください（例: 「味噌ラーメン」「カルボナーラ」）
+- 麺料理は、麺の色と太さ・スープの有無・器の形・箸かフォークかを観察して、ラーメン/うどん/そば/パスタ/焼きそばを慎重に区別してください
 - 複数の料理が写っている場合はメインの料理名を記載してください
 - 価格は日本の一般的な相場から推定してください
 - カロリーは一般的な1人前の量から推定してください
-- 料理が写っていない場合も必ず同じJSON形式で回答してください。写っているものを短く描写してmenu_nameに入れ、priceとcaloriesは0、cuisine_genreは「写真」としてください（例: menu_name「夕焼けの海」）''';
+- cuisine_genreは次のリストから最も近いものを1つだけ選んでください: $_genreList
+- 撮影状況（食事種別・場所・時間帯）が与えられている場合は、判断の参考にしてください
+- image_typeが"food"でない場合も必ず同じJSON形式で回答してください。写っているものを短く描写してmenu_nameに入れ、estimated_priceとestimated_caloriesは0、cuisine_genreは「写真」としてください（例: menu_name「夕焼けの海」）''';
 
   bool _initialized = false;
   InferenceModel? _model;
@@ -116,6 +145,8 @@ class GemmaOnDeviceService {
     await _disposeModel();
     // アクティブモデルをこのkindに設定(インストール済みならDLはスキップされる)
     await _ensureInstalledAndActive(kind, null);
+    // vendorパッチ経由で画像の実効解像度を設定(メッセージ送信時に反映される)
+    litertLmVisualTokenBudget = kind.visualTokenBudget;
     final sw = Stopwatch()..start();
     _model = await FlutterGemma.getActiveModel(
       maxTokens: kind.maxTokens,
@@ -131,7 +162,12 @@ class GemmaOnDeviceService {
   }
 
   /// 画像1枚を解析。生テキスト・パース結果・推論msを返す。
-  Future<GemmaAnalysisResult> analyze(Uint8List originalBytes) async {
+  /// [context] に撮影状況(食事種別・場所・時間帯など)を渡すとプロンプトに
+  /// 前置される(クラウド経路のcontextInfoと同じ方式。精度に効く)。
+  Future<GemmaAnalysisResult> analyze(
+    Uint8List originalBytes, {
+    String? context,
+  }) async {
     if (_chat == null) {
       throw StateError('モデルが未ロードです');
     }
@@ -143,9 +179,12 @@ class GemmaOnDeviceService {
 
     final resized = await compute(_resizeJpeg, originalBytes);
 
+    final prompt = (context == null || context.isEmpty)
+        ? _prompt
+        : '$context\n\n$_prompt';
     final sw = Stopwatch()..start();
     await chat.addQueryChunk(Message.withImages(
-      text: _prompt,
+      text: prompt,
       imageBytes: [resized],
       isUser: true,
     ));
@@ -159,6 +198,20 @@ class GemmaOnDeviceService {
       parsed: _extractJson(text),
       inferenceMs: sw.elapsedMilliseconds,
     );
+  }
+
+  /// 直前のanalyze()と同じ会話にテキストのみの追い質問を送り、生テキストを返す。
+  /// 画像がチャット履歴に残っているため、モデルは写真の内容を踏まえて答える
+  /// (センシティブ画像のタイトル雰囲気変換に使用)。履歴は次のanalyze()で
+  /// クリアされるので、この呼び出しが後続の解析を汚すことはない。
+  Future<String> followUpText(String prompt) async {
+    final chat = _chat;
+    if (chat == null) {
+      throw StateError('モデルが未ロードです');
+    }
+    await chat.addQueryChunk(Message.text(text: prompt, isUser: true));
+    final ModelResponse resp = await chat.generateChatResponse();
+    return resp is TextResponse ? resp.token : resp.toString();
   }
 
   Future<void> _disposeModel() async {
@@ -314,4 +367,8 @@ class GemmaAnalysisResult {
   int? get price => (parsed?['estimated_price'] as num?)?.toInt();
   int? get calories => (parsed?['estimated_calories'] as num?)?.toInt();
   String? get genre => parsed?['cuisine_genre'] as String?;
+
+  /// 画像の種別判定: "food" / "sensitive" / "not_food"。
+  /// 旧プロンプトの結果やモデルがフィールドを省いた場合はnull。
+  String? get imageType => parsed?['image_type'] as String?;
 }

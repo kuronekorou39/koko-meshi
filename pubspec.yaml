@@ -1,7 +1,7 @@
 name: koko_meshi
 description: "撮るだけで食事を全自動記録する食事ログ＆グルメマップアプリ"
 publish_to: 'none'
-version: 0.2.1+3
+version: 0.3.0+4
 
 environment:
   sdk: ^3.11.0
@@ -70,6 +70,13 @@ dependencies:
   # オンデバイスAI PoC: Gemma 4 E2B (vision, LiteRT-LM)
   flutter_gemma: ^1.2.3
   flutter_gemma_litertlm: ^1.0.4
+
+# vendorパッチ版: visual token budget(画像の実効解像度)を設定可能にする
+# (pub.dev 1.0.4にはFFIバインディングだけあり公開APIが無い。詳細は
+#  packages/flutter_gemma_litertlm/lib/src/visual_token_budget.dart)
+dependency_overrides:
+  flutter_gemma_litertlm:
+    path: packages/flutter_gemma_litertlm
 
 dev_dependencies:
   flutter_test:

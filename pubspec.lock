@@ -457,10 +457,9 @@ packages:
   flutter_gemma_litertlm:
     dependency: "direct main"
     description:
-      name: flutter_gemma_litertlm
-      sha256: "846b54700a1dc9205fe45d33c4a47545d9917b0809d7cfac744ae3725696fb0f"
-      url: "https://pub.dev"
-    source: hosted
+      path: "packages/flutter_gemma_litertlm"
+      relative: true
+    source: path
     version: "1.0.4"
   flutter_lints:
     dependency: "direct dev"
