@@ -1,0 +1,90 @@
+# リリースAPKビルド: v* タグのpushで起動(手動起動も可)。
+# Secrets が設定されていれば本番署名+実 .env、無ければ debug署名+ダミー .env
+# でビルドだけ通す(その場合のAPKは署名が異なるため既存アプリに上書き不可)。
+#
+# 必要な Secrets (リポジトリ Settings > Secrets and variables > Actions):
+#   DOTENV_BASE64      : .env を base64 したもの (Maps/Supabase キー)
+#   KEYSTORE_BASE64    : android/app/kokomeshi-release.keystore を base64 したもの
+#   KEYSTORE_PASSWORD  : keystore のパスワード
+#   KEY_ALIAS          : キーのエイリアス (kokomeshi)
+#   KEY_PASSWORD       : キーのパスワード
+name: Release APK
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write # GitHub Release 作成に必要
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: .env を復元 (Secret が無ければダミー)
+        env:
+          DOTENV_BASE64: ${{ secrets.DOTENV_BASE64 }}
+        run: |
+          if [ -n "$DOTENV_BASE64" ]; then
+            echo "$DOTENV_BASE64" | base64 -d > .env
+            echo ".env restored from secret"
+          else
+            echo "# CI dummy (DOTENV_BASE64 secret 未設定)" > .env
+            echo "WARNING: dummy .env — Maps/Supabase はこのAPKでは動きません"
+          fi
+
+      - name: 署名キーを復元 (Secret があれば本番署名)
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > android/app/kokomeshi-release.keystore
+            {
+              echo "storeFile=kokomeshi-release.keystore"
+              echo "storePassword=$KEYSTORE_PASSWORD"
+              echo "keyAlias=${KEY_ALIAS:-kokomeshi}"
+              echo "keyPassword=$KEY_PASSWORD"
+            } > android/key.properties
+            echo "release keystore restored"
+          else
+            echo "WARNING: KEYSTORE_BASE64 未設定 — debug署名でビルドします"
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.44.6 # ローカル開発環境と揃える (Dart 3.12)
+          cache: true
+
+      - run: flutter pub get
+
+      - run: flutter build apk --release
+
+      - name: 成果物をアプリ名+バージョンにリネーム
+        run: |
+          NAME="kokomeshi-${GITHUB_REF_NAME//\//-}.apk"
+          cp build/app/outputs/flutter-apk/app-release.apk "$NAME"
+          echo "APK_NAME=$NAME" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APK_NAME }}
+          path: ${{ env.APK_NAME }}
+
+      - name: GitHub Release を作成してAPKを添付
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.APK_NAME }}
+          generate_release_notes: true
