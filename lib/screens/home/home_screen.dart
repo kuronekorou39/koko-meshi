@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -15,11 +14,11 @@ import '../../services/ai_analysis_service.dart';
 import '../../services/ai_rate_limit_service.dart';
 import '../../services/auth_service.dart';
 import 'package:geolocator/geolocator.dart';
-import '../../services/location_service.dart';
 import '../../services/photo_service.dart';
 import '../../services/sync_service.dart';
 import '../../widgets/ai_limit_dialog.dart';
 import '../../app.dart';
+import '../capture/camera_screen.dart';
 import 'timeline_tab.dart';
 import 'map_tab.dart';
 
@@ -76,16 +75,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     });
   }
 
-  /// カメラ直接起動 → 確認ダイアログ → 保存
+  /// カメラ直接起動 → カメラ画面内で確認 → 保存
   Future<void> _onCameraPressed() async {
-    final photo = await PhotoService.takePhoto();
-    if (photo == null || !mounted) return;
-
-    // 確認ダイアログでAI解析ON/OFF選択
-    final result = await _showSaveConfirmDialog(photo);
+    final result = await Navigator.push<CameraCaptureResult>(
+      context,
+      MaterialPageRoute(builder: (_) => const CameraScreen()),
+    );
     if (result == null || !mounted) return;
 
-    await _quickSavePhoto(photo, aiEnabled: result);
+    await _quickSavePhoto(
+      result.photo,
+      aiEnabled: result.aiEnabled,
+      position: result.position,
+      address: result.address,
+      locationTag: result.locationTag,
+    );
   }
 
   /// ライブラリから選択 → CaptureScreen へ
@@ -95,96 +99,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     await _handleLibraryPhotos(photos);
   }
 
-  /// 撮影後確認ダイアログ: プレビュー + AIトグル
-  /// 戻り値: AI解析ON→true, OFF→false, キャンセル→null
-  Future<bool?> _showSaveConfirmDialog(XFile photo) async {
-    bool aiEnabled = true;
-    return showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => Dialog(
-          insetPadding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // プレビュー画像
-              ClipRRect(
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-                child: AspectRatio(
-                  aspectRatio: 3 / 4,
-                  child: Image.file(
-                    File(photo.path),
-                    fit: BoxFit.cover,
-                  ),
-                ),
-              ),
-              // 下部: AIトグル + ボタン
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-                child: Row(
-                  children: [
-                    // AIトグル
-                    GestureDetector(
-                      onTap: () => setDialogState(() => aiEnabled = !aiEnabled),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: aiEnabled
-                              ? Theme.of(context).colorScheme.primaryContainer
-                              : Theme.of(context).colorScheme.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              aiEnabled ? Icons.auto_awesome : Icons.auto_awesome_outlined,
-                              size: 18,
-                              color: aiEnabled
-                                  ? Theme.of(context).colorScheme.primary
-                                  : Colors.grey,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              aiEnabled ? 'AI解析ON' : 'AI解析OFF',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                                color: aiEnabled
-                                    ? Theme.of(context).colorScheme.primary
-                                    : Colors.grey,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const Spacer(),
-                    // キャンセル
-                    TextButton(
-                      onPressed: () => Navigator.pop(context, null),
-                      child: const Text('やめる'),
-                    ),
-                    const SizedBox(width: 8),
-                    // 保存
-                    FilledButton.icon(
-                      onPressed: () => Navigator.pop(context, aiEnabled),
-                      icon: const Icon(Icons.check, size: 20),
-                      label: const Text('保存'),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   /// カメラ撮影 → 即保存（マージ判定あり）
-  Future<void> _quickSavePhoto(XFile xfile, {bool aiEnabled = true}) async {
+  Future<void> _quickSavePhoto(
+    XFile xfile, {
+    bool aiEnabled = true,
+    Position? position,
+    String? address,
+    String? locationTag,
+  }) async {
     final mealLogs = ref.read(mealLogsProvider).valueOrNull ?? [];
     final recentMeal = mealLogs.isNotEmpty ? mealLogs.first : null;
 
@@ -202,25 +124,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       }
     }
 
-    // 新規記録として即保存
+    // 新規記録として即保存（GPS・場所はカメラ画面から受け取り済み）
     final mealLogId = _uuid.v4();
-    final pos = await LocationService.getCurrentPosition();
-    double? lat = pos?.latitude;
-    double? lng = pos?.longitude;
-    String? locationTag;
-
-    if (lat != null && lng != null) {
-      final savedPlaces = await LocalDatabase.getSavedPlaces();
-      for (final place in savedPlaces) {
-        final distance = Geolocator.distanceBetween(
-          lat, lng, place.latitude, place.longitude,
-        );
-        if (distance <= 100) {
-          locationTag = place.iconType == 'home' ? 'home' : place.id;
-          break;
-        }
-      }
-    }
+    final double? lat = position?.latitude;
+    final double? lng = position?.longitude;
 
     final mealLog = MealLog(
       id: mealLogId,

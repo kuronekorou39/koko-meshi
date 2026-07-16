@@ -76,8 +76,9 @@ class CropResult {
 class CropScreen extends StatefulWidget {
   final String filePath;
   final CropEditParams? initialParams; // 前回の編集パラメータ
+  final bool hasOriginal; // オリジナルに戻すボタンを表示するか
 
-  const CropScreen({super.key, required this.filePath, this.initialParams});
+  const CropScreen({super.key, required this.filePath, this.initialParams, this.hasOriginal = false});
 
   @override
   State<CropScreen> createState() => _CropScreenState();
@@ -169,14 +170,36 @@ class _CropScreenState extends State<CropScreen> {
   }
 
   Future<void> _loadImage() async {
-    final bytes = await File(widget.filePath).readAsBytes();
-    final codec = await ui.instantiateImageCodec(bytes);
-    final frame = await codec.getNextFrame();
-    if (mounted) {
-      setState(() {
-        _image = frame.image;
-        _loading = false;
-      });
+    try {
+      final file = File(widget.filePath);
+      if (!file.existsSync()) {
+        if (mounted) {
+          setState(() => _loading = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('ファイルが見つかりません: ${widget.filePath}')),
+          );
+        }
+        return;
+      }
+      final bytes = await file.readAsBytes();
+      // 大きすぎる画像はリサイズしてデコード
+      final codec = bytes.length > 10 * 1024 * 1024
+          ? await ui.instantiateImageCodec(bytes, targetWidth: 2048)
+          : await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      if (mounted) {
+        setState(() {
+          _image = frame.image;
+          _loading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _loading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('画像の読み込みに失敗: $e')),
+        );
+      }
     }
   }
 
@@ -190,6 +213,9 @@ class _CropScreenState extends State<CropScreen> {
   // 画像フィットスケール（回転考慮）
   // -----------------------------------------------------------------------
 
+  // 画像の余白（四方）
+  static const _imagePadding = 40.0;
+
   double _baseFitScale() {
     if (_image == null || _canvasSize == Size.zero) return 1.0;
     final imgW = _image!.width.toDouble();
@@ -201,9 +227,13 @@ class _CropScreenState extends State<CropScreen> {
     final rotW = imgW * abscos + imgH * abssin;
     final rotH = imgW * abssin + imgH * abscos;
 
+    // 余白を差し引いた領域にフィット
+    final availW = _canvasSize.width - _imagePadding * 2;
+    final availH = _canvasSize.height - _imagePadding * 2;
+
     return math.min(
-      _canvasSize.width / rotW,
-      _canvasSize.height / rotH,
+      availW / rotW,
+      availH / rotH,
     );
   }
 
@@ -232,25 +262,25 @@ class _CropScreenState extends State<CropScreen> {
       return;
     }
 
-    const padding = 16.0;
-    final maxW = _canvasSize.width - padding * 2;
-    final maxH = _canvasSize.height - padding * 2;
+    // 画像の表示サイズ = 切り抜き枠の初期サイズ（画像にぴったり）
+    final fitScale = _baseFitScale();
+    final imgDispW = _image!.width * fitScale;
+    final imgDispH = _image!.height * fitScale;
 
     double w, h;
     if (_aspectPreset.ratio != null) {
       final ratio = _aspectPreset.ratio!;
-      if (maxW / maxH > ratio) {
-        h = maxH;
+      if (imgDispW / imgDispH > ratio) {
+        h = imgDispH;
         w = h * ratio;
       } else {
-        w = maxW;
+        w = imgDispW;
         h = w / ratio;
       }
     } else {
-      // フリー: 画像に合わせる
-      final fitScale = _baseFitScale();
-      w = (_image!.width * fitScale).clamp(0.0, maxW);
-      h = (_image!.height * fitScale).clamp(0.0, maxH);
+      // フリー: 画像にぴったり合わせる
+      w = imgDispW;
+      h = imgDispH;
     }
 
     final left = (_canvasSize.width - w) / 2;
@@ -652,6 +682,30 @@ class _CropScreenState extends State<CropScreen> {
     });
   }
 
+  /// オリジナルに戻す（特別な戻り値 'restore' を返す）
+  Future<void> _confirmRestoreOriginal() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('オリジナルに戻す'),
+        content: const Text('撮影時の元画像に復元しますか？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('復元'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) {
+      Navigator.pop(context, const CropResult(croppedPath: '_restore_original_', editParams: CropEditParams()));
+    }
+  }
+
   // -----------------------------------------------------------------------
   // アスペクト比変更
   // -----------------------------------------------------------------------
@@ -768,12 +822,18 @@ class _CropScreenState extends State<CropScreen> {
       appBar: AppBar(
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
-        title: const Text('切り取り'),
+        title: const Text('編集'),
         leading: IconButton(
           icon: const Icon(Icons.close),
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
+          if (widget.hasOriginal)
+            IconButton(
+              icon: const Icon(Icons.restore),
+              tooltip: 'オリジナルに戻す',
+              onPressed: _confirmRestoreOriginal,
+            ),
           IconButton(
             icon: const Icon(Icons.rotate_right),
             tooltip: '90度回転',
