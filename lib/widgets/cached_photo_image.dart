@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../services/photo_cache_service.dart';
+import '../theme/app_theme.dart';
 
 /// 写真表示ウィジェット（ローカル→サムネ→クラウドの順でフォールバック）
 class CachedPhotoImage extends StatefulWidget {
@@ -67,10 +68,13 @@ class _CachedPhotoImageState extends State<CachedPhotoImage> {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = KokoTokens.of(context);
+
     if (_loading) {
-      return SizedBox(
+      return Container(
         width: widget.width,
         height: widget.height,
+        color: tokens.photoPlaceholder,
         child: const Center(
           child: SizedBox(
             width: 20, height: 20,
@@ -84,9 +88,9 @@ class _CachedPhotoImageState extends State<CachedPhotoImage> {
       return Container(
         width: widget.width,
         height: widget.height,
-        color: Colors.grey[300],
-        child: const Center(
-          child: Icon(Icons.broken_image, color: Colors.grey),
+        color: tokens.photoPlaceholder,
+        child: Center(
+          child: Icon(Icons.broken_image_outlined, color: tokens.textFaint),
         ),
       );
     }

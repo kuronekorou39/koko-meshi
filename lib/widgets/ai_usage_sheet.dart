@@ -3,14 +3,12 @@ import 'package:intl/intl.dart';
 
 import '../database/local_database.dart';
 import '../services/ai_rate_limit_service.dart';
+import '../theme/app_theme.dart';
 
 /// AI使用状況ボトムシートを表示
 void showAiUsageSheet(BuildContext context) {
   showModalBottomSheet(
     context: context,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-    ),
     builder: (_) => const _AiUsageSheetContent(),
   );
 }
@@ -109,28 +107,14 @@ class _AiUsageSheetContentState extends State<_AiUsageSheetContent> {
         status.hourly.exceeded || status.daily.exceeded || status.monthly.exceeded;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+      padding: const EdgeInsets.fromLTRB(24, 4, 24, 32),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ドラッグハンドル
-          Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              margin: const EdgeInsets.only(bottom: 16),
-              decoration: BoxDecoration(
-                color: Colors.grey[300],
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-          ),
           Text(
             'AI解析の使用状況',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
+            style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: 16),
           _buildUsageRow('1時間', status.hourly, _hourlyReset),
@@ -156,11 +140,13 @@ class _AiUsageSheetContentState extends State<_AiUsageSheetContent> {
   }
 
   Widget _buildUsageRow(String label, AiRateLimit limit, DateTime? resetAt) {
+    final scheme = Theme.of(context).colorScheme;
+    final tokens = KokoTokens.of(context);
     final color = limit.exceeded
-        ? Colors.red
+        ? scheme.error
         : limit.ratio > 0.8
-            ? Colors.orange
-            : Theme.of(context).colorScheme.primary;
+            ? tokens.warning
+            : scheme.primary;
 
     final resetText = _formatResetTime(resetAt, limit);
 
@@ -178,7 +164,7 @@ class _AiUsageSheetContentState extends State<_AiUsageSheetContent> {
                 borderRadius: BorderRadius.circular(4),
                 child: LinearProgressIndicator(
                   value: limit.ratio.clamp(0.0, 1.0),
-                  backgroundColor: Colors.grey[200],
+                  backgroundColor: scheme.surfaceContainerHighest,
                   color: color,
                   minHeight: 8,
                 ),
@@ -187,22 +173,21 @@ class _AiUsageSheetContentState extends State<_AiUsageSheetContent> {
             const SizedBox(width: 8),
             Text(
               '${limit.used}/${limit.limit}',
-              style: TextStyle(
+              style: tokens.numeral.copyWith(
                 fontSize: 12,
-                fontWeight: FontWeight.bold,
-                color: limit.exceeded ? Colors.red : Colors.grey[600],
+                color: limit.exceeded ? scheme.error : tokens.textMuted,
               ),
             ),
           ],
         ),
         if (resetText.isNotEmpty)
           Padding(
-            padding: const EdgeInsets.only(left: 50, top: 2),
+            padding: const EdgeInsets.only(left: 50, top: 4),
             child: Text(
               resetText,
               style: TextStyle(
                 fontSize: 11,
-                color: limit.exceeded ? Colors.red[400] : Colors.grey[500],
+                color: limit.exceeded ? scheme.error : tokens.textFaint,
               ),
             ),
           ),

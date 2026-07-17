@@ -8,6 +8,7 @@ import '../../database/local_database.dart';
 import '../../models/meal_log.dart';
 import '../../models/meal_photo.dart';
 import '../../providers/meal_providers.dart';
+import '../../theme/app_theme.dart';
 import '../../widgets/ai_usage_sheet.dart';
 import '../../services/photo_service.dart';
 import '../../widgets/meal_card.dart';
@@ -36,11 +37,17 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('ココメシ'),
+        title: Text(
+          'ココメシ',
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.2,
+              ),
+        ),
         actions: [
           // ライブラリから追加
           IconButton(
-            icon: const Icon(Icons.photo_library),
+            icon: const Icon(Icons.photo_library_outlined),
             tooltip: 'ライブラリから追加',
             onPressed: widget.onLibraryPressed ?? _defaultLibraryPressed,
           ),
@@ -52,12 +59,12 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
           ),
           // AI使用状況
           IconButton(
-            icon: const Icon(Icons.auto_awesome),
+            icon: const Icon(Icons.auto_awesome_outlined),
             onPressed: () => showAiUsageSheet(context),
             tooltip: 'AI使用状況',
           ),
           IconButton(
-            icon: const Icon(Icons.settings),
+            icon: const Icon(Icons.settings_outlined),
             onPressed: () => context.push('/settings'),
           ),
         ],
@@ -79,9 +86,9 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
   }
 
   IconData get _viewModeIcon => switch (_viewMode) {
-    ViewMode.list => Icons.view_list,
-    ViewMode.grid => Icons.grid_view,
-    ViewMode.calendar => Icons.calendar_month,
+    ViewMode.list => Icons.view_list_outlined,
+    ViewMode.grid => Icons.grid_view_outlined,
+    ViewMode.calendar => Icons.calendar_month_outlined,
   };
 
   String get _viewModeLabel => switch (_viewMode) {
@@ -105,21 +112,48 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
     });
   }
 
-  // ─── リスト表示（従来） ───
+  // ─── リスト表示（日付でグルーピング） ───
 
   Widget _buildListView(List<MealLog> mealLogs) {
+    // 日付見出し(DateTime)と記録(MealLog)を順に並べたフラットなリストを作る
+    final items = <Object>[];
+    DateTime? lastDay;
+    for (final log in mealLogs) {
+      final day =
+          DateTime(log.eatenAt.year, log.eatenAt.month, log.eatenAt.day);
+      if (lastDay == null || day != lastDay) {
+        items.add(day);
+        lastDay = day;
+      }
+      items.add(log);
+    }
+
     return RefreshIndicator(
       onRefresh: () => ref.read(mealLogsProvider.notifier).refresh(),
       child: ListView.builder(
-        padding: const EdgeInsets.only(top: 8, bottom: 100),
-        itemCount: mealLogs.length,
+        padding: const EdgeInsets.only(bottom: 100),
+        itemCount: items.length,
         itemBuilder: (context, index) {
+          final item = items[index];
+          if (item is DateTime) return _buildDateHeader(item);
+          final log = item as MealLog;
           return _MealLogItem(
-            key: ValueKey(mealLogs[index].id),
-            mealLog: mealLogs[index],
-            onTap: () => context.push('/meal/${mealLogs[index].id}'),
+            key: ValueKey(log.id),
+            mealLog: log,
+            onTap: () => context.push('/meal/${log.id}'),
           );
         },
+      ),
+    );
+  }
+
+  /// 「7月17日 木曜日」形式のセクション見出し
+  Widget _buildDateHeader(DateTime day) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+      child: Text(
+        DateFormat('M月d日 EEEE', 'ja').format(day),
+        style: KokoTokens.of(context).sectionLabel,
       ),
     );
   }
@@ -130,10 +164,13 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
     return RefreshIndicator(
       onRefresh: () => ref.read(mealLogsProvider.notifier).refresh(),
       child: GridView.builder(
-        padding: const EdgeInsets.all(8),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 2,
-          childAspectRatio: 0.85,
+          crossAxisSpacing: 12,
+          mainAxisSpacing: 12,
+          // 写真 + テキスト2行(メニュー名/日時)が収まる縦横比
+          childAspectRatio: 0.78,
         ),
         itemCount: mealLogs.length,
         itemBuilder: (context, index) {
@@ -182,7 +219,27 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
           onPageChanged: (focused) {
             _focusedDay = focused;
           },
+          // table_calendarの既定文字色はテーマ非連動(ライトで白文字等)なので
+          // 明示的にトークンから指定する
           calendarStyle: CalendarStyle(
+            defaultTextStyle:
+                TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurface),
+            weekendTextStyle:
+                TextStyle(fontSize: 14, color: Theme.of(context).colorScheme.onSurface),
+            outsideTextStyle: TextStyle(
+                fontSize: 14, color: KokoTokens.of(context).textFaint),
+            disabledTextStyle: TextStyle(
+                fontSize: 14, color: KokoTokens.of(context).textFaint),
+            todayTextStyle: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+            selectedTextStyle: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: Theme.of(context).colorScheme.onPrimary,
+            ),
             markerDecoration: BoxDecoration(
               color: Theme.of(context).colorScheme.primary,
               shape: BoxShape.circle,
@@ -198,9 +255,30 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
               shape: BoxShape.circle,
             ),
           ),
-          headerStyle: const HeaderStyle(
+          daysOfWeekStyle: DaysOfWeekStyle(
+            weekdayStyle: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: KokoTokens.of(context).textMuted,
+            ),
+            weekendStyle: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: KokoTokens.of(context).textMuted,
+            ),
+          ),
+          headerStyle: HeaderStyle(
             formatButtonVisible: false,
             titleCentered: true,
+            titleTextStyle: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
+            leftChevronIcon: Icon(Icons.chevron_left,
+                color: KokoTokens.of(context).textMuted),
+            rightChevronIcon: Icon(Icons.chevron_right,
+                color: KokoTokens.of(context).textMuted),
           ),
           calendarFormat: CalendarFormat.month,
           availableCalendarFormats: const {CalendarFormat.month: '月'},
@@ -214,7 +292,7 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
                     _selectedDay != null
                         ? '${DateFormat('M月d日', 'ja').format(_selectedDay!)}の記録はありません'
                         : '日付をタップして記録を表示',
-                    style: TextStyle(color: Colors.grey[500]),
+                    style: TextStyle(color: KokoTokens.of(context).textFaint),
                   ),
                 )
               : ListView.builder(
@@ -234,23 +312,30 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
   }
 
   Widget _buildEmptyState() {
-    return const Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.restaurant_menu, size: 64, color: Colors.grey),
-          SizedBox(height: 16),
-          Text(
-            'まだ記録がありません',
-            style: TextStyle(fontSize: 18, color: Colors.grey),
-          ),
-          SizedBox(height: 8),
-          Text(
-            'カメラボタンを押して\n最初の食事を記録しましょう',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.grey),
-          ),
-        ],
+    final theme = Theme.of(context);
+    final tokens = KokoTokens.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.restaurant_outlined, size: 56, color: tokens.textFaint),
+            const SizedBox(height: 24),
+            Text(
+              'まだ記録がありません',
+              style: theme.textTheme.titleMedium
+                  ?.copyWith(color: tokens.textMuted),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '下の撮影ボタンから、最初の食事を記録できます。',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: tokens.textFaint, height: 1.6),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -283,10 +368,13 @@ class _MealLogItemState extends State<_MealLogItem> {
 
   @override
   Widget build(BuildContext context) {
-    return MealCard(
-      mealLog: widget.mealLog,
-      photos: _photos ?? [],
-      onTap: widget.onTap,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      child: MealCard(
+        mealLog: widget.mealLog,
+        photos: _photos ?? [],
+        onTap: widget.onTap,
+      ),
     );
   }
 }

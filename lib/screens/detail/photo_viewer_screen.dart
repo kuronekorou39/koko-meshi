@@ -21,6 +21,9 @@ class PhotoViewerScreen extends StatefulWidget {
 }
 
 class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
+  /// 写真上に重ねるUIの下地（黒地の画面専用）
+  static const _overlayColor = Colors.black54;
+
   late PageController _pageController;
   late int _currentIndex;
   bool _showUI = true;
@@ -96,6 +99,11 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
     );
   }
 
+  ButtonStyle get _overlayButtonStyle => IconButton.styleFrom(
+        backgroundColor: _overlayColor,
+        foregroundColor: Colors.white,
+      );
+
   @override
   Widget build(BuildContext context) {
     final photo = widget.photos[_currentIndex];
@@ -106,17 +114,51 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
       extendBodyBehindAppBar: true,
       appBar: _showUI
           ? AppBar(
-              backgroundColor: Colors.black54,
+              backgroundColor: Colors.transparent,
               foregroundColor: Colors.white,
+              centerTitle: true,
+              leading: Center(
+                child: IconButton(
+                  style: _overlayButtonStyle,
+                  icon: const Icon(Icons.close, size: 20),
+                  tooltip: '閉じる',
+                  onPressed: () => Navigator.of(context).maybePop(),
+                ),
+              ),
+              // ページインジケータ
               title: hasMultiple
-                  ? Text('${_currentIndex + 1} / ${widget.photos.length}')
+                  ? Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: _overlayColor,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        '${_currentIndex + 1} / ${widget.photos.length}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    )
                   : null,
               actions: [
                 if (_downloading)
-                  const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: SizedBox(
-                      width: 24, height: 24,
+                  Container(
+                    width: 40,
+                    height: 40,
+                    alignment: Alignment.center,
+                    margin: const EdgeInsets.only(right: 8),
+                    decoration: const BoxDecoration(
+                      color: _overlayColor,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const SizedBox(
+                      width: 18,
+                      height: 18,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
                         color: Colors.white,
@@ -124,10 +166,14 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
                     ),
                   )
                 else
-                  IconButton(
-                    icon: const Icon(Icons.download),
-                    tooltip: 'カメラロールに保存',
-                    onPressed: _downloadPhoto,
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: IconButton(
+                      style: _overlayButtonStyle,
+                      icon: const Icon(Icons.download_outlined, size: 20),
+                      tooltip: 'カメラロールに保存',
+                      onPressed: _downloadPhoto,
+                    ),
                   ),
               ],
             )
@@ -143,17 +189,29 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
           },
         ),
       ),
+      // 下部バー: メニュー名
       bottomNavigationBar: _showUI && photo.displayName != null
-          ? Container(
-              color: Colors.black54,
-              padding: EdgeInsets.fromLTRB(
-                16, 12, 16, MediaQuery.of(context).padding.bottom + 12,
-              ),
-              child: Text(
-                photo.displayName!,
-                style: const TextStyle(color: Colors.white, fontSize: 15),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+          ? SafeArea(
+              top: false,
+              child: Container(
+                margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: _overlayColor,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  photo.displayName!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             )
           : null,
@@ -204,8 +262,25 @@ class _PhotoPageState extends State<_PhotoPage> {
     }
 
     if (_path == null || !File(_path!).existsSync()) {
-      return const Center(
-        child: Icon(Icons.broken_image, color: Colors.grey, size: 64),
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.broken_image_outlined,
+              color: Colors.white.withValues(alpha: 0.4),
+              size: 48,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '写真を読み込めません',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.6),
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
       );
     }
 

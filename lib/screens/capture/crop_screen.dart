@@ -8,6 +8,26 @@ import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../../theme/app_theme.dart';
+
+// ---------------------------------------------------------------------------
+// 写真編集系画面（黒背景固定）の共通配色。
+// 編集画面はテーマのライト/ダークに関わらず純黒下地とするため、
+// colorScheme ではなくここで統一する。アクセントは黒地で成立する漆（夜）色。
+// ---------------------------------------------------------------------------
+
+class EditorColors {
+  EditorColors._();
+
+  static const Color background = Colors.black;
+  static const Color accent = Color(0xFFDE8A62); // 漆（夜）
+  static const Color text = Colors.white;
+  static const Color textMuted = Colors.white70;
+  static const Color textFaint = Colors.white38;
+  static const Color outline = Colors.white24;
+  static const Color hairline = Colors.white12;
+}
+
 // ---------------------------------------------------------------------------
 // 切り抜き編集パラメータ（正規化済み、JSON化可能）
 // ---------------------------------------------------------------------------
@@ -818,10 +838,18 @@ class _CropScreenState extends State<CropScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: EditorColors.background,
       appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
+        backgroundColor: EditorColors.background,
+        foregroundColor: EditorColors.text,
+        iconTheme: const IconThemeData(color: EditorColors.text),
+        actionsIconTheme: const IconThemeData(color: EditorColors.text),
+        titleTextStyle: const TextStyle(
+          fontSize: 17,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.2,
+          color: EditorColors.text,
+        ),
         title: const Text('編集'),
         leading: IconButton(
           icon: const Icon(Icons.close),
@@ -830,12 +858,12 @@ class _CropScreenState extends State<CropScreen> {
         actions: [
           if (widget.hasOriginal)
             IconButton(
-              icon: const Icon(Icons.restore),
+              icon: const Icon(Icons.restore_outlined),
               tooltip: 'オリジナルに戻す',
               onPressed: _confirmRestoreOriginal,
             ),
           IconButton(
-            icon: const Icon(Icons.rotate_right),
+            icon: const Icon(Icons.rotate_90_degrees_cw_outlined),
             tooltip: '90度回転',
             onPressed: _rotate90,
           ),
@@ -850,7 +878,7 @@ class _CropScreenState extends State<CropScreen> {
                   child: SizedBox(
                     width: 24, height: 24,
                     child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white,
+                      strokeWidth: 2, color: EditorColors.text,
                     ),
                   ),
                 )
@@ -868,7 +896,8 @@ class _CropScreenState extends State<CropScreen> {
             Expanded(
               child: _loading
                   ? const Center(
-                      child: CircularProgressIndicator(color: Colors.white),
+                      child:
+                          CircularProgressIndicator(color: EditorColors.text),
                     )
                   : LayoutBuilder(
                       builder: (context, constraints) {
@@ -962,7 +991,7 @@ class _CropScreenState extends State<CropScreen> {
     final displayDeg = _normalizedDegrees();
     return Container(
       height: 56,
-      color: Colors.black,
+      color: EditorColors.background,
       child: GestureDetector(
         onHorizontalDragStart: _onRulerDragStart,
         onHorizontalDragUpdate: _onRulerDragUpdate,
@@ -976,11 +1005,10 @@ class _CropScreenState extends State<CropScreen> {
           child: Center(
             child: Text(
               '${displayDeg.toStringAsFixed(1)}°',
-              style: const TextStyle(
-                color: Colors.orange,
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-              ),
+              style: KokoTokens.of(context).numeral.copyWith(
+                    fontSize: 12,
+                    color: EditorColors.accent,
+                  ),
             ),
           ),
         ),
@@ -995,7 +1023,7 @@ class _CropScreenState extends State<CropScreen> {
   Widget _buildPresetBar() {
     return Container(
       height: 52,
-      color: Colors.black,
+      color: EditorColors.background,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: _AspectPreset.values.map((preset) {
@@ -1005,15 +1033,24 @@ class _CropScreenState extends State<CropScreen> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: isSelected ? Colors.orange : Colors.transparent,
-                borderRadius: BorderRadius.circular(16),
+                color: isSelected
+                    ? EditorColors.accent.withValues(alpha: 0.16)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color:
+                      isSelected ? EditorColors.accent : Colors.transparent,
+                  width: 1,
+                ),
               ),
               child: Text(
                 preset.label,
                 style: TextStyle(
-                  color: isSelected ? Colors.white : Colors.grey[400],
+                  color: isSelected
+                      ? EditorColors.accent
+                      : EditorColors.textMuted,
                   fontSize: 13,
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
                 ),
               ),
             ),
@@ -1045,14 +1082,14 @@ class _CropOverlayPainter extends CustomPainter {
 
     // 枠線
     final borderPaint = Paint()
-      ..color = Colors.white
+      ..color = EditorColors.text
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.5;
     canvas.drawRect(cropRect, borderPaint);
 
     // 3x3 グリッド
     final gridPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.3)
+      ..color = EditorColors.text.withValues(alpha: 0.3)
       ..strokeWidth = 0.5;
     for (int i = 1; i < 3; i++) {
       final x = cropRect.left + cropRect.width * i / 3;
@@ -1065,7 +1102,7 @@ class _CropOverlayPainter extends CustomPainter {
     const handleLen = 20.0;
     const handleWidth = 3.0;
     final handlePaint = Paint()
-      ..color = Colors.white
+      ..color = EditorColors.text
       ..strokeWidth = handleWidth
       ..strokeCap = StrokeCap.round;
 
@@ -1105,15 +1142,15 @@ class _RulerPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final center = size.width / 2;
     final tickPaint = Paint()
-      ..color = Colors.grey[600]!
+      ..color = EditorColors.textFaint
       ..strokeWidth = 1;
 
     final majorTickPaint = Paint()
-      ..color = Colors.grey[400]!
+      ..color = EditorColors.textMuted
       ..strokeWidth = 1.5;
 
     final zeroTickPaint = Paint()
-      ..color = Colors.orange.withValues(alpha: 0.5)
+      ..color = EditorColors.accent.withValues(alpha: 0.5)
       ..strokeWidth = 2;
 
     // 1度ごとのtick、10ピクセルごと
@@ -1142,7 +1179,7 @@ class _RulerPainter extends CustomPainter {
 
     // 中央インジケーター
     final indicatorPaint = Paint()
-      ..color = Colors.orange
+      ..color = EditorColors.accent
       ..strokeWidth = 2;
     canvas.drawLine(
       Offset(center, 4),

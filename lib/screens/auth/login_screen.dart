@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../services/auth_service.dart';
+import '../../theme/app_theme.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -120,32 +121,30 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final tokens = KokoTokens.of(context);
+
     return Scaffold(
       appBar: AppBar(
         title: Text(_isLogin ? 'ログイン' : 'アカウント作成'),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
           child: Form(
             key: _formKey,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // アイコン
-                Icon(
-                  Icons.restaurant_menu,
-                  size: 64,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-                const SizedBox(height: 8),
+                // ロゴタイプ
                 Text(
                   'ココメシ',
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: Theme.of(context).colorScheme.primary,
+                    fontSize: 32,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.5,
+                    color: scheme.onSurface,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -154,7 +153,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       ? 'ログインしてクラウドに同期'
                       : 'アカウントを作成して始めましょう',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey[600]),
+                  style: TextStyle(fontSize: 13, color: tokens.textMuted),
                 ),
                 const SizedBox(height: 32),
 
@@ -164,18 +163,25 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     padding: const EdgeInsets.all(12),
                     margin: const EdgeInsets.only(bottom: 16),
                     decoration: BoxDecoration(
-                      color: Colors.red.shade50,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.red.shade200),
+                      color: scheme.errorContainer,
+                      borderRadius: BorderRadius.circular(12),
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.error_outline, color: Colors.red[700], size: 20),
+                        Icon(
+                          Icons.error_outline,
+                          color: scheme.onErrorContainer,
+                          size: 20,
+                        ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             _error!,
-                            style: TextStyle(color: Colors.red[700], fontSize: 13),
+                            style: TextStyle(
+                              color: scheme.onErrorContainer,
+                              fontSize: 13,
+                              height: 1.4,
+                            ),
                           ),
                         ),
                       ],
@@ -190,7 +196,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       labelText: '表示名',
                       hintText: '例: たろう',
                       prefixIcon: Icon(Icons.person_outline),
-                      border: OutlineInputBorder(),
                     ),
                     textInputAction: TextInputAction.next,
                   ),
@@ -204,7 +209,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     labelText: 'メールアドレス',
                     hintText: 'example@mail.com',
                     prefixIcon: Icon(Icons.email_outlined),
-                    border: OutlineInputBorder(),
                   ),
                   keyboardType: TextInputType.emailAddress,
                   textInputAction: TextInputAction.next,
@@ -227,12 +231,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     labelText: 'パスワード',
                     hintText: '6文字以上',
                     prefixIcon: const Icon(Icons.lock_outlined),
-                    border: const OutlineInputBorder(),
                     suffixIcon: IconButton(
                       icon: Icon(
                         _obscurePassword
-                            ? Icons.visibility_off
-                            : Icons.visibility,
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
                       ),
                       onPressed: () {
                         setState(() => _obscurePassword = !_obscurePassword);
@@ -257,19 +260,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 // 送信ボタン
                 FilledButton(
                   onPressed: _loading ? null : _submit,
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(52),
-                  ),
                   child: _loading
                       ? const SizedBox(
                           width: 20,
                           height: 20,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : Text(
-                          _isLogin ? 'ログイン' : 'アカウント作成',
-                          style: const TextStyle(fontSize: 16),
-                        ),
+                      : Text(_isLogin ? 'ログイン' : 'アカウント作成'),
                 ),
                 const SizedBox(height: 20),
 
@@ -279,7 +276,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     const Expanded(child: Divider()),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Text('または', style: TextStyle(color: Colors.grey[500], fontSize: 13)),
+                      child: Text(
+                        'または',
+                        style: TextStyle(fontSize: 12, color: tokens.textFaint),
+                      ),
                     ),
                     const Expanded(child: Divider()),
                   ],
@@ -289,20 +289,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 // Googleログイン
                 OutlinedButton.icon(
                   onPressed: _loading ? null : _signInWithGoogle,
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(52),
-                    side: BorderSide(color: Colors.grey[300]!),
-                  ),
                   icon: Image.asset(
                     'assets/google_logo.png',
                     width: 20,
                     height: 20,
-                    errorBuilder: (_, _, _) => const Icon(Icons.g_mobiledata, size: 24),
+                    errorBuilder: (_, _, _) =>
+                        const Icon(Icons.g_mobiledata, size: 24),
                   ),
-                  label: const Text(
-                    'Googleアカウントで続ける',
-                    style: TextStyle(fontSize: 15),
-                  ),
+                  label: const Text('Googleアカウントで続ける'),
                 ),
                 const SizedBox(height: 16),
 

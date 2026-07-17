@@ -47,15 +47,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         onDestinationSelected: _onDestinationSelected,
         destinations: const [
           NavigationDestination(
-            icon: Icon(Icons.restaurant),
+            icon: Icon(Icons.receipt_long_outlined),
+            selectedIcon: Icon(Icons.receipt_long),
             label: '記録',
           ),
           NavigationDestination(
-            icon: Icon(Icons.camera_alt),
+            icon: _CameraDestinationIcon(),
             label: '撮影',
           ),
           NavigationDestination(
-            icon: Icon(Icons.map),
+            icon: Icon(Icons.map_outlined),
+            selectedIcon: Icon(Icons.map),
             label: 'マップ',
           ),
         ],
@@ -308,5 +310,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     if (AuthService.isLoggedIn) {
       SyncService.syncAll();
     }
+  }
+}
+
+/// 中央「撮影」用の主ボタン: 漆色(primary)の円形地に白のカメラアイコン
+class _CameraDestinationIcon extends StatelessWidget {
+  const _CameraDestinationIcon();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: 38,
+      height: 38,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: scheme.primary,
+        shape: BoxShape.circle,
+      ),
+      child: Icon(Icons.photo_camera, size: 20, color: scheme.onPrimary),
+    );
   }
 }

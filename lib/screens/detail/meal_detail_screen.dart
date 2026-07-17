@@ -1,25 +1,24 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
-import 'package:flutter/foundation.dart';
-import 'package:go_router/go_router.dart';
-import 'package:path/path.dart' as path;
-import 'package:path_provider/path_provider.dart';
-
 import '../../database/local_database.dart';
-import '../../providers/meal_providers.dart';
+import '../../models/meal_log.dart';
 import '../../models/meal_photo.dart';
+import '../../providers/meal_providers.dart';
 import '../../services/ai_analysis_service.dart';
-import '../../services/app_settings_service.dart';
 import '../../services/ai_rate_limit_service.dart';
+import '../../services/app_settings_service.dart';
 import '../../services/photo_service.dart';
+import '../../theme/app_theme.dart';
+import '../../theme/meal_type_style.dart';
 import '../../widgets/cached_photo_image.dart';
-import 'dart:convert';
 import '../capture/crop_screen.dart';
-import '../capture/photo_editor_screen.dart';
 import 'photo_viewer_screen.dart';
 
 class MealDetailScreen extends ConsumerStatefulWidget {
@@ -67,27 +66,38 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
       }
     });
 
+    final tokens = KokoTokens.of(context);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('食事の詳細'),
         actions: [
           IconButton(
             icon: const Icon(Icons.delete_outline),
+            tooltip: '記録を削除',
             onPressed: () => _confirmDelete(context),
           ),
         ],
       ),
       body: mealLogAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('エラー: $e')),
+        error: (e, _) => Center(
+          child: Text('エラー: $e', style: TextStyle(color: tokens.textMuted)),
+        ),
         data: (mealLog) {
           if (mealLog == null) {
-            return const Center(child: Text('記録が見つかりません'));
+            return Center(
+              child: Text(
+                '記録が見つかりません',
+                style: TextStyle(color: tokens.textMuted),
+              ),
+            );
           }
 
           final dateFormat = DateFormat('yyyy年M月d日 (E) HH:mm', 'ja');
 
           return SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -98,39 +108,24 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
                   ),
                   error: (e, _) => SizedBox(
                     height: 300,
-                    child: Center(child: Text('写真の読み込みに失敗: $e')),
+                    child: Center(
+                      child: Text(
+                        '写真の読み込みに失敗: $e',
+                        style: TextStyle(color: tokens.textMuted),
+                      ),
+                    ),
                   ),
                   data: (photos) => _buildPhotoSection(photos),
                 ),
-
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Chip(label: Text(mealLog.mealType.label)),
-                          if (mealLog.locationTag == 'home')
-                            Padding(
-                              padding: const EdgeInsets.only(left: 8),
-                              child: Chip(
-                                avatar: const Icon(Icons.home, size: 16),
-                                label: const Text('自宅'),
-                              ),
-                            ),
-                          const Spacer(),
-                          Text(
-                            dateFormat.format(mealLog.eatenAt),
-                            style: TextStyle(
-                              color: Colors.grey[600],
-                              fontSize: 14,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
+                const SizedBox(height: 16),
+                _buildMetaRow(mealLog, dateFormat),
+                const SizedBox(height: 16),
+                photosAsync.when(
+                  loading: () => const SizedBox.shrink(),
+                  error: (_, _) => const SizedBox.shrink(),
+                  data: (photos) => photos.isEmpty
+                      ? const SizedBox.shrink()
+                      : _buildPhotoAiResult(photos[_selectedPhotoIndex]),
                 ),
               ],
             ),
@@ -140,12 +135,78 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
     );
   }
 
-  /// 写真セクション: 選択写真 + サムネ一覧 + AI結果
+  /// メタ情報: 食事種別チップ・自宅タグ・日時
+  Widget _buildMetaRow(MealLog mealLog, DateFormat dateFormat) {
+    final tokens = KokoTokens.of(context);
+    final scheme = Theme.of(context).colorScheme;
+
+    return Row(
+      children: [
+        MealTypeChip(mealType: mealLog.mealType, compact: false),
+        if (mealLog.locationTag == 'home') ...[
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHigh,
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.home_outlined, size: 16, color: tokens.textMuted),
+                const SizedBox(width: 6),
+                Text(
+                  '自宅',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: tokens.textMuted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            dateFormat.format(mealLog.eatenAt),
+            textAlign: TextAlign.end,
+            style: tokens.numeral.copyWith(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w500,
+              color: tokens.textMuted,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 写真セクション: 選択写真 + サムネ一覧
   Widget _buildPhotoSection(List<MealPhoto> photos) {
+    final tokens = KokoTokens.of(context);
+
     if (photos.isEmpty) {
-      return const SizedBox(
+      return Container(
         height: 200,
-        child: Center(child: Text('写真がありません')),
+        width: double.infinity,
+        decoration: BoxDecoration(
+          color: tokens.photoPlaceholder,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.image_outlined, size: 32, color: tokens.textFaint),
+            const SizedBox(height: 8),
+            Text(
+              '写真がありません',
+              style: TextStyle(fontSize: 13, color: tokens.textMuted),
+            ),
+          ],
+        ),
       );
     }
 
@@ -154,72 +215,80 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
     return Column(
       children: [
         // 選択中の写真を大きく表示
-        Stack(
-          children: [
-            GestureDetector(
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => PhotoViewerScreen(
-                    photos: photos,
-                    initialIndex: _selectedPhotoIndex,
+        ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Stack(
+            children: [
+              GestureDetector(
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PhotoViewerScreen(
+                      photos: photos,
+                      initialIndex: _selectedPhotoIndex,
+                    ),
                   ),
                 ),
-              ),
-              child: CachedPhotoImage(
-                localPath: selectedPhoto.localPath,
-                thumbnailPath: selectedPhoto.thumbnailUrl,
-                originalUrl: selectedPhoto.originalUrl,
-                height: 300,
-                width: double.infinity,
-                fullQuality: true,
-              ),
-            ),
-            // 編集ボタン
-            Positioned(
-              right: 8,
-              bottom: 8,
-              child: Material(
-                color: Colors.black54,
-                borderRadius: BorderRadius.circular(20),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(20),
-                  onTap: () => _editPhoto(selectedPhoto),
-                  child: const Padding(
-                    padding: EdgeInsets.all(8),
-                    child: Icon(Icons.tune, color: Colors.white, size: 20),
-                  ),
+                child: CachedPhotoImage(
+                  localPath: selectedPhoto.localPath,
+                  thumbnailPath: selectedPhoto.thumbnailUrl,
+                  originalUrl: selectedPhoto.originalUrl,
+                  height: 300,
+                  width: double.infinity,
+                  fullQuality: true,
                 ),
               ),
-            ),
-            // 枚数表示
-            if (photos.length > 1)
+              // 編集ボタン
               Positioned(
-                left: 8,
-                bottom: 8,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    '${_selectedPhotoIndex + 1} / ${photos.length}',
-                    style: const TextStyle(color: Colors.white, fontSize: 12),
+                right: 12,
+                bottom: 12,
+                child: Material(
+                  color: Colors.black.withValues(alpha: 0.55),
+                  borderRadius: BorderRadius.circular(999),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(999),
+                    onTap: () => _editPhoto(selectedPhoto),
+                    child: const Padding(
+                      padding: EdgeInsets.all(10),
+                      child: Icon(Icons.tune, color: Colors.white, size: 18),
+                    ),
                   ),
                 ),
               ),
-          ],
+              // 枚数表示
+              if (photos.length > 1)
+                Positioned(
+                  left: 12,
+                  bottom: 12,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.55),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '${_selectedPhotoIndex + 1} / ${photos.length}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        fontFeatures: [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
 
         // サムネイル一覧（2枚以上の場合）
-        if (photos.length > 1)
-          Container(
-            height: 72,
-            padding: const EdgeInsets.symmetric(vertical: 8),
+        if (photos.length > 1) ...[
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 56,
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
               itemCount: photos.length,
               itemBuilder: (context, index) {
                 final photo = photos[index];
@@ -228,14 +297,15 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
                   onTap: () => setState(() => _selectedPhotoIndex = index),
                   child: Container(
                     width: 56,
-                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                    margin: EdgeInsets.only(
+                        right: index == photos.length - 1 ? 0 : 8),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
                         color: isSelected
                             ? Theme.of(context).colorScheme.primary
-                            : Colors.transparent,
-                        width: 2,
+                            : tokens.hairline,
+                        width: isSelected ? 2 : 1,
                       ),
                     ),
                     child: ClipRRect(
@@ -253,12 +323,7 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
               },
             ),
           ),
-
-        // 選択中の写真のAI解析結果
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: _buildPhotoAiResult(selectedPhoto),
-        ),
+        ],
       ],
     );
   }
@@ -275,178 +340,228 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
         return _buildCompletedResult(photo);
       case 'pending':
       case 'processing':
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Row(
-            children: [
-              const SizedBox(
-                width: 14,
-                height: 14,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'AI解析中...',
-                style: TextStyle(color: Colors.grey[500], fontSize: 14),
-              ),
-            ],
+        return _buildStatusCard(
+          leading: const SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(strokeWidth: 2),
           ),
+          message: 'AI解析中です',
         );
       case 'failed':
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Row(
-            children: [
-              Icon(Icons.error_outline, size: 16, color: Colors.red[300]),
-              const SizedBox(width: 6),
-              Text(
-                '解析に失敗',
-                style: TextStyle(color: Colors.red[300], fontSize: 14),
+        {
+          final scheme = Theme.of(context).colorScheme;
+          return _buildStatusCard(
+            leading: Icon(Icons.error_outline, size: 18, color: scheme.error),
+            message: '解析に失敗しました',
+            messageColor: scheme.error,
+            action: TextButton.icon(
+              onPressed: () => _retryForPhoto(photo),
+              icon: const Icon(Icons.refresh, size: 16),
+              label: const Text('再解析'),
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
               ),
-              const Spacer(),
-              TextButton.icon(
-                onPressed: () => _retryForPhoto(photo),
-                icon: const Icon(Icons.refresh, size: 16),
-                label: const Text('再解析'),
-                style: TextButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                ),
-              ),
-            ],
-          ),
-        );
-      case 'skipped':
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Row(
-            children: [
-              Icon(Icons.visibility_off, size: 16, color: Colors.grey[400]),
-              const SizedBox(width: 6),
-              Text(
-                'AI解析スキップ',
-                style: TextStyle(color: Colors.grey[500], fontSize: 14),
-              ),
-              const Spacer(),
-              TextButton.icon(
-                onPressed: () => _retryForPhoto(photo),
-                icon: const Icon(Icons.auto_awesome, size: 16),
-                label: const Text('解析する'),
-                style: TextButton.styleFrom(
-                  visualDensity: VisualDensity.compact,
-                ),
-              ),
-            ],
-          ),
-        );
-      default:
-        // skipAiがtrueでstatusがcompletedでない場合
-        if (photo.skipAi) {
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Row(
-              children: [
-                Icon(Icons.visibility_off, size: 16, color: Colors.grey[400]),
-                const SizedBox(width: 6),
-                Text(
-                  'AI解析スキップ',
-                  style: TextStyle(color: Colors.grey[500], fontSize: 14),
-                ),
-                const Spacer(),
-                TextButton.icon(
-                  onPressed: () => _retryForPhoto(photo),
-                  icon: const Icon(Icons.auto_awesome, size: 16),
-                  label: const Text('解析する'),
-                  style: TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ),
-              ],
             ),
           );
         }
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Text(
-            'AI解析未実行',
-            style: TextStyle(color: Colors.grey[500], fontSize: 14),
+      case 'skipped':
+        return _buildSkippedCard(photo);
+      default:
+        // skipAiがtrueでstatusがcompletedでない場合
+        if (photo.skipAi) {
+          return _buildSkippedCard(photo);
+        }
+        return _buildStatusCard(
+          leading: Icon(
+            Icons.smart_toy_outlined,
+            size: 18,
+            color: KokoTokens.of(context).textFaint,
           ),
+          message: 'AI解析は未実行です',
         );
     }
   }
 
+  /// AI解析スキップ時の表示
+  Widget _buildSkippedCard(MealPhoto photo) {
+    return _buildStatusCard(
+      leading: Icon(
+        Icons.visibility_off_outlined,
+        size: 18,
+        color: KokoTokens.of(context).textFaint,
+      ),
+      message: 'AI解析をスキップしました',
+      action: TextButton.icon(
+        onPressed: () => _retryForPhoto(photo),
+        icon: const Icon(Icons.auto_awesome_outlined, size: 16),
+        label: const Text('解析する'),
+        style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+      ),
+    );
+  }
+
   /// AI解析オフ時の表示（設定画面へのリンク付き）
   Widget _buildAiOffNotice() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        children: [
-          Icon(Icons.smart_toy_outlined, size: 16, color: Colors.grey[400]),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              'AI解析はオフです',
-              style: TextStyle(color: Colors.grey[500], fontSize: 14),
+    return _buildStatusCard(
+      leading: Icon(
+        Icons.smart_toy_outlined,
+        size: 18,
+        color: KokoTokens.of(context).textFaint,
+      ),
+      message: 'AI解析はオフです',
+      action: TextButton.icon(
+        onPressed: () => context.push('/settings'),
+        icon: const Icon(Icons.settings_outlined, size: 16),
+        label: const Text('設定'),
+        style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+      ),
+    );
+  }
+
+  /// 解析中/失敗/スキップ/オフの共通カード
+  Widget _buildStatusCard({
+    required Widget leading,
+    required String message,
+    Color? messageColor,
+    Widget? action,
+  }) {
+    final tokens = KokoTokens.of(context);
+    return Card(
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(16, 10, action != null ? 8 : 16, 10),
+        child: Row(
+          children: [
+            leading,
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                message,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  color: messageColor ?? tokens.textMuted,
+                ),
+              ),
             ),
-          ),
-          TextButton.icon(
-            onPressed: () => context.push('/settings'),
-            icon: const Icon(Icons.settings, size: 16),
-            label: const Text('設定'),
-            style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
-          ),
-        ],
+            ?action,
+          ],
+        ),
       ),
     );
   }
 
   /// 解析完了時の結果表示
   Widget _buildCompletedResult(MealPhoto photo) {
+    final tokens = KokoTokens.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
     final isUserCorrected = photo.userCorrectedName != null ||
         photo.userCorrectedPrice != null ||
         photo.userCorrectedCalories != null;
+    final hasPrice = photo.displayPrice != null;
+    final hasCalories = photo.displayCalories != null;
 
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      title: Text(
-        photo.displayName ?? '不明',
-        style: const TextStyle(fontWeight: FontWeight.bold),
-      ),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              if (photo.displayPrice != null)
-                Text('¥${NumberFormat('#,###').format(photo.displayPrice)}'),
-              if (photo.displayPrice != null && photo.displayCalories != null)
-                const Text(' / '),
-              if (photo.displayCalories != null)
-                Text('${photo.displayCalories} kcal'),
-            ],
-          ),
-          const SizedBox(height: 2),
-          Row(
-            children: [
-              if (photo.aiModel != null)
-                Text(
-                  photo.aiModel!,
-                  style: TextStyle(fontSize: 11, color: Colors.grey[400]),
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(photo.displayName ?? '不明',
+                          style: textTheme.titleMedium),
+                      if (hasPrice || hasCalories)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Row(
+                            children: [
+                              if (hasPrice)
+                                Text(
+                                  '¥${NumberFormat('#,###').format(photo.displayPrice)}',
+                                  style: tokens.numeral.copyWith(fontSize: 15),
+                                ),
+                              if (hasPrice && hasCalories)
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8),
+                                  child: Text(
+                                    '/',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: tokens.textFaint,
+                                    ),
+                                  ),
+                                ),
+                              if (hasCalories)
+                                Text(
+                                  '${photo.displayCalories} kcal',
+                                  style: tokens.numeral.copyWith(
+                                    fontSize: 15,
+                                    color: tokens.textMuted,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
-              if (isUserCorrected) ...[
-                if (photo.aiModel != null)
-                  Text(' · ', style: TextStyle(fontSize: 11, color: Colors.grey[400])),
-                Text(
-                  'ユーザー修正済',
-                  style: TextStyle(fontSize: 11, color: Colors.blue[300]),
+                const SizedBox(width: 12),
+                FilledButton.tonalIcon(
+                  onPressed: () => _showEditDialog(context, photo),
+                  icon: const Icon(Icons.edit_outlined, size: 16),
+                  label: const Text('編集'),
+                  style: FilledButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    minimumSize: const Size(0, 36),
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    textStyle: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w700),
+                  ),
                 ),
               ],
-            ],
-          ),
-        ],
-      ),
-      trailing: IconButton(
-        icon: const Icon(Icons.edit, size: 18, color: Colors.grey),
-        onPressed: () => _showEditDialog(context, photo),
+            ),
+            if (isUserCorrected || photo.aiModel != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Row(
+                  children: [
+                    if (isUserCorrected)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: scheme.secondaryContainer,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          'ユーザー修正済',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: scheme.onSecondaryContainer,
+                          ),
+                        ),
+                      ),
+                    const Spacer(),
+                    if (photo.aiModel != null)
+                      Text(
+                        photo.aiModel!,
+                        style:
+                            TextStyle(fontSize: 11, color: tokens.textFaint),
+                      ),
+                  ],
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -662,7 +777,10 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('削除', style: TextStyle(color: Colors.red)),
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: const Text('削除'),
           ),
         ],
       ),

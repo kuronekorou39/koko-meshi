@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../services/gemma_ondevice_service.dart';
+import '../../theme/app_theme.dart';
 
 /// オンデバイス Gemma 4 (vision) の実機PoC画面。
 /// E2B / E4B の両方を個別にDLでき、どちらをロードするか選べる。
@@ -166,13 +167,13 @@ class _GemmaPocScreenState extends State<GemmaPocScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = KokoTokens.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('オンデバイスGemma PoC')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Text('モデルを選んでロード',
-              style: Theme.of(context).textTheme.titleMedium),
+          Text('モデルを選んでロード', style: tokens.sectionLabel),
           const SizedBox(height: 8),
           ...GemmaModelKind.values.map(_buildModelCard),
 
@@ -180,7 +181,7 @@ class _GemmaPocScreenState extends State<GemmaPocScreen> {
           // 端末動作テスト（バンドル画像3枚・ギャラリー不要で確実に測れる）
           FilledButton.icon(
             onPressed: _busy || _loadedKind == null ? null : _runSelfTest,
-            icon: const Icon(Icons.speed),
+            icon: const Icon(Icons.speed_outlined),
             label: Text(
               _selfTesting ? 'テスト中... ($_selfTestDone/3)' : 'この端末で動作テスト（3枚）',
             ),
@@ -188,9 +189,8 @@ class _GemmaPocScreenState extends State<GemmaPocScreen> {
           if (_selfTest != null) _buildVerdict(_selfTest!),
 
           const SizedBox(height: 16),
-          Text('自分の写真で試す',
-              style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 4),
+          Text('自分の写真で試す', style: tokens.sectionLabel),
+          const SizedBox(height: 8),
           // 解析
           Row(
             children: [
@@ -199,7 +199,7 @@ class _GemmaPocScreenState extends State<GemmaPocScreen> {
                   onPressed: _busy || _loadedKind == null
                       ? null
                       : () => _pickAndAnalyze(ImageSource.gallery),
-                  icon: const Icon(Icons.photo_library),
+                  icon: const Icon(Icons.photo_library_outlined),
                   label: const Text('写真から'),
                 ),
               ),
@@ -209,17 +209,17 @@ class _GemmaPocScreenState extends State<GemmaPocScreen> {
                   onPressed: _busy || _loadedKind == null
                       ? null
                       : () => _pickAndAnalyze(ImageSource.camera),
-                  icon: const Icon(Icons.camera_alt),
+                  icon: const Icon(Icons.camera_alt_outlined),
                   label: const Text('撮影'),
                 ),
               ),
             ],
           ),
           if (_loadedKind == null)
-            const Padding(
-              padding: EdgeInsets.only(top: 6),
-              child: Text('※ 先にモデルをロードしてください',
-                  style: TextStyle(color: Colors.grey, fontSize: 12)),
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text('先にモデルをロードしてください',
+                  style: TextStyle(color: tokens.textFaint, fontSize: 12)),
             ),
 
           const SizedBox(height: 12),
@@ -227,13 +227,14 @@ class _GemmaPocScreenState extends State<GemmaPocScreen> {
           if (_status.isNotEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Text(_status, style: const TextStyle(color: Colors.grey)),
+              child: Text(_status,
+                  style: TextStyle(color: tokens.textMuted, fontSize: 13)),
             ),
 
           if (_lastImage != null) ...[
             const Divider(height: 24),
             ClipRRect(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(12),
               child: Image.file(_lastImage!,
                   height: 220, width: double.infinity, fit: BoxFit.cover),
             ),
@@ -251,6 +252,7 @@ class _GemmaPocScreenState extends State<GemmaPocScreen> {
   }
 
   Widget _buildModelCard(GemmaModelKind k) {
+    final tokens = KokoTokens.of(context);
     final installed = _installed[k] ?? false;
     final loaded = _loadedKind == k;
     final downloading = _busyKind == k && !installed;
@@ -262,9 +264,9 @@ class _GemmaPocScreenState extends State<GemmaPocScreen> {
         child: Text('DL（${k.approxSize}）'),
       );
     } else if (loaded) {
-      action = const Chip(
-        avatar: Icon(Icons.check_circle, color: Colors.green, size: 18),
-        label: Text('ロード済み'),
+      action = Chip(
+        avatar: Icon(Icons.check_circle, color: tokens.success, size: 18),
+        label: const Text('ロード済み'),
       );
     } else {
       action = FilledButton(
@@ -273,94 +275,129 @@ class _GemmaPocScreenState extends State<GemmaPocScreen> {
       );
     }
 
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('${k.label}  ',
+                            style:
+                                const TextStyle(fontWeight: FontWeight.w700)),
+                        Text(
+                          '${k.note} ・ ${installed ? "インストール済" : "未DL ${k.approxSize}"}'
+                          '${loaded && _loadMs != null ? " ・ ロード ${_loadMs}ms" : ""}',
+                          style:
+                              TextStyle(fontSize: 12, color: tokens.textMuted),
+                        ),
+                      ],
+                    ),
+                  ),
+                  action,
+                ],
+              ),
+              if (downloading)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('${k.label}  ',
-                          style: const TextStyle(fontWeight: FontWeight.bold)),
+                      LinearProgressIndicator(
+                          value: (_dlProgress[k] ?? 0) / 100),
                       Text(
-                        '${k.note} ・ ${installed ? "インストール済" : "未DL ${k.approxSize}"}'
-                        '${loaded && _loadMs != null ? " ・ ロード ${_loadMs}ms" : ""}',
-                        style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                        '${_dlProgress[k] ?? 0}%',
+                        style: tokens.numeral
+                            .copyWith(fontSize: 12, color: tokens.textMuted),
                       ),
                     ],
                   ),
                 ),
-                action,
-              ],
-            ),
-            if (downloading)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Column(
-                  children: [
-                    LinearProgressIndicator(value: (_dlProgress[k] ?? 0) / 100),
-                    Text('${_dlProgress[k] ?? 0}%'),
-                  ],
-                ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 
   Widget _buildVerdict(GemmaSelfTestResult t) {
+    final tokens = KokoTokens.of(context);
+    final scheme = Theme.of(context).colorScheme;
     final (String label, Color color, IconData icon) = switch (t.verdict) {
-      GemmaDeviceVerdict.smooth => ('この端末で快適に動作します', Colors.green, Icons.check_circle),
-      GemmaDeviceVerdict.usable => ('この端末で実用的に動作します', Colors.lightGreen, Icons.check_circle_outline),
-      GemmaDeviceVerdict.slow => ('動作しますが遅めです', Colors.orange, Icons.warning_amber),
-      GemmaDeviceVerdict.unstable => ('不安定（一部パース失敗）', Colors.red, Icons.error_outline),
+      GemmaDeviceVerdict.smooth => (
+          'この端末で快適に動作します',
+          tokens.success,
+          Icons.check_circle_outline,
+        ),
+      GemmaDeviceVerdict.usable => (
+          'この端末で実用的に動作します',
+          tokens.success,
+          Icons.check_circle_outline,
+        ),
+      GemmaDeviceVerdict.slow => (
+          '動作しますが遅めです',
+          tokens.warning,
+          Icons.warning_amber,
+        ),
+      GemmaDeviceVerdict.unstable => (
+          '不安定（一部パース失敗）',
+          scheme.error,
+          Icons.error_outline,
+        ),
     };
-    return Card(
-      color: color.withValues(alpha: 0.12),
-      margin: const EdgeInsets.only(top: 8),
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(children: [
-              Icon(icon, color: color),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(label,
-                    style: TextStyle(fontWeight: FontWeight.bold, color: color)),
-              ),
-            ]),
-            const SizedBox(height: 6),
-            Text('${t.modelKind?.label ?? "-"} ・ 平均 ${t.avgSeconds.toStringAsFixed(1)}s/枚 ・ '
-                'JSON成功 ${t.parseOk}/${t.count}'),
-            const Divider(height: 16),
-            ...List.generate(t.results.length, (i) {
-              final r = t.results[i];
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 2),
-                child: Text(
-                  '${i + 1}. ${r.menuName ?? "パース失敗"}'
-                  '${r.parsed != null ? " ・ ${r.genre} ・ ${r.price}円 ・ ${r.calories}kcal" : ""}'
-                  ' ・ ${(r.inferenceMs / 1000).toStringAsFixed(1)}s',
-                  style: const TextStyle(fontSize: 13),
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Card(
+        color: color.withValues(alpha: 0.12),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                Icon(icon, color: color),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(label,
+                      style: TextStyle(
+                          fontWeight: FontWeight.w700, color: color)),
                 ),
-              );
-            }),
-          ],
+              ]),
+              const SizedBox(height: 6),
+              Text(
+                '${t.modelKind?.label ?? "-"} ・ 平均 ${t.avgSeconds.toStringAsFixed(1)}s/枚 ・ '
+                'JSON成功 ${t.parseOk}/${t.count}',
+                style: tokens.numeral.copyWith(fontSize: 13),
+              ),
+              const Divider(height: 16),
+              ...List.generate(t.results.length, (i) {
+                final r = t.results[i];
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Text(
+                    '${i + 1}. ${r.menuName ?? "パース失敗"}'
+                    '${r.parsed != null ? " ・ ${r.genre} ・ ${r.price}円 ・ ${r.calories}kcal" : ""}'
+                    ' ・ ${(r.inferenceMs / 1000).toStringAsFixed(1)}s',
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                );
+              }),
+            ],
+          ),
         ),
       ),
     );
   }
 
   Widget _buildResult(GemmaAnalysisResult r) {
+    final tokens = KokoTokens.of(context);
+    final scheme = Theme.of(context).colorScheme;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -370,23 +407,29 @@ class _GemmaPocScreenState extends State<GemmaPocScreen> {
             Row(
               children: [
                 Text('${r.modelKind?.label ?? "-"} ・ 推論 ${(r.inferenceMs / 1000).toStringAsFixed(1)}s',
-                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                    style: const TextStyle(fontWeight: FontWeight.w700)),
                 const Spacer(),
-                Text(r.parsed != null ? 'JSON ✓' : 'パース失敗',
+                Text(r.parsed != null ? 'JSON OK' : 'パース失敗',
                     style: TextStyle(
-                        color: r.parsed != null ? Colors.green : Colors.red)),
+                        fontWeight: FontWeight.w600,
+                        color:
+                            r.parsed != null ? tokens.success : scheme.error)),
               ],
             ),
             const SizedBox(height: 8),
             if (r.parsed != null) ...[
               Text(r.menuName ?? '-',
                   style: Theme.of(context).textTheme.titleMedium),
-              Text('${r.genre ?? "-"} ・ ${r.price ?? "-"}円 ・ ${r.calories ?? "-"}kcal'),
+              Text(
+                '${r.genre ?? "-"} ・ ${r.price ?? "-"}円 ・ ${r.calories ?? "-"}kcal',
+                style: tokens.numeral.copyWith(fontSize: 14),
+              ),
             ],
             const SizedBox(height: 8),
             ExpansionTile(
               tilePadding: EdgeInsets.zero,
-              title: const Text('raw', style: TextStyle(fontSize: 12)),
+              title: Text('raw',
+                  style: TextStyle(fontSize: 12, color: tokens.textMuted)),
               children: [
                 Text(r.rawText,
                     style: const TextStyle(fontSize: 11, fontFamily: 'monospace')),
@@ -399,6 +442,7 @@ class _GemmaPocScreenState extends State<GemmaPocScreen> {
   }
 
   Widget _buildLatencySummary(GemmaModelKind k, List<int> ms) {
+    final tokens = KokoTokens.of(context);
     final avg = ms.reduce((a, b) => a + b) / ms.length / 1000;
     return Padding(
       padding: const EdgeInsets.only(top: 12),
@@ -407,8 +451,17 @@ class _GemmaPocScreenState extends State<GemmaPocScreen> {
         children: [
           Text('${k.label} 推論速度（実機）: ${ms.length}回',
               style: Theme.of(context).textTheme.titleSmall),
-          Text('各回: ${ms.map((e) => "${(e / 1000).toStringAsFixed(1)}s").join(", ")}'),
-          Text('平均: ${avg.toStringAsFixed(1)}s/枚'),
+          const SizedBox(height: 4),
+          Text(
+            '各回: ${ms.map((e) => "${(e / 1000).toStringAsFixed(1)}s").join(", ")}',
+            style: tokens.numeral
+                .copyWith(fontSize: 13, color: tokens.textMuted),
+          ),
+          Text(
+            '平均: ${avg.toStringAsFixed(1)}s/枚',
+            style: tokens.numeral
+                .copyWith(fontSize: 13, color: tokens.textMuted),
+          ),
         ],
       ),
     );

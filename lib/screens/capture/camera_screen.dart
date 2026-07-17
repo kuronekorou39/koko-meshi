@@ -505,7 +505,11 @@ class _CameraScreenState extends State<CameraScreen>
                     shape: BoxShape.circle,
                     color: Theme.of(context).colorScheme.primary,
                   ),
-                  child: const Icon(Icons.check, color: Colors.white, size: 32),
+                  child: Icon(
+                    Icons.check,
+                    color: Theme.of(context).colorScheme.onPrimary,
+                    size: 32,
+                  ),
                 ),
               ),
               const SizedBox(width: 24),
@@ -531,7 +535,7 @@ class _CameraScreenState extends State<CameraScreen>
         Row(
           children: [
             Icon(
-              Icons.location_on,
+              Icons.location_on_outlined,
               size: 16,
               color: _position != null ? Colors.white70 : Colors.white30,
             ),
@@ -573,8 +577,8 @@ class _CameraScreenState extends State<CameraScreen>
                 if (index == 0) {
                   final isSelected = _selectedLocationTag == null;
                   return _placeChip(
-                    label: 'なし',
-                    icon: Icons.location_off,
+                    label: '指定なし',
+                    icon: Icons.location_off_outlined,
                     isSelected: isSelected,
                     onTap: () => setState(() => _selectedLocationTag = null),
                   );
@@ -586,10 +590,10 @@ class _CameraScreenState extends State<CameraScreen>
                 return _placeChip(
                   label: place.name + (isAutoMatched ? ' (近く)' : ''),
                   icon: place.iconType == 'home'
-                      ? Icons.home
+                      ? Icons.home_outlined
                       : place.iconType == 'friend'
-                          ? Icons.person
-                          : Icons.place,
+                          ? Icons.person_outlined
+                          : Icons.place_outlined,
                   isSelected: isSelected,
                   onTap: () => setState(() => _selectedLocationTag = tag),
                 );
@@ -613,7 +617,7 @@ class _CameraScreenState extends State<CameraScreen>
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
         decoration: BoxDecoration(
           color: isSelected ? Colors.white24 : Colors.white10,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(999),
           border: Border.all(
             color: isSelected ? Colors.white70 : Colors.white24,
           ),
@@ -684,7 +688,7 @@ class _CameraScreenState extends State<CameraScreen>
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
           color: Colors.black54,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(12),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 
+import '../../theme/app_theme.dart';
 import 'crop_screen.dart';
 
 // ---------------------------------------------------------------------------
@@ -390,13 +391,19 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: EditorColors.background,
       appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
+        backgroundColor: EditorColors.background,
+        foregroundColor: EditorColors.text,
+        iconTheme: const IconThemeData(color: EditorColors.text),
+        actionsIconTheme: const IconThemeData(color: EditorColors.text),
+        titleTextStyle: const TextStyle(
+          fontSize: 17,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -0.2,
+          color: EditorColors.text,
+        ),
         title: const Text('写真を編集'),
         leading: IconButton(
           icon: const Icon(Icons.close),
@@ -425,15 +432,20 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
           children: [
             Expanded(child: _buildPreview()),
             Container(
-              color: colorScheme.surface,
+              color: EditorColors.background,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   TabBar(
                     controller: _tabController,
-                    indicatorColor: Colors.orange,
-                    labelColor: Colors.orange,
-                    unselectedLabelColor: Colors.grey,
+                    indicatorColor: EditorColors.accent,
+                    labelColor: EditorColors.text,
+                    unselectedLabelColor: EditorColors.textMuted,
+                    dividerColor: EditorColors.hairline,
+                    labelStyle: const TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.w700),
+                    unselectedLabelStyle: const TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.w500),
                     tabs: const [
                       Tab(text: 'フィルター'),
                       Tab(text: '調整'),
@@ -487,7 +499,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
     }
 
     return Container(
-      color: Colors.black,
+      color: EditorColors.background,
       alignment: Alignment.center,
       child: image,
     );
@@ -504,7 +516,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
             final isSelected = index == _selectedPresetIndex;
 
             return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
               child: GestureDetector(
                 onTap: () => _applyPreset(index),
                 child: Column(
@@ -516,8 +528,10 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: isSelected ? Colors.orange : Colors.grey[400]!,
-                          width: isSelected ? 3 : 1,
+                          color: isSelected
+                              ? EditorColors.accent
+                              : EditorColors.outline,
+                          width: isSelected ? 2 : 1,
                         ),
                       ),
                       child: ClipOval(
@@ -536,13 +550,16 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
                         ),
                       ),
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 8),
                     Text(
                       preset.name,
                       style: TextStyle(
                         fontSize: 12,
-                        color: isSelected ? Colors.orange : null,
-                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                        color: isSelected
+                            ? EditorColors.accent
+                            : EditorColors.textMuted,
+                        fontWeight:
+                            isSelected ? FontWeight.w700 : FontWeight.w500,
                       ),
                     ),
                   ],
@@ -571,7 +588,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
         children: [
           _buildSlider(
             label: '明るさ',
-            icon: Icons.brightness_6,
+            icon: Icons.brightness_6_outlined,
             value: _brightness,
             min: -100,
             max: 100,
@@ -582,7 +599,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
           ),
           _buildSlider(
             label: 'コントラスト',
-            icon: Icons.contrast,
+            icon: Icons.contrast_outlined,
             value: _contrast,
             min: -80,
             max: 100,
@@ -593,7 +610,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
           ),
           _buildSlider(
             label: '彩度',
-            icon: Icons.palette,
+            icon: Icons.palette_outlined,
             value: _saturation,
             min: -100,
             max: 100,
@@ -604,7 +621,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
           ),
           _buildSlider(
             label: '色温度',
-            icon: Icons.thermostat,
+            icon: Icons.thermostat_outlined,
             value: _warmth,
             min: -100,
             max: 100,
@@ -615,7 +632,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
           ),
           _buildSlider(
             label: 'ビネット',
-            icon: Icons.vignette,
+            icon: Icons.vignette_outlined,
             value: _vignette,
             min: 0,
             max: 100,
@@ -639,13 +656,15 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
   }) {
     return Row(
       children: [
-        Icon(icon, size: 20, color: Colors.grey[500]),
-        const SizedBox(width: 6),
+        const SizedBox(width: 4),
+        Icon(icon, size: 20, color: EditorColors.textMuted),
+        const SizedBox(width: 8),
         SizedBox(
           width: 52,
           child: Text(
             label,
-            style: const TextStyle(fontSize: 11),
+            style:
+                const TextStyle(fontSize: 11, color: EditorColors.textMuted),
             maxLines: 1,
             overflow: TextOverflow.visible,
           ),
@@ -656,9 +675,10 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
               trackHeight: 2,
               thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
               overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-              activeTrackColor: Colors.orange,
-              thumbColor: Colors.orange,
-              inactiveTrackColor: Colors.grey[300],
+              activeTrackColor: EditorColors.accent,
+              thumbColor: EditorColors.text,
+              inactiveTrackColor: EditorColors.outline,
+              overlayColor: EditorColors.accent.withValues(alpha: 0.12),
             ),
             child: Slider(
               value: value,
@@ -673,11 +693,10 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
           child: Text(
             value.round().toString(),
             textAlign: TextAlign.right,
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey[600],
-              fontFeatures: const [FontFeature.tabularFigures()],
-            ),
+            style: KokoTokens.of(context).numeral.copyWith(
+                  fontSize: 12,
+                  color: EditorColors.textMuted,
+                ),
           ),
         ),
       ],

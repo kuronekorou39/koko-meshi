@@ -10,6 +10,7 @@ import 'package:uuid/uuid.dart';
 import '../../config/env.dart';
 import '../../models/saved_place.dart';
 import '../../services/location_service.dart';
+import '../../theme/app_theme.dart';
 
 /// マイプレイス編集画面
 ///
@@ -306,7 +307,6 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
       resizeToAvoidBottomInset: false,
       appBar: AppBar(
         title: Text(title),
-        centerTitle: true,
       ),
       body: _loadingPosition
           ? const Center(child: CircularProgressIndicator())
@@ -350,11 +350,12 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
                             color: widget.iconType == 'home'
                                 ? colorScheme.primary
                                 : colorScheme.error,
-                            shadows: const [
+                            shadows: [
                               Shadow(
                                 blurRadius: 8,
-                                color: Colors.black38,
-                                offset: Offset(0, 2),
+                                color: colorScheme.shadow
+                                    .withValues(alpha: 0.38),
+                                offset: const Offset(0, 2),
                               ),
                             ],
                           ),
@@ -367,14 +368,9 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
                           width: 6,
                           height: 6,
                           decoration: BoxDecoration(
-                            color: Colors.black45,
+                            color:
+                                colorScheme.shadow.withValues(alpha: 0.45),
                             shape: BoxShape.circle,
-                            boxShadow: [
-                              BoxShadow(
-                                blurRadius: 4,
-                                color: Colors.black.withValues(alpha: 0.2),
-                              ),
-                            ],
                           ),
                         ),
                       ),
@@ -383,10 +379,10 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
                       Positioned(
                         right: 16,
                         bottom: 16,
-                        child: FloatingActionButton.small(
-                          heroTag: 'currentLocation',
-                          onPressed: _moveToCurrentLocation,
-                          child: const Icon(Icons.my_location),
+                        child: _mapButton(
+                          icon: Icons.my_location,
+                          tooltip: '現在地へ移動',
+                          onTap: _moveToCurrentLocation,
                         ),
                       ),
 
@@ -405,18 +401,17 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
 
   /// 検索バーウィジェット
   Widget _buildSearchBar(ColorScheme colorScheme) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      color: colorScheme.surface,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
       child: TextField(
         controller: _searchController,
         focusNode: _searchFocusNode,
         decoration: InputDecoration(
-          hintText: '場所を検索...',
-          prefixIcon: const Icon(Icons.search),
+          hintText: '場所を検索',
+          prefixIcon: const Icon(Icons.search, size: 20),
           suffixIcon: _searchController.text.isNotEmpty
               ? IconButton(
-                  icon: const Icon(Icons.clear),
+                  icon: const Icon(Icons.clear, size: 20),
                   onPressed: () {
                     _searchController.clear();
                     setState(() {
@@ -435,13 +430,6 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
                       ),
                     )
                   : null),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          filled: true,
-          fillColor: colorScheme.surfaceContainerLow,
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         ),
         textInputAction: TextInputAction.search,
         onChanged: (value) {
@@ -460,20 +448,24 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
 
   /// 検索結果ドロップダウン
   Widget _buildSearchResults(ColorScheme colorScheme) {
+    final tokens = KokoTokens.of(context);
+    final bg = Theme.of(context).brightness == Brightness.light
+        ? colorScheme.surface
+        : colorScheme.surfaceContainerHigh;
     return Positioned(
       top: 0,
-      left: 0,
-      right: 0,
+      left: 16,
+      right: 16,
       child: Material(
-        elevation: 4,
-        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
+        color: bg,
+        clipBehavior: Clip.antiAlias,
+        shape: RoundedRectangleBorder(
+          borderRadius:
+              const BorderRadius.vertical(bottom: Radius.circular(12)),
+          side: BorderSide(color: tokens.hairline, width: 0.8),
+        ),
         child: Container(
           constraints: const BoxConstraints(maxHeight: 280),
-          decoration: BoxDecoration(
-            color: colorScheme.surface,
-            borderRadius:
-                const BorderRadius.vertical(bottom: Radius.circular(12)),
-          ),
           child: ListView.separated(
             padding: EdgeInsets.zero,
             shrinkWrap: true,
@@ -483,7 +475,7 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
               final result = _searchResults[index];
               return ListTile(
                 leading: Icon(
-                  Icons.place,
+                  Icons.place_outlined,
                   color: colorScheme.primary,
                 ),
                 title: Text(
@@ -497,7 +489,7 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 12,
-                    color: colorScheme.onSurfaceVariant,
+                    color: tokens.textMuted,
                   ),
                 ),
                 dense: true,
@@ -510,18 +502,46 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
     );
   }
 
+  /// マップ上のオーバーレイボタン(現在地)
+  Widget _mapButton({
+    required IconData icon,
+    required VoidCallback onTap,
+    String? tooltip,
+  }) {
+    final theme = Theme.of(context);
+    final tokens = KokoTokens.of(context);
+    final button = Material(
+      color: theme.brightness == Brightness.light
+          ? theme.colorScheme.surface
+          : theme.colorScheme.surfaceContainerHigh,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: tokens.hairline, width: 0.8),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: SizedBox(
+          width: 44,
+          height: 44,
+          child: Icon(icon, size: 22, color: theme.colorScheme.onSurface),
+        ),
+      ),
+    );
+    if (tooltip == null) return button;
+    return Tooltip(message: tooltip, child: button);
+  }
+
   /// 下部パネル: 住所・名前入力・保存ボタン
   Widget _buildBottomPanel(ColorScheme colorScheme, String iconLabel) {
+    final theme = Theme.of(context);
+    final tokens = KokoTokens.of(context);
     return Container(
       decoration: BoxDecoration(
         color: colorScheme.surface,
-        boxShadow: [
-          BoxShadow(
-            blurRadius: 8,
-            color: Colors.black.withValues(alpha: 0.1),
-            offset: const Offset(0, -2),
-          ),
-        ],
+        border: Border(
+          top: BorderSide(color: tokens.hairline, width: 0.8),
+        ),
       ),
       child: SafeArea(
         child: Padding(
@@ -536,7 +556,7 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
                   Icon(
                     Icons.location_on_outlined,
                     size: 18,
-                    color: colorScheme.onSurfaceVariant,
+                    color: tokens.textMuted,
                   ),
                   const SizedBox(width: 6),
                   Expanded(
@@ -548,15 +568,15 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
                                 height: 14,
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2,
-                                  color: colorScheme.onSurfaceVariant,
+                                  color: tokens.textMuted,
                                 ),
                               ),
                               const SizedBox(width: 8),
                               Text(
-                                '住所を取得中...',
+                                '住所を取得中…',
                                 style: TextStyle(
                                   fontSize: 13,
-                                  color: colorScheme.onSurfaceVariant,
+                                  color: tokens.textMuted,
                                 ),
                               ),
                             ],
@@ -567,7 +587,7 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
                               fontSize: 13,
                               color: _address != null
                                   ? colorScheme.onSurface
-                                  : colorScheme.onSurfaceVariant,
+                                  : tokens.textFaint,
                             ),
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
@@ -582,19 +602,14 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
               Row(
                 children: [
                   Icon(
-                    widget.iconType == 'home' ? Icons.home : Icons.star,
-                    size: 18,
-                    color: colorScheme.primary,
+                    widget.iconType == 'home'
+                        ? Icons.home_outlined
+                        : Icons.star_outline,
+                    size: 16,
+                    color: tokens.textMuted,
                   ),
                   const SizedBox(width: 6),
-                  Text(
-                    iconLabel,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: colorScheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
+                  Text(iconLabel, style: tokens.sectionLabel),
                 ],
               ),
 
@@ -608,15 +623,12 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
                       _nameController.text.isEmpty
                           ? (widget.iconType == 'home' ? '自宅' : 'お気に入り')
                           : _nameController.text,
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                        color: colorScheme.onSurface,
-                      ),
+                      style: theme.textTheme.titleMedium,
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.edit, size: 20),
+                    icon: const Icon(Icons.edit_outlined, size: 20),
+                    color: tokens.textMuted,
                     tooltip: '名前を変更',
                     onPressed: () async {
                       final controller = TextEditingController(
@@ -661,22 +673,16 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
               FilledButton.icon(
                 onPressed: _saving ? null : _save,
                 icon: _saving
-                    ? const SizedBox(
+                    ? SizedBox(
                         width: 18,
                         height: 18,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          color: Colors.white,
+                          color: colorScheme.onPrimary,
                         ),
                       )
                     : const Icon(Icons.check),
                 label: Text(widget.existingId != null ? '更新する' : '保存する'),
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                ),
               ),
             ],
           ),

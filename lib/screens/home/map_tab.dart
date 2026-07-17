@@ -16,6 +16,7 @@ import '../../models/saved_place.dart';
 import '../../providers/meal_providers.dart';
 import '../../services/location_service.dart';
 import '../../services/places_service.dart';
+import '../../theme/app_theme.dart';
 import '../../widgets/cached_photo_image.dart';
 import 'place_editor_screen.dart';
 
@@ -233,6 +234,7 @@ class _MapTabState extends ConsumerState<MapTab> {
   /// 件数バッジ付きマーカーを生成
   Future<BitmapDescriptor> _createCountBadgeMarker(IconData icon, int count) async {
     final dpr = MediaQuery.of(context).devicePixelRatio;
+    final scheme = Theme.of(context).colorScheme;
     final size = 48.0 * dpr;
     final badgeSize = 18.0 * dpr;
 
@@ -243,7 +245,7 @@ class _MapTabState extends ConsumerState<MapTab> {
     canvas.drawCircle(
       Offset(size / 2, size / 2),
       size / 2 - 2 * dpr,
-      Paint()..color = const Color(0xFF7C4DFF),
+      Paint()..color = scheme.primary,
     );
     canvas.drawCircle(
       Offset(size / 2, size / 2),
@@ -275,7 +277,7 @@ class _MapTabState extends ConsumerState<MapTab> {
     // バッジ（右上）
     if (count > 0) {
       final badgeCenter = Offset(size - badgeSize / 2, badgeSize / 2);
-      canvas.drawCircle(badgeCenter, badgeSize / 2, Paint()..color = const Color(0xFFE53935));
+      canvas.drawCircle(badgeCenter, badgeSize / 2, Paint()..color = scheme.error);
       canvas.drawCircle(
         badgeCenter,
         badgeSize / 2,
@@ -322,6 +324,7 @@ class _MapTabState extends ConsumerState<MapTab> {
   /// カスタムラベル付きマーカーを生成
   Future<BitmapDescriptor> _createLabeledMarker(String label) async {
     final dpr = MediaQuery.of(context).devicePixelRatio;
+    final scheme = Theme.of(context).colorScheme;
     final truncated = label.length > 5 ? '${label.substring(0, 5)}…' : label;
 
     final textPainter = TextPainter(
@@ -351,7 +354,7 @@ class _MapTabState extends ConsumerState<MapTab> {
     canvas.drawCircle(
       Offset(w / 2, pinR),
       pinR,
-      Paint()..color = const Color(0xFFE53935),
+      Paint()..color = scheme.primary,
     );
     canvas.drawCircle(
       Offset(w / 2, pinR),
@@ -480,11 +483,16 @@ class _MapTabState extends ConsumerState<MapTab> {
 
     // スロット定義: 自宅1つ + お気に入り3つ
     final slots = <_PlaceSlot>[
-      _PlaceSlot(label: '自宅', icon: Icons.home, iconType: 'home', place: home),
+      _PlaceSlot(
+        label: '自宅',
+        icon: home != null ? Icons.home : Icons.home_outlined,
+        iconType: 'home',
+        place: home,
+      ),
       for (var i = 0; i < 3; i++)
         _PlaceSlot(
           label: 'お気に入り${i + 1}',
-          icon: Icons.star,
+          icon: i < favorites.length ? Icons.star : Icons.star_outline,
           iconType: 'favorite',
           place: i < favorites.length ? favorites[i] : null,
         ),
@@ -497,14 +505,15 @@ class _MapTabState extends ConsumerState<MapTab> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              padding: const EdgeInsets.fromLTRB(16, 4, 8, 8),
               child: Row(
                 children: [
-                  const Text('マイプレイス',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  Text('マイプレイス',
+                      style: Theme.of(context).textTheme.titleMedium),
                   const Spacer(),
                   IconButton(
                     icon: const Icon(Icons.close),
+                    color: KokoTokens.of(context).textMuted,
                     onPressed: () => Navigator.pop(context),
                   ),
                 ],
@@ -520,27 +529,33 @@ class _MapTabState extends ConsumerState<MapTab> {
   }
 
   Widget _buildPlaceSlotTile(BuildContext sheetContext, _PlaceSlot slot) {
+    final tokens = KokoTokens.of(context);
     final isSet = slot.place != null;
 
     return ListTile(
       leading: Icon(
         slot.icon,
-        color: isSet ? Theme.of(context).colorScheme.primary : Colors.grey,
+        color: isSet ? Theme.of(context).colorScheme.primary : tokens.textFaint,
       ),
       title: Text(isSet ? slot.place!.name : slot.label),
       subtitle: isSet
           ? Text(
               '${slot.place!.latitude.toStringAsFixed(4)}, ${slot.place!.longitude.toStringAsFixed(4)}',
-              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              style: tokens.numeral.copyWith(
+                fontSize: 12,
+                fontWeight: FontWeight.w400,
+                color: tokens.textMuted,
+              ),
             )
-          : Text('未設定', style: TextStyle(color: Colors.grey[500])),
+          : Text('未設定',
+              style: TextStyle(fontSize: 12.5, color: tokens.textFaint)),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           // その場所に移動
           if (isSet)
             IconButton(
-              icon: const Icon(Icons.near_me, size: 22),
+              icon: const Icon(Icons.near_me_outlined, size: 22),
               tooltip: 'この場所に移動',
               onPressed: () {
                 Navigator.pop(sheetContext);
@@ -559,7 +574,9 @@ class _MapTabState extends ConsumerState<MapTab> {
           // 場所編集画面を開く
           IconButton(
             icon: Icon(
-              isSet ? Icons.edit_location_alt : Icons.add_location_alt,
+              isSet
+                  ? Icons.edit_location_alt_outlined
+                  : Icons.add_location_alt_outlined,
               size: 22,
             ),
             tooltip: isSet ? '場所を編集' : '場所を追加',
@@ -611,14 +628,15 @@ class _MapTabState extends ConsumerState<MapTab> {
     ref.listen(mealLogsProvider, (_, _) => _loadMealMarkers());
 
     final allMarkers = {..._mealMarkers, ..._placeMarkersMap.values};
+    final scheme = Theme.of(context).colorScheme;
 
     // プレビュー円（検索前に範囲を示す）
     final previewCircle = Circle(
       circleId: const CircleId('preview'),
       center: _currentCenter,
       radius: _searchRadiusMeters,
-      fillColor: Colors.orange.withValues(alpha: 0.06),
-      strokeColor: Colors.orange.withValues(alpha: 0.4),
+      fillColor: scheme.primary.withValues(alpha: 0.06),
+      strokeColor: scheme.primary.withValues(alpha: 0.4),
       strokeWidth: 2,
     );
 
@@ -684,23 +702,33 @@ class _MapTabState extends ConsumerState<MapTab> {
 
                 // 視点切り替えボタン
                 Positioned(
-                  top: 12,
-                  left: 12,
-                  child: _buildTiltButton(),
+                  top: 16,
+                  left: 16,
+                  child: _mapButton(
+                    icon: _isTilted
+                        ? Icons.map_outlined
+                        : Icons.view_in_ar_outlined,
+                    tooltip: _isTilted ? '真上から表示' : '立体表示',
+                    onTap: _toggleTilt,
+                  ),
                 ),
 
                 // 検索結果クリアボタン
                 if (_placeMarkersMap.isNotEmpty)
                   Positioned(
-                    top: 12,
-                    right: 12,
-                    child: _buildClearButton(),
+                    top: 16,
+                    right: 16,
+                    child: _mapButton(
+                      icon: Icons.layers_clear_outlined,
+                      tooltip: '検索結果をクリア',
+                      onTap: _clearSearchResults,
+                    ),
                   ),
 
                 // 「このエリアで検索」ボタン
                 if (_showSearchButton)
                   Positioned(
-                    top: 12,
+                    top: 16,
                     left: 0,
                     right: 0,
                     child: Center(
@@ -708,27 +736,23 @@ class _MapTabState extends ConsumerState<MapTab> {
                     ),
                   ),
 
-                // マイプレイスボタン
+                // マイプレイス・現在地ボタン
                 Positioned(
                   bottom: _sheetVisible ? 260 : 16,
-                  right: 12,
+                  right: 16,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      FloatingActionButton.small(
-                        heroTag: 'myPlaces',
-                        backgroundColor: Colors.white,
-                        foregroundColor: Colors.black87,
-                        onPressed: _showPlacesManager,
-                        child: const Icon(Icons.bookmark),
+                      _mapButton(
+                        icon: Icons.bookmark_outline,
+                        tooltip: 'マイプレイス',
+                        onTap: _showPlacesManager,
                       ),
                       const SizedBox(height: 8),
-                      FloatingActionButton.small(
-                        heroTag: 'myLocation',
-                        backgroundColor: Colors.white,
-                        foregroundColor: Colors.black87,
-                        onPressed: _initCurrentPosition,
-                        child: const Icon(Icons.my_location),
+                      _mapButton(
+                        icon: Icons.my_location,
+                        tooltip: '現在地へ移動',
+                        onTap: _initCurrentPosition,
                       ),
                     ],
                   ),
@@ -749,15 +773,20 @@ class _MapTabState extends ConsumerState<MapTab> {
   }
 
   Widget _buildSearchButton() {
+    final theme = Theme.of(context);
+    final tokens = KokoTokens.of(context);
     return Material(
-      elevation: 3,
-      borderRadius: BorderRadius.circular(20),
-      color: Colors.white,
+      color: theme.brightness == Brightness.light
+          ? theme.colorScheme.surface
+          : theme.colorScheme.surfaceContainerHigh,
+      shape: StadiumBorder(
+        side: BorderSide(color: tokens.hairline, width: 0.8),
+      ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(20),
+        customBorder: const StadiumBorder(),
         onTap: _isSearching ? null : _searchNearbyRestaurants,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -767,11 +796,11 @@ class _MapTabState extends ConsumerState<MapTab> {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               else
-                const Icon(Icons.search, size: 18),
-              const SizedBox(width: 6),
+                Icon(Icons.search, size: 18, color: theme.colorScheme.primary),
+              const SizedBox(width: 8),
               Text(
-                _isSearching ? '検索中...' : 'このエリアで検索',
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                _isSearching ? '検索中…' : 'このエリアで検索',
+                style: theme.textTheme.labelLarge,
               ),
             ],
           ),
@@ -780,55 +809,39 @@ class _MapTabState extends ConsumerState<MapTab> {
     );
   }
 
-  Widget _buildClearButton() {
-    return GestureDetector(
-      onTap: _clearSearchResults,
-      child: Container(
-        width: 44,
-        height: 44,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(8),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.25),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: const Icon(Icons.layers_clear, color: Colors.black87, size: 22),
+  /// マップ上のオーバーレイボタン(視点切替・クリア・マイプレイス・現在地)
+  Widget _mapButton({
+    required IconData icon,
+    required VoidCallback onTap,
+    String? tooltip,
+  }) {
+    final theme = Theme.of(context);
+    final tokens = KokoTokens.of(context);
+    final button = Material(
+      color: theme.brightness == Brightness.light
+          ? theme.colorScheme.surface
+          : theme.colorScheme.surfaceContainerHigh,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: tokens.hairline, width: 0.8),
       ),
-    );
-  }
-
-  Widget _buildTiltButton() {
-    return GestureDetector(
-      onTap: _toggleTilt,
-      child: Container(
-        width: 44,
-        height: 44,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(8),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.25),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Icon(
-          _isTilted ? Icons.map : Icons.view_in_ar,
-          color: Colors.black87,
-          size: 24,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: SizedBox(
+          width: 44,
+          height: 44,
+          child: Icon(icon, size: 22, color: theme.colorScheme.onSurface),
         ),
       ),
     );
+    if (tooltip == null) return button;
+    return Tooltip(message: tooltip, child: button);
   }
 
   Widget _buildSheet() {
+    final theme = Theme.of(context);
+    final tokens = KokoTokens.of(context);
     final content = _sheetContent;
 
     return GestureDetector(
@@ -839,35 +852,30 @@ class _MapTabState extends ConsumerState<MapTab> {
       },
       child: Container(
         decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.2),
-              blurRadius: 8,
-              offset: const Offset(0, -2),
-            ),
-          ],
+          color: theme.colorScheme.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          border: Border.all(color: tokens.hairline, width: 0.8),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             // ドラッグハンドル + 閉じるボタン
             Padding(
-              padding: const EdgeInsets.only(top: 8, right: 4, bottom: 4),
+              padding: const EdgeInsets.only(top: 8, right: 8, bottom: 4),
               child: Row(
                 children: [
                   const Spacer(),
                   Container(
                     width: 40, height: 4,
                     decoration: BoxDecoration(
-                      color: Colors.grey[400],
-                      borderRadius: BorderRadius.circular(2),
+                      color: theme.colorScheme.outlineVariant,
+                      borderRadius: BorderRadius.circular(999),
                     ),
                   ),
                   const Spacer(),
                   IconButton(
                     icon: const Icon(Icons.close, size: 20),
+                    color: tokens.textMuted,
                     onPressed: _closeSheet,
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
@@ -890,6 +898,8 @@ class _MapTabState extends ConsumerState<MapTab> {
   }
 
   Widget _buildGroupedMealContent(String placeName, List<_MealLogWithPhotos> items) {
+    final theme = Theme.of(context);
+    final tokens = KokoTokens.of(context);
     final dateFormat = DateFormat('M/d (E) HH:mm', 'ja');
 
     return Column(
@@ -898,15 +908,22 @@ class _MapTabState extends ConsumerState<MapTab> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
             children: [
-              Text(
-                placeName,
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              Expanded(
+                child: Text(
+                  placeName,
+                  style: theme.textTheme.titleMedium,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
               const SizedBox(width: 8),
               Text(
                 '${items.length}件',
-                style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                style: tokens.numeral
+                    .copyWith(fontSize: 13, color: tokens.textMuted),
               ),
             ],
           ),
@@ -927,7 +944,7 @@ class _MapTabState extends ConsumerState<MapTab> {
               return ListTile(
                 contentPadding: const EdgeInsets.symmetric(horizontal: 4),
                 leading: ClipRRect(
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(12),
                   child: firstPhoto != null
                       ? CachedPhotoImage(
                           localPath: firstPhoto.localPath,
@@ -939,21 +956,23 @@ class _MapTabState extends ConsumerState<MapTab> {
                       : Container(
                           width: 48,
                           height: 48,
-                          color: Colors.grey[300],
-                          child: const Icon(Icons.restaurant, size: 24, color: Colors.grey),
+                          color: tokens.photoPlaceholder,
+                          child: Icon(Icons.restaurant_outlined,
+                              size: 24, color: tokens.textFaint),
                         ),
                 ),
                 title: Text(
                   menuName.isNotEmpty ? menuName : item.log.mealType.label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 14),
+                  style: theme.textTheme.bodyMedium,
                 ),
                 subtitle: Text(
                   dateFormat.format(item.log.eatenAt),
-                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                  style: theme.textTheme.bodySmall,
                 ),
-                trailing: const Icon(Icons.chevron_right, size: 20),
+                trailing: Icon(Icons.chevron_right,
+                    size: 20, color: tokens.textFaint),
                 onTap: () {
                   _closeSheet();
                   context.push('/meal/${item.log.id}');
@@ -967,6 +986,8 @@ class _MapTabState extends ConsumerState<MapTab> {
   }
 
   Widget _buildMealContent(MealLog log, List<MealPhoto> photos) {
+    final theme = Theme.of(context);
+    final tokens = KokoTokens.of(context);
     final dateFormat = DateFormat('M/d (E) HH:mm', 'ja');
 
     return Column(
@@ -977,14 +998,14 @@ class _MapTabState extends ConsumerState<MapTab> {
             height: 120,
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
               itemCount: photos.length,
               itemBuilder: (context, index) {
                 final photo = photos[index];
                 return Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(12),
                     child: CachedPhotoImage(
                       localPath: photo.localPath,
                       thumbnailPath: photo.thumbnailUrl,
@@ -998,7 +1019,7 @@ class _MapTabState extends ConsumerState<MapTab> {
             ),
           ),
         Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
           child: Row(
             children: [
               Expanded(
@@ -1008,13 +1029,18 @@ class _MapTabState extends ConsumerState<MapTab> {
                     if (photos.any((p) => p.displayName != null))
                       Text(
                         photos.where((p) => p.displayName != null).map((p) => p.displayName!).join('、'),
-                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                        style: theme.textTheme.titleSmall,
                         maxLines: 1, overflow: TextOverflow.ellipsis,
                       )
                     else
-                      Text(log.mealType.label, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                      Text(log.mealType.label,
+                          style: theme.textTheme.titleSmall),
                     const SizedBox(height: 4),
-                    Text(dateFormat.format(log.eatenAt), style: TextStyle(fontSize: 13, color: Colors.grey[600])),
+                    Text(
+                      dateFormat.format(log.eatenAt),
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: tokens.textMuted),
+                    ),
                   ],
                 ),
               ),
@@ -1034,14 +1060,17 @@ class _MapTabState extends ConsumerState<MapTab> {
   }
 
   Widget _buildPlaceContent(PlaceInfo place) {
+    final theme = Theme.of(context);
+    final tokens = KokoTokens.of(context);
+
     return Padding(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // サムネ画像
           ClipRRect(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(12),
             child: place.photoUrl != null
                 ? Image.network(
                     place.photoUrl!,
@@ -1060,23 +1089,28 @@ class _MapTabState extends ConsumerState<MapTab> {
               children: [
                 Text(
                   place.name,
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  style: theme.textTheme.titleMedium,
                   maxLines: 1, overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 4),
                 if (place.rating != null)
                   Row(
                     children: [
-                      Icon(Icons.star, size: 16, color: Colors.amber[700]),
+                      Icon(Icons.star,
+                          size: 16, color: theme.colorScheme.tertiary),
                       const SizedBox(width: 2),
                       Text(
                         place.rating!.toStringAsFixed(1),
-                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                        style: tokens.numeral.copyWith(fontSize: 13),
                       ),
                       if (place.userRatingCount != null)
                         Text(
                           ' (${place.userRatingCount}件)',
-                          style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                          style: tokens.numeral.copyWith(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w400,
+                            color: tokens.textMuted,
+                          ),
                         ),
                     ],
                   ),
@@ -1084,7 +1118,7 @@ class _MapTabState extends ConsumerState<MapTab> {
                 if (place.address != null)
                   Text(
                     place.address!,
-                    style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                    style: theme.textTheme.bodySmall,
                     maxLines: 1, overflow: TextOverflow.ellipsis,
                   ),
                 const SizedBox(height: 8),
@@ -1112,17 +1146,18 @@ class _MapTabState extends ConsumerState<MapTab> {
       isScrollControlled: true,
       builder: (sheetCtx) => StatefulBuilder(
         builder: (context, setSheetState) {
+          final tokens = KokoTokens.of(context);
           return SafeArea(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     children: [
-                      const Text('フィルタ',
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      Text('フィルタ',
+                          style: Theme.of(context).textTheme.titleMedium),
                       const Spacer(),
                       if (tempFilter.isActive)
                         TextButton(
@@ -1133,14 +1168,17 @@ class _MapTabState extends ConsumerState<MapTab> {
                         ),
                       IconButton(
                         icon: const Icon(Icons.close),
+                        color: tokens.textMuted,
                         onPressed: () => Navigator.pop(context),
                       ),
                     ],
                   ),
+                  const SizedBox(height: 4),
                   const Divider(),
+                  const SizedBox(height: 16),
 
                   // 期間
-                  const Text('期間', style: TextStyle(fontWeight: FontWeight.bold)),
+                  Text('期間', style: tokens.sectionLabel),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
@@ -1176,7 +1214,8 @@ class _MapTabState extends ConsumerState<MapTab> {
                         label: Text(tempFilter.dateRangeLabel == 'custom'
                             ? '${DateFormat('M/d').format(tempFilter.dateFrom!)}〜${DateFormat('M/d').format(tempFilter.dateTo!)}'
                             : 'カスタム'),
-                        avatar: const Icon(Icons.calendar_today, size: 16),
+                        avatar: Icon(Icons.calendar_today_outlined,
+                            size: 16, color: tokens.textMuted),
                         onPressed: () async {
                           final range = await showDateRangePicker(
                             context: context,
@@ -1198,15 +1237,13 @@ class _MapTabState extends ConsumerState<MapTab> {
                   const SizedBox(height: 16),
 
                   // テキスト検索
-                  const Text('キーワード', style: TextStyle(fontWeight: FontWeight.bold)),
+                  Text('キーワード', style: tokens.sectionLabel),
                   const SizedBox(height: 8),
                   TextField(
                     controller: TextEditingController(text: tempFilter.keyword),
                     decoration: const InputDecoration(
                       hintText: 'メニュー名で検索',
                       prefixIcon: Icon(Icons.search, size: 20),
-                      isDense: true,
-                      border: OutlineInputBorder(),
                     ),
                     onChanged: (v) {
                       tempFilter = tempFilter.copyWith(keyword: v);
@@ -1245,10 +1282,11 @@ class _MapTabState extends ConsumerState<MapTab> {
   }
 
   Widget _placeholderImage() {
+    final tokens = KokoTokens.of(context);
     return Container(
       width: 80, height: 80,
-      color: Colors.grey[200],
-      child: Icon(Icons.restaurant, color: Colors.grey[400]),
+      color: tokens.photoPlaceholder,
+      child: Icon(Icons.restaurant_outlined, color: tokens.textFaint),
     );
   }
 }

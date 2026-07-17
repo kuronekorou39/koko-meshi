@@ -7,6 +7,7 @@ import 'screens/home/home_screen.dart';
 import 'screens/capture/capture_screen.dart';
 import 'screens/detail/meal_detail_screen.dart';
 import 'screens/settings/settings_screen.dart';
+import 'theme/app_theme.dart';
 
 final navigatorKey = GlobalKey<NavigatorState>();
 
@@ -58,16 +59,8 @@ class KokoMeshiApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp.router(
       title: 'ココメシ',
-      theme: ThemeData(
-        colorSchemeSeed: Colors.orange,
-        useMaterial3: true,
-        brightness: Brightness.light,
-      ),
-      darkTheme: ThemeData(
-        colorSchemeSeed: Colors.orange,
-        useMaterial3: true,
-        brightness: Brightness.dark,
-      ),
+      theme: AppTheme.light,
+      darkTheme: AppTheme.dark,
       routerConfig: _router,
       debugShowCheckedModeBanner: false,
     );

@@ -20,6 +20,8 @@ import '../../services/auth_service.dart';
 import '../../services/location_service.dart';
 import '../../services/photo_service.dart';
 import '../../services/sync_service.dart';
+import '../../theme/app_theme.dart';
+import '../../theme/meal_type_style.dart';
 import 'photo_editor_screen.dart';
 
 class CaptureScreen extends ConsumerStatefulWidget {
@@ -171,24 +173,22 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
               // 写真追加ボタン（入り方で出し分け）
               OutlinedButton.icon(
                 onPressed: widget.fromLibrary ? _pickFromLibrary : _takePhoto,
-                icon: Icon(widget.fromLibrary ? Icons.photo_library : Icons.add_a_photo),
+                icon: Icon(widget.fromLibrary
+                    ? Icons.photo_library_outlined
+                    : Icons.add_a_photo_outlined),
                 label: Text(widget.fromLibrary ? 'ライブラリから追加' : '追加撮影'),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
 
               // 食事種別選択
+              Text('食事の種類', style: KokoTokens.of(context).sectionLabel),
+              const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
-                runSpacing: 4,
-                children: MealType.values.map((type) {
-                  final selected = type == _selectedType;
-                  return ChoiceChip(
-                    label: Text(type.label),
-                    selected: selected,
-                    onSelected: (_) => setState(() => _selectedType = type),
-                    visualDensity: VisualDensity.compact,
-                  );
-                }).toList(),
+                runSpacing: 8,
+                children: MealType.values
+                    .map((type) => _mealTypeChoice(type, type == _selectedType))
+                    .toList(),
               ),
               const SizedBox(height: 12),
 
@@ -203,7 +203,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                   Material(
                     color: _aiEnabled
                         ? Theme.of(context).colorScheme.primaryContainer
-                        : Theme.of(context).colorScheme.surfaceContainerHighest,
+                        : Theme.of(context).colorScheme.surfaceContainerHigh,
                     borderRadius: BorderRadius.circular(12),
                     child: InkWell(
                       borderRadius: BorderRadius.circular(12),
@@ -217,18 +217,18 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                               _aiEnabled ? Icons.auto_awesome : Icons.auto_awesome_outlined,
                               size: 20,
                               color: _aiEnabled
-                                  ? Theme.of(context).colorScheme.primary
-                                  : Colors.grey,
+                                  ? Theme.of(context).colorScheme.onPrimaryContainer
+                                  : KokoTokens.of(context).textMuted,
                             ),
                             const SizedBox(width: 4),
                             Text(
                               'AI',
                               style: TextStyle(
                                 fontSize: 13,
-                                fontWeight: FontWeight.bold,
+                                fontWeight: FontWeight.w700,
                                 color: _aiEnabled
-                                    ? Theme.of(context).colorScheme.primary
-                                    : Colors.grey,
+                                    ? Theme.of(context).colorScheme.onPrimaryContainer
+                                    : KokoTokens.of(context).textMuted,
                               ),
                             ),
                           ],
@@ -285,26 +285,29 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
 
   Widget _buildMetadataBar(DateFormat dateFormat) {
     final hasLocation = _position != null || _exifPosition != null;
+    final tokens = KokoTokens.of(context);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        color: Theme.of(context).colorScheme.surfaceContainerHigh,
         borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: tokens.hairline, width: 0.8),
       ),
       child: Row(
         children: [
           // 日時
-          Icon(Icons.schedule, size: 16, color: Colors.grey[600]),
+          Icon(Icons.schedule_outlined, size: 16, color: tokens.textMuted),
           const SizedBox(width: 4),
           Text(
             dateFormat.format(_capturedAt),
-            style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+            style: tokens.numeral
+                .copyWith(fontSize: 12, color: tokens.textMuted),
           ),
           const SizedBox(width: 12),
           // 位置情報
-          Icon(Icons.location_on, size: 16,
-            color: hasLocation ? Colors.grey[600] : Colors.grey[400]),
+          Icon(Icons.location_on_outlined, size: 16,
+            color: hasLocation ? tokens.textMuted : tokens.textFaint),
           const SizedBox(width: 4),
           Expanded(
             child: _loadingLocation
@@ -318,7 +321,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                         _address ??
                             '${(_position?.latitude ?? _exifPosition?.lat)?.toStringAsFixed(4)}, '
                             '${(_position?.longitude ?? _exifPosition?.lng)?.toStringAsFixed(4)}',
-                        style: TextStyle(fontSize: 12, color: Colors.grey[700]),
+                        style: TextStyle(fontSize: 12, color: tokens.textMuted),
                         overflow: TextOverflow.ellipsis,
                       )
                     : GestureDetector(
@@ -328,7 +331,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                         },
                         child: Text(
                           _locationCleared ? '位置情報なし (タップで再取得)' : '取得できません (タップで再取得)',
-                          style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                          style: TextStyle(fontSize: 12, color: tokens.textFaint),
                         ),
                       ),
           ),
@@ -338,7 +341,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
               onTap: _clearLocation,
               child: Padding(
                 padding: const EdgeInsets.only(left: 4),
-                child: Icon(Icons.close, size: 16, color: Colors.grey[500]),
+                child: Icon(Icons.close, size: 16, color: tokens.textFaint),
               ),
             ),
         ],
@@ -346,23 +349,64 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     );
   }
 
+  /// 食事種別の選択チップ(MealTypeStyleの色/アイコンを使用)
+  Widget _mealTypeChoice(MealType type, bool selected) {
+    final tokens = KokoTokens.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final fg = selected ? type.fg(context) : tokens.textMuted;
+    return Material(
+      color: selected ? type.bg(context) : scheme.surfaceContainerHigh,
+      shape: StadiumBorder(
+        side: BorderSide(
+          color: selected
+              ? type.fg(context).withValues(alpha: 0.4)
+              : tokens.hairline,
+          width: 0.8,
+        ),
+      ),
+      child: InkWell(
+        customBorder: const StadiumBorder(),
+        onTap: () => setState(() => _selectedType = type),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(type.icon, size: 15, color: fg),
+              const SizedBox(width: 4),
+              Text(
+                type.label,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                  color: fg,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildPhotoPlaceholder() {
+    final tokens = KokoTokens.of(context);
     return GestureDetector(
       onTap: _showPickerChoice,
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.grey[200],
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.grey[400]!),
+          color: tokens.photoPlaceholder,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: tokens.hairline, width: 0.8),
         ),
-        child: const Column(
+        child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.add_a_photo, size: 64, color: Colors.grey),
-            SizedBox(height: 16),
+            Icon(Icons.add_a_photo_outlined, size: 56, color: tokens.textFaint),
+            const SizedBox(height: 16),
             Text(
               'タップして写真を撮影・選択',
-              style: TextStyle(fontSize: 16, color: Colors.grey),
+              style: TextStyle(fontSize: 14, color: tokens.textMuted),
             ),
           ],
         ),
@@ -380,11 +424,12 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       itemCount: _selectedPhotos.length,
       itemBuilder: (context, index) {
         final item = _selectedPhotos[index];
+        final scheme = Theme.of(context).colorScheme;
         return Stack(
           fit: StackFit.expand,
           children: [
             ClipRRect(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(12),
               child: _buildPhotoThumbnail(item),
             ),
             // EXIF日時（ライブラリ写真で日時がある場合）
@@ -394,13 +439,14 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                 left: 0,
                 right: 0,
                 child: Container(
-                  decoration: BoxDecoration(
+                  decoration: const BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.bottomCenter,
                       end: Alignment.topCenter,
                       colors: [Colors.black54, Colors.transparent],
                     ),
-                    borderRadius: const BorderRadius.vertical(bottom: Radius.circular(8)),
+                    borderRadius:
+                        BorderRadius.vertical(bottom: Radius.circular(12)),
                   ),
                   padding: const EdgeInsets.fromLTRB(6, 16, 6, 4),
                   child: Text(
@@ -417,11 +463,11 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                 right: 4,
                 child: Container(
                   decoration: BoxDecoration(
-                    color: Colors.orange,
+                    color: scheme.tertiary,
                     borderRadius: BorderRadius.circular(4),
                   ),
                   padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                  child: const Icon(Icons.tune, size: 12, color: Colors.white),
+                  child: Icon(Icons.tune, size: 12, color: scheme.onTertiary),
                 ),
               ),
             // AI解析スキップ表示
@@ -430,10 +476,11 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                 child: Container(
                   decoration: BoxDecoration(
                     color: Colors.black26,
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(12),
                   ),
                   child: const Center(
-                    child: Icon(Icons.visibility_off, color: Colors.white70, size: 28),
+                    child: Icon(Icons.visibility_off_outlined,
+                        color: Colors.white70, size: 28),
                   ),
                 ),
               ),
@@ -481,7 +528,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                 },
                 child: Container(
                   decoration: BoxDecoration(
-                    color: item.skipAi ? Colors.orange : Colors.black54,
+                    color: item.skipAi ? scheme.tertiary : Colors.black54,
                     borderRadius: BorderRadius.circular(4),
                   ),
                   padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
@@ -489,14 +536,19 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
-                        item.skipAi ? Icons.visibility_off : Icons.auto_awesome,
+                        item.skipAi
+                            ? Icons.visibility_off_outlined
+                            : Icons.auto_awesome,
                         size: 12,
-                        color: Colors.white,
+                        color: item.skipAi ? scheme.onTertiary : Colors.white,
                       ),
                       const SizedBox(width: 2),
                       Text(
-                        item.skipAi ? 'AI off' : 'AI',
-                        style: const TextStyle(fontSize: 10, color: Colors.white),
+                        item.skipAi ? 'AI OFF' : 'AI',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: item.skipAi ? scheme.onTertiary : Colors.white,
+                        ),
                       ),
                     ],
                   ),
@@ -541,7 +593,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
-              leading: const Icon(Icons.camera_alt),
+              leading: const Icon(Icons.camera_alt_outlined),
               title: const Text('カメラで撮影'),
               onTap: () {
                 Navigator.pop(context);
@@ -549,7 +601,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library),
+              leading: const Icon(Icons.photo_library_outlined),
               title: const Text('ライブラリから選択'),
               onTap: () {
                 Navigator.pop(context);
