@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../../services/gemma_download_manager.dart';
 import '../../services/gemma_ondevice_service.dart';
 import '../../theme/app_theme.dart';
 
@@ -17,15 +18,22 @@ class GemmaPocScreen extends StatefulWidget {
 
 class _GemmaPocScreenState extends State<GemmaPocScreen> {
   final _svc = GemmaOnDeviceService.instance;
+  final _mgr = GemmaDownloadManager.instance;
   final _picker = ImagePicker();
 
-  final Map<GemmaModelKind, bool> _installed = {};
-  final Map<GemmaModelKind, int> _dlProgress = {};
+  /// DL状態とインストール済みフラグ(全モデル分)の変化をまとめて購読する
+  late final Listenable _mgrListenable = Listenable.merge([
+    for (final k in GemmaModelKind.values) ...[
+      _mgr.stateOf(k),
+      _mgr.installedOf(k),
+    ],
+  ]);
+
   final Map<GemmaModelKind, List<int>> _latencies = {
     for (final k in GemmaModelKind.values) k: [],
   };
 
-  GemmaModelKind? _busyKind; // DL/ロード中のモデル
+  GemmaModelKind? _busyKind; // ロード中のモデル
   bool _analyzing = false;
   GemmaModelKind? _loadedKind;
   int? _loadMs;
@@ -38,41 +46,26 @@ class _GemmaPocScreenState extends State<GemmaPocScreen> {
   int _selfTestDone = 0;
   GemmaSelfTestResult? _selfTest;
 
-  bool get _busy => _busyKind != null || _analyzing || _selfTesting;
+  bool get _downloading =>
+      GemmaModelKind.values.any((k) => _mgr.stateOf(k).value.downloading);
+
+  bool get _busy =>
+      _busyKind != null || _analyzing || _selfTesting || _downloading;
 
   @override
   void initState() {
     super.initState();
-    _checkInstalled();
-  }
-
-  Future<void> _checkInstalled() async {
     for (final k in GemmaModelKind.values) {
-      try {
-        final ok = await _svc.isInstalled(k);
-        if (mounted) setState(() => _installed[k] = ok);
-      } catch (e) {
-        if (mounted) setState(() => _status = 'init失敗: $e');
-      }
+      _mgr.refreshInstalled(k);
     }
   }
 
   Future<void> _install(GemmaModelKind k) async {
-    setState(() {
-      _busyKind = k;
-      _dlProgress[k] = 0;
-      _status = '${k.label} をDL中（${k.approxSize}）...';
-    });
+    setState(() => _status = '${k.label} をDL中（${k.approxSize}）...');
     try {
-      final src = await _svc.install(
-        k,
-        onProgress: (p) {
-          if (mounted) setState(() => _dlProgress[k] = p);
-        },
-      );
+      final src = await _mgr.download(k);
       if (mounted) {
         setState(() {
-          _installed[k] = true;
           _status = src == GemmaInstallSource.localFile
               ? '${k.label} 準備完了（端末内ファイルから）'
               : '${k.label} DL完了（ネットワーク）';
@@ -80,8 +73,6 @@ class _GemmaPocScreenState extends State<GemmaPocScreen> {
       }
     } catch (e) {
       if (mounted) setState(() => _status = '${k.label} DL失敗: $e');
-    } finally {
-      if (mounted) setState(() => _busyKind = null);
     }
   }
 
@@ -170,92 +161,98 @@ class _GemmaPocScreenState extends State<GemmaPocScreen> {
     final tokens = KokoTokens.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('オンデバイスGemma PoC')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Text('モデルを選んでロード', style: tokens.sectionLabel),
-          const SizedBox(height: 8),
-          ...GemmaModelKind.values.map(_buildModelCard),
+      // DL進捗はGemmaDownloadManagerが画面をまたいで保持しているので、
+      // 画面を離れて戻ってもここで購読し直すだけで進捗表示が復元される
+      body: ListenableBuilder(
+        listenable: _mgrListenable,
+        builder: (context, _) => ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Text('モデルを選んでロード', style: tokens.sectionLabel),
+            const SizedBox(height: 8),
+            ...GemmaModelKind.values.map(_buildModelCard),
 
-          const SizedBox(height: 12),
-          // 端末動作テスト（バンドル画像3枚・ギャラリー不要で確実に測れる）
-          FilledButton.icon(
-            onPressed: _busy || _loadedKind == null ? null : _runSelfTest,
-            icon: const Icon(Icons.speed_outlined),
-            label: Text(
-              _selfTesting ? 'テスト中... ($_selfTestDone/3)' : 'この端末で動作テスト（3枚）',
-            ),
-          ),
-          if (_selfTest != null) _buildVerdict(_selfTest!),
-
-          const SizedBox(height: 16),
-          Text('自分の写真で試す', style: tokens.sectionLabel),
-          const SizedBox(height: 8),
-          // 解析
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _busy || _loadedKind == null
-                      ? null
-                      : () => _pickAndAnalyze(ImageSource.gallery),
-                  icon: const Icon(Icons.photo_library_outlined),
-                  label: const Text('写真から'),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _busy || _loadedKind == null
-                      ? null
-                      : () => _pickAndAnalyze(ImageSource.camera),
-                  icon: const Icon(Icons.camera_alt_outlined),
-                  label: const Text('撮影'),
-                ),
-              ),
-            ],
-          ),
-          if (_loadedKind == null)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text('先にモデルをロードしてください',
-                  style: TextStyle(color: tokens.textFaint, fontSize: 12)),
-            ),
-
-          const SizedBox(height: 12),
-          if (_busy) const LinearProgressIndicator(),
-          if (_status.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Text(_status,
-                  style: TextStyle(color: tokens.textMuted, fontSize: 13)),
-            ),
-
-          if (_lastImage != null) ...[
-            const Divider(height: 24),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.file(_lastImage!,
-                  height: 220, width: double.infinity, fit: BoxFit.cover),
-            ),
             const SizedBox(height: 12),
-          ],
-          if (_result != null) _buildResult(_result!),
+            // 端末動作テスト（バンドル画像3枚・ギャラリー不要で確実に測れる）
+            FilledButton.icon(
+              onPressed: _busy || _loadedKind == null ? null : _runSelfTest,
+              icon: const Icon(Icons.speed_outlined),
+              label: Text(
+                _selfTesting ? 'テスト中... ($_selfTestDone/3)' : 'この端末で動作テスト（3枚）',
+              ),
+            ),
+            if (_selfTest != null) _buildVerdict(_selfTest!),
 
-          // モデル別の推論速度サマリ
-          ..._latencies.entries
-              .where((e) => e.value.length >= 2)
-              .map((e) => _buildLatencySummary(e.key, e.value)),
-        ],
+            const SizedBox(height: 16),
+            Text('自分の写真で試す', style: tokens.sectionLabel),
+            const SizedBox(height: 8),
+            // 解析
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _busy || _loadedKind == null
+                        ? null
+                        : () => _pickAndAnalyze(ImageSource.gallery),
+                    icon: const Icon(Icons.photo_library_outlined),
+                    label: const Text('写真から'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _busy || _loadedKind == null
+                        ? null
+                        : () => _pickAndAnalyze(ImageSource.camera),
+                    icon: const Icon(Icons.camera_alt_outlined),
+                    label: const Text('撮影'),
+                  ),
+                ),
+              ],
+            ),
+            if (_loadedKind == null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text('先にモデルをロードしてください',
+                    style: TextStyle(color: tokens.textFaint, fontSize: 12)),
+              ),
+
+            const SizedBox(height: 12),
+            if (_busy) const LinearProgressIndicator(),
+            if (_status.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text(_status,
+                    style: TextStyle(color: tokens.textMuted, fontSize: 13)),
+              ),
+
+            if (_lastImage != null) ...[
+              const Divider(height: 24),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.file(_lastImage!,
+                    height: 220, width: double.infinity, fit: BoxFit.cover),
+              ),
+              const SizedBox(height: 12),
+            ],
+            if (_result != null) _buildResult(_result!),
+
+            // モデル別の推論速度サマリ
+            ..._latencies.entries
+                .where((e) => e.value.length >= 2)
+                .map((e) => _buildLatencySummary(e.key, e.value)),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildModelCard(GemmaModelKind k) {
     final tokens = KokoTokens.of(context);
-    final installed = _installed[k] ?? false;
+    final installed = _mgr.installedOf(k).value ?? false;
+    final dl = _mgr.stateOf(k).value;
     final loaded = _loadedKind == k;
-    final downloading = _busyKind == k && !installed;
+    final downloading = dl.downloading;
 
     Widget action;
     if (!installed) {
@@ -309,10 +306,9 @@ class _GemmaPocScreenState extends State<GemmaPocScreen> {
                   padding: const EdgeInsets.only(top: 8),
                   child: Column(
                     children: [
-                      LinearProgressIndicator(
-                          value: (_dlProgress[k] ?? 0) / 100),
+                      LinearProgressIndicator(value: dl.progress / 100),
                       Text(
-                        '${_dlProgress[k] ?? 0}%',
+                        '${dl.progress}%',
                         style: tokens.numeral
                             .copyWith(fontSize: 12, color: tokens.textMuted),
                       ),

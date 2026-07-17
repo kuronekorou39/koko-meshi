@@ -14,9 +14,14 @@ enum GemmaModelKind {
     label: 'Gemma 4 E2B',
     note: '軽量・8GB端末で安定',
     fileName: 'gemma-4-E2B-it.litertlm',
+    // resolve/mainではなくコミットにピン留め(上流が同名で差し替えても
+    // expectedBytesとの食い違いで「毎回破損扱い」にならないように)
     url:
-        'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm',
+        'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/9262660a1676eed6d0c477ab1a86344430854664/gemma-4-E2B-it.litertlm',
     approxSize: '約2.4GB',
+    // HuggingFaceのlfs.size。DL完了後のサイズ検証に使う(過去にDL中断の
+    // 追記破損ファイルが「インストール済み」になった実績があるため)
+    expectedBytes: 2588147712,
     // visualTokenBudget 1120(画像だけで1120トークン)+プロンプト+出力が
     // 収まるように確保。KVキャッシュ増は2B級では数十MBで8GB端末でも許容
     maxTokens: 3072,
@@ -28,9 +33,12 @@ enum GemmaModelKind {
     label: 'Gemma 4 E4B',
     note: '高精度・12GB+推奨（8GBでは不安定/OOM）',
     fileName: 'gemma-4-E4B-it.litertlm',
+    // コミットピン留め(E2B側のコメント参照)
     url:
-        'https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm',
+        'https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/f7ad3343bd6ebc9607f4dc3bc4f2398bd5749bc5/gemma-4-E4B-it.litertlm',
     approxSize: '約3.4GB',
+    // HuggingFaceのlfs.size(E2B側のコメント参照)
+    expectedBytes: 3659530240,
     // E4Bはメモリが厳しいのでコンテキスト窓(=KVキャッシュ)を絞る。ただし
     // 画像280+プロンプト+出力で~1200トークン使うため1024では溢れる
     maxTokens: 1536,
@@ -44,6 +52,7 @@ enum GemmaModelKind {
     required this.fileName,
     required this.url,
     required this.approxSize,
+    required this.expectedBytes,
     required this.maxTokens,
     required this.visualTokenBudget,
   });
@@ -53,17 +62,20 @@ enum GemmaModelKind {
   final String fileName;
   final String url;
   final String approxSize;
+
+  /// 正規モデルファイルの正確なバイト数(DL完了後のサイズ検証用)
+  final int expectedBytes;
+
   final int maxTokens;
   final int visualTokenBudget;
 }
 
 enum GemmaInstallSource { localFile, network }
 
-/// オンデバイス Gemma 4 (vision, LiteRT-LM) 実機PoC サービス。
+/// オンデバイス Gemma 4 (vision, LiteRT-LM) サービス。
 /// E2B / E4B の両方を個別にインストールでき、どちらをロードするか選べる。
-/// プロンプトは Edge Function (analyze-meal-photo) 版をベースに、小型モデル
-/// 向けの精度対策(ジャンル固定リスト・麺類の観察ヒント)と image_type 判定を
-/// 加えた独自版(クラウド版とは同期していない)。
+/// プロンプトは小型モデル向けの精度対策(ジャンル固定リスト・麺類の観察
+/// ヒント)と image_type 判定を含む端末内解析専用版。
 class GemmaOnDeviceService {
   GemmaOnDeviceService._();
   static final GemmaOnDeviceService instance = GemmaOnDeviceService._();
@@ -163,7 +175,7 @@ image_typeは次の3つから1つ選んでください:
 
   /// 画像1枚を解析。生テキスト・パース結果・推論msを返す。
   /// [context] に撮影状況(食事種別・場所・時間帯など)を渡すとプロンプトに
-  /// 前置される(クラウド経路のcontextInfoと同じ方式。精度に効く)。
+  /// 前置される(精度に効く)。
   Future<GemmaAnalysisResult> analyze(
     Uint8List originalBytes, {
     String? context,
@@ -257,8 +269,12 @@ image_typeは次の3つから1つ選んでください:
       fileType: ModelFileType.litertlm,
     );
     final localPath = await _prePlacedModelPath(kind);
-    builder =
-        localPath != null ? builder.fromFile(localPath) : builder.fromNetwork(kind.url);
+    // foreground: true → background_downloaderが通知+フォアグラウンドサービスで
+    // DLする(非フォアグラウンドWorkManagerの9分タイムアウト→0%リトライ対策)。
+    // 必要なPOST_NOTIFICATIONS権限はSmartDownloaderがDL開始前に自動要求する
+    builder = localPath != null
+        ? builder.fromFile(localPath)
+        : builder.fromNetwork(kind.url, foreground: true);
     if (onProgress != null) {
       builder = builder.withProgress(onProgress);
     }
@@ -292,7 +308,7 @@ image_typeは次の3つから1つ選んでください:
     return Uint8List.fromList(img.encodeJpg(out, quality: 85));
   }
 
-  /// Edge Function の extractJson 相当。fenced/braces からJSONを救出。
+  /// モデル出力の fenced/braces からJSONを救出する。
   static Map<String, dynamic>? _extractJson(String text) {
     if (text.isEmpty) return null;
     final fenced = RegExp(r'```(?:json)?\s*([\s\S]*?)```').firstMatch(text);

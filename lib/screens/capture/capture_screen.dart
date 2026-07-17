@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -15,14 +16,14 @@ import '../../models/meal_photo.dart';
 import '../../models/meal_type.dart';
 import '../../providers/meal_providers.dart';
 import '../../services/ai_analysis_service.dart';
-import '../../app.dart';
 import '../../services/auth_service.dart';
 import '../../services/location_service.dart';
 import '../../services/photo_service.dart';
 import '../../services/sync_service.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/meal_type_style.dart';
-import 'photo_editor_screen.dart';
+import '../editor/photo_edit_core.dart';
+import '../editor/photo_editor_screen.dart';
 
 class CaptureScreen extends ConsumerStatefulWidget {
   final List<XFile>? initialPhotos;
@@ -37,17 +38,14 @@ class CaptureScreen extends ConsumerStatefulWidget {
 class _SelectedPhoto {
   final XFile originalFile; // 常にオリジナルを保持
   bool skipAi = false;
-  PhotoEditResult? editParams; // 編集パラメータ（nullなら未編集）
+  PhotoEditParams? editParams; // 編集パラメータ v2（nullなら未編集）
   DateTime? exifDateTime;
   double? exifLatitude;
   double? exifLongitude;
   _SelectedPhoto(this.originalFile);
 
-  /// 表示用パス（クロップがあればクロップ済み、なければオリジナル）
-  String get displayPath => editParams?.croppedPath ?? originalFile.path;
-
-  /// 保存用のソースパス（クロップ優先）
-  String get sourcePathForSave => editParams?.croppedPath ?? originalFile.path;
+  /// 見た目に影響する編集があるか（保存時に焼き込む対象か）
+  bool get hasEdits => editParams != null && !editParams!.isIdentity;
 }
 
 class _CaptureScreenState extends ConsumerState<CaptureScreen> {
@@ -457,7 +455,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                 ),
               ),
             // 編集済みバッジ
-            if (item.editParams?.hasEdits == true)
+            if (item.hasEdits)
               Positioned(
                 bottom: item.exifDateTime != null ? 20 : 4,
                 right: 4,
@@ -563,24 +561,18 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
 
   Widget _buildPhotoThumbnail(_SelectedPhoto item) {
     final image = Image.file(
-      File(item.displayPath),
+      File(item.originalFile.path),
       fit: BoxFit.cover,
       gaplessPlayback: true,
     );
 
-    final params = item.editParams;
-    if (params == null || !params.hasEdits) return image;
-
-    // フィルター調整があればColorFilteredで反映
-    final hasFilterEdits = params.brightness != 0 ||
-        params.contrast != 0 ||
-        params.saturation != 0 ||
-        params.warmth != 0;
-
-    if (!hasFilterEdits) return image;
+    // クロップ/回転は焼き込み前なのでプレビューには反映しない（編集済みバッジで示す）。
+    // フィルターのみColorFilteredで反映する
+    final filter = item.editParams?.filter;
+    if (filter == null || filter.isIdentity) return image;
 
     return ColorFiltered(
-      colorFilter: ColorFilter.matrix(buildEditColorMatrix(params)),
+      colorFilter: ColorFilter.matrix(buildEditColorMatrix(filter)),
       child: image,
     );
   }
@@ -659,24 +651,28 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
 
   Future<void> _editPhoto(int index) async {
     final item = _selectedPhotos[index];
-    final result = await Navigator.push<PhotoEditResult>(
+    final outcome = await Navigator.push<PhotoEditOutcome>(
       context,
       MaterialPageRoute(
         builder: (_) => PhotoEditorScreen(
-          filePath: item.originalFile.path,
+          imagePath: item.originalFile.path,
           initialParams: item.editParams,
         ),
       ),
     );
-    if (result != null && mounted) {
+    if (outcome is PhotoEditApplied && mounted) {
       setState(() {
-        item.editParams = result;
+        // 恒等（編集なし）で確定された場合は未編集扱いに戻す
+        item.editParams = outcome.params.isIdentity ? null : outcome.params;
       });
     }
   }
 
   Future<void> _save() async {
     setState(() => _saving = true);
+    // 画面を閉じた後に通知を出すため、アプリ直下のMessengerを先に掴んでおく
+    final messenger = ScaffoldMessenger.of(context);
+    var bakeFailures = 0; // 焼き込みに失敗しオリジナルで保存した枚数
 
     try {
       final mealLogId = _uuid.v4();
@@ -714,50 +710,43 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       );
       await LocalDatabase.insertMealLog(mealLog);
 
-      // 写真を保存（編集がある場合は先にisolateで処理してから保存）
-      for (final item in _selectedPhotos) {
+      // 写真を保存（編集がある場合は先にisolateで焼き込んでから保存）
+      for (var i = 0; i < _selectedPhotos.length; i++) {
+        final item = _selectedPhotos[i];
         // まずオリジナル（未編集）画像を保存
         final originalPath = await PhotoService.saveToLocalFromPath(
           item.originalFile.path,
         );
 
-        String fileToSave = item.sourcePathForSave;
-        final hasEdits = item.editParams != null && item.editParams!.hasEdits == true;
-
-        // フィルター編集がある場合、先にisolateで処理
-        if (hasEdits) {
+        // 編集がある場合はオリジナルへ焼き込み、パラメータもv2 JSONで保存する
+        // （詳細画面からオリジナル基準で再編集できるようにする）
+        String localPath = originalPath;
+        String? editParamsJson;
+        if (item.hasEdits) {
           final params = item.editParams!;
-          final hasFilterEdits = params.brightness != 0 ||
-              params.contrast != 0 ||
-              params.saturation != 0 ||
-              params.warmth != 0 ||
-              params.vignette != 0;
-
-          if (hasFilterEdits) {
-            final tmpDir = await getTemporaryDirectory();
-            final outputPath = '${tmpDir.path}/edit_${DateTime.now().millisecondsSinceEpoch}_${_selectedPhotos.indexOf(item)}.jpg';
-            final processed = await compute(processEditedImage, ImageProcessParams(
-              inputPath: fileToSave,
+          final tmpDir = await getTemporaryDirectory();
+          final outputPath =
+              '${tmpDir.path}/edit_${DateTime.now().millisecondsSinceEpoch}_$i.jpg';
+          final baked = await compute(
+            bakePhotoEdit,
+            PhotoEditBakeRequest(
+              inputPath: item.originalFile.path,
               outputPath: outputPath,
-              brightness: params.brightness,
-              contrast: params.contrast,
-              saturation: params.saturation,
-              warmth: params.warmth,
-              vignette: params.vignette,
-            ));
-            if (processed != null) {
-              fileToSave = processed;
-            }
+              params: params,
+            ),
+          );
+          if (baked != null) {
+            localPath = await PhotoService.saveToLocalFromPath(baked);
+            editParamsJson = jsonEncode(params.toJson());
+            // ローカルへコピー済みなので焼き込みの一時ファイルは片付ける
+            try {
+              await File(baked).delete();
+            } catch (_) {}
+          } else {
+            // 焼き込み失敗（非対応の画像形式やI/O失敗）。オリジナルで保存を
+            // 続行し、後でまとめて通知する
+            bakeFailures++;
           }
-        }
-
-        // 編集済み（or 未編集）ファイルを保存
-        final String localPath;
-        if (hasEdits) {
-          localPath = await PhotoService.saveToLocalFromPath(fileToSave);
-        } else {
-          // 編集なし: オリジナルと同じパス
-          localPath = originalPath;
         }
         final thumbnailPath = await PhotoService.generateThumbnail(localPath);
 
@@ -773,6 +762,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
           thumbnailUrl: thumbnailPath,
           skipAi: item.skipAi || !_aiEnabled,
           aiStatus: (item.skipAi || !_aiEnabled) ? 'skipped' : 'pending',
+          editParamsJson: editParamsJson,
           shotAt: photoShotAt,
           latitude: photoLat,
           longitude: photoLng,
@@ -785,41 +775,21 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       ref.read(mealLogsProvider.notifier).refresh();
       if (mounted) context.pop();
 
+      // 焼き込みに失敗した写真があれば通知（オリジナルで保存済み）
+      if (bakeFailures > 0) {
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              '$bakeFailures枚の写真は編集を反映できませんでした（非対応の画像形式の可能性）',
+            ),
+          ),
+        );
+      }
+
       // --- 以下バックグラウンド処理（画面はすでに閉じている） ---
 
-      // AI解析（Edge Function経由）
-      AiAnalysisService.anonymousLimitReached = false;
+      // AI解析（端末内Gemma）
       await AiAnalysisService.processPendingPhotos();
-
-      // 匿名ユーザーのAI解析上限に達した場合、ログイン促進ダイアログを表示
-      if (AiAnalysisService.anonymousLimitReached) {
-        final ctx = navigatorKey.currentContext;
-        if (ctx != null) {
-          showDialog(
-            context: ctx,
-            builder: (dialogCtx) => AlertDialog(
-              title: const Text('AI解析の上限に達しました'),
-              content: const Text(
-                'お試し3回分のAI解析を使い切りました。\n'
-                'ログインすると月90回までAI解析が使えます。',
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogCtx),
-                  child: const Text('後で'),
-                ),
-                FilledButton(
-                  onPressed: () {
-                    Navigator.pop(dialogCtx);
-                    GoRouter.of(ctx).push('/login');
-                  },
-                  child: const Text('ログイン'),
-                ),
-              ],
-            ),
-          );
-        }
-      }
 
       // ログイン中ならクラウドに同期
       if (AuthService.isLoggedIn) {

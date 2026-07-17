@@ -9,6 +9,7 @@ import '../../models/saved_place.dart';
 import '../../providers/auth_providers.dart';
 import '../../services/app_settings_service.dart';
 import '../../services/auth_service.dart';
+import '../../services/gemma_download_manager.dart';
 import '../../services/gemma_ondevice_service.dart';
 import '../../services/sync_service.dart';
 import '../../theme/app_theme.dart';
@@ -27,10 +28,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   String _appVersion = '';
 
   // AI解析モード
-  AiAnalysisMode _aiMode = AiAnalysisMode.cloud;
-  bool _e2bInstalled = false;
-  bool _dlBusy = false;
-  int _dlProgress = 0;
+  AiAnalysisMode _aiMode = AiAnalysisMode.onDevice;
 
   @override
   void initState() {
@@ -38,14 +36,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _aiMode = AppSettings.aiMode;
     _loadSavedPlaces();
     _loadVersion();
-    _checkE2b();
-  }
-
-  Future<void> _checkE2b() async {
-    try {
-      final ok = await GemmaOnDeviceService.instance.isInstalled(GemmaModelKind.e2b);
-      if (mounted) setState(() => _e2bInstalled = ok);
-    } catch (_) {}
+    // DL状態・インストール済みフラグはGemmaDownloadManagerが画面をまたいで
+    // 保持しているので、ここでは最新化だけ依頼する
+    GemmaDownloadManager.instance.refreshInstalled(GemmaModelKind.e2b);
   }
 
   Future<void> _setAiMode(AiAnalysisMode mode) async {
@@ -54,26 +47,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _downloadModel() async {
-    setState(() {
-      _dlBusy = true;
-      _dlProgress = 0;
-    });
     try {
-      await GemmaOnDeviceService.instance.install(
-        GemmaModelKind.e2b,
-        onProgress: (p) {
-          if (mounted) setState(() => _dlProgress = p);
-        },
-      );
-      if (mounted) setState(() => _e2bInstalled = true);
+      await GemmaDownloadManager.instance.download(GemmaModelKind.e2b);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('モデルのDLに失敗: $e')),
         );
       }
-    } finally {
-      if (mounted) setState(() => _dlBusy = false);
     }
   }
 
@@ -350,18 +331,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         child: SegmentedButton<AiAnalysisMode>(
           segments: const [
             ButtonSegment(value: AiAnalysisMode.onDevice, label: Text('端末内')),
-            ButtonSegment(value: AiAnalysisMode.cloud, label: Text('クラウド')),
             ButtonSegment(value: AiAnalysisMode.off, label: Text('オフ')),
           ],
           selected: {_aiMode},
           onSelectionChanged: (s) => _setAiMode(s.first),
         ),
       ),
-      Padding(
-        padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
-        child: Text(
-          _aiModeDescription(),
-          style: TextStyle(fontSize: 12, height: 1.4, color: tokens.textMuted),
+      ValueListenableBuilder<bool?>(
+        valueListenable:
+            GemmaDownloadManager.instance.installedOf(GemmaModelKind.e2b),
+        builder: (context, installed, _) => Padding(
+          padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+          child: Text(
+            _aiModeDescription(installed ?? false),
+            style:
+                TextStyle(fontSize: 12, height: 1.4, color: tokens.textMuted),
+          ),
         ),
       ),
       if (_aiMode == AiAnalysisMode.onDevice) ...[
@@ -371,66 +356,95 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     ];
   }
 
-  String _aiModeDescription() {
+  String _aiModeDescription(bool e2bInstalled) {
     switch (_aiMode) {
       case AiAnalysisMode.onDevice:
-        return _e2bInstalled
+        return e2bInstalled
             ? '端末内のGemma 4 E2Bで解析（オフライン・無料・写真は外部送信なし）。'
             : 'オフラインで解析します。まずモデル（約2.4GB）のダウンロードが必要です。';
-      case AiAnalysisMode.cloud:
-        return 'オンラインでクラウド解析（レガシー）。回数制限あり。';
       case AiAnalysisMode.off:
         return 'AI解析を使わず、料理名・価格・カロリーは手動入力します。';
     }
   }
 
+  /// E2BモデルのDL状態タイル。進捗はGemmaDownloadManagerが保持しているので、
+  /// DL中に画面を離れて戻っても進捗バーが復元される。
   Widget _buildOnDeviceModelTile() {
+    final mgr = GemmaDownloadManager.instance;
     final tokens = KokoTokens.of(context);
-    if (_dlBusy) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(999),
-            child: LinearProgressIndicator(value: _dlProgress / 100, minHeight: 6),
-          ),
-          const SizedBox(height: 8),
-          Text.rich(
-            TextSpan(
-              children: [
-                const TextSpan(text: 'モデルをダウンロード中 '),
+    final scheme = Theme.of(context).colorScheme;
+    return ValueListenableBuilder<GemmaDownloadState>(
+      valueListenable: mgr.stateOf(GemmaModelKind.e2b),
+      builder: (context, dl, _) {
+        if (dl.downloading) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(999),
+                child: LinearProgressIndicator(
+                    value: dl.progress / 100, minHeight: 6),
+              ),
+              const SizedBox(height: 8),
+              Text.rich(
                 TextSpan(
-                  text: '$_dlProgress%',
-                  style: tokens.numeral.copyWith(fontSize: 12),
+                  children: [
+                    const TextSpan(text: 'モデルをダウンロード中 '),
+                    TextSpan(
+                      text: '${dl.progress}%',
+                      style: tokens.numeral.copyWith(fontSize: 12),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-            style: TextStyle(fontSize: 12, color: tokens.textMuted),
-          ),
-        ],
-      );
-    }
-    if (!_e2bInstalled) {
-      return SizedBox(
-        width: double.infinity,
-        child: FilledButton.tonalIcon(
-          onPressed: _downloadModel,
-          icon: const Icon(Icons.download_outlined),
-          label: const Text('モデルをダウンロード（約2.4GB・Wi-Fi推奨）'),
-        ),
-      );
-    }
-    return _sectionCard([
-      ListTile(
-        leading: const Icon(Icons.speed_outlined),
-        title: const Text('この端末で動作テスト'),
-        subtitle: const Text('E2Bがこの端末で快適に動くか確認'),
-        trailing: const Icon(Icons.chevron_right),
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const GemmaPocScreen()),
-        ),
-      ),
-    ]);
+                style: TextStyle(fontSize: 12, color: tokens.textMuted),
+              ),
+            ],
+          );
+        }
+        return ValueListenableBuilder<bool?>(
+          valueListenable: mgr.installedOf(GemmaModelKind.e2b),
+          builder: (context, installed, _) {
+            if (installed != true) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.tonalIcon(
+                      onPressed: _downloadModel,
+                      icon: const Icon(Icons.download_outlined),
+                      label: Text(
+                        'モデルをダウンロード（${GemmaModelKind.e2b.approxSize}・Wi-Fi推奨）',
+                      ),
+                    ),
+                  ),
+                  // 別画面でDLが失敗していた場合もここに理由を表示する
+                  if (dl.error != null)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+                      child: Text(
+                        dl.error!,
+                        style: TextStyle(fontSize: 12, color: scheme.error),
+                      ),
+                    ),
+                ],
+              );
+            }
+            return _sectionCard([
+              ListTile(
+                leading: const Icon(Icons.speed_outlined),
+                title: const Text('この端末で動作テスト'),
+                subtitle: const Text('E2Bがこの端末で快適に動くか確認'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const GemmaPocScreen()),
+                ),
+              ),
+            ]);
+          },
+        );
+      },
+    );
   }
 
   Widget _buildLoggedOutSection() {

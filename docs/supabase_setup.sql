@@ -10,8 +10,6 @@ CREATE TABLE IF NOT EXISTS profiles (
   email TEXT,
   avatar_url TEXT,
   plan TEXT NOT NULL DEFAULT 'free',  -- free / premium
-  ai_usage_count INTEGER NOT NULL DEFAULT 0,
-  ai_usage_reset_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   storage_used_bytes BIGINT NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -118,8 +116,8 @@ CREATE POLICY "Users can manage own saved_places"
 
 
 -- 6. プラン定数
--- free: AI解析 30回/月, ストレージ 500MB
--- premium: AI解析 無制限, ストレージ 50GB
+-- free: ストレージ 500MB
+-- premium: ストレージ 50GB
 
 -- 7. 新規ユーザー作成時に自動でprofilesレコードを作成するトリガー
 CREATE OR REPLACE FUNCTION handle_new_user()

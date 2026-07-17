@@ -11,13 +11,10 @@ import '../../models/meal_photo.dart';
 import '../../models/meal_type.dart';
 import '../../providers/meal_providers.dart';
 import '../../services/ai_analysis_service.dart';
-import '../../services/ai_rate_limit_service.dart';
 import '../../services/auth_service.dart';
 import 'package:geolocator/geolocator.dart';
 import '../../services/photo_service.dart';
 import '../../services/sync_service.dart';
-import '../../widgets/ai_limit_dialog.dart';
-import '../../app.dart';
 import '../capture/camera_screen.dart';
 import 'timeline_tab.dart';
 import 'map_tab.dart';
@@ -37,6 +34,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     TimelineTab(onLibraryPressed: _onLibraryPressed),
     const MapTab(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    // アプリ起動時、未解析(pending)のまま残っている写真があれば解析+同期を回す
+    // (モデルDL前に保存した写真などが「解析中」のまま止まらないように)
+    _runBackgroundAiAndSync();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -258,57 +263,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     _runBackgroundAiAndSync();
   }
 
-  /// バックグラウンドAI解析 + 同期
+  /// バックグラウンドAI解析 + 同期。
+  /// 起動時(initState)にも呼ばれるため例外は握って落とさない
+  /// (テスト環境のDB/環境変数未初期化や、起動直後のI/O失敗でクラッシュさせない)
   Future<void> _runBackgroundAiAndSync() async {
-    final rateLimitStatus = await AiRateLimitService.getStatus();
-    if (rateLimitStatus.canUse) {
-      AiAnalysisService.anonymousLimitReached = false;
-      AiAnalysisService.processPendingPhotos().then((_) {
-        if (mounted) ref.read(mealLogsProvider.notifier).refresh();
-
-        if (AiAnalysisService.anonymousLimitReached) {
-          final ctx = navigatorKey.currentContext;
-          if (ctx != null) {
-            showDialog(
-              context: ctx,
-              builder: (dialogCtx) => AlertDialog(
-                title: const Text('AI解析の上限に達しました'),
-                content: const Text(
-                  'お試し3回分のAI解析を使い切りました。\n'
-                  'ログインすると月90回までAI解析が使えます。',
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(dialogCtx),
-                    child: const Text('後で'),
-                  ),
-                  FilledButton(
-                    onPressed: () {
-                      Navigator.pop(dialogCtx);
-                      GoRouter.of(ctx).push('/login');
-                    },
-                    child: const Text('ログイン'),
-                  ),
-                ],
-              ),
-            );
-          }
-        }
-
-        if (AuthService.isLoggedIn) SyncService.syncAll();
-      });
-    } else if (mounted) {
-      final recovered = await showAiLimitDialog(context, rateLimitStatus);
-      if (recovered == true) {
-        AiAnalysisService.processPendingPhotos().then((_) {
-          if (mounted) ref.read(mealLogsProvider.notifier).refresh();
-          if (AuthService.isLoggedIn) SyncService.syncAll();
-        });
-      }
-    }
-
-    if (AuthService.isLoggedIn) {
-      SyncService.syncAll();
+    try {
+      // 写真本体は先に同期し、AI解析完了後にメタデータを再同期する
+      if (AuthService.isLoggedIn) SyncService.syncAll();
+      await AiAnalysisService.processPendingPhotos();
+      if (mounted) ref.read(mealLogsProvider.notifier).refresh();
+      if (AuthService.isLoggedIn) SyncService.syncAll();
+    } catch (e) {
+      debugPrint('[Home] background AI/sync failed: $e');
     }
   }
 }

@@ -21,7 +21,7 @@ class LocalDatabase {
 
     return openDatabase(
       path,
-      version: 8,
+      version: 9,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -87,7 +87,6 @@ class LocalDatabase {
       )
     ''');
     await _createSavedPlacesTable(db);
-    await _createAiUsageLogTable(db);
   }
 
   static Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -102,9 +101,8 @@ class LocalDatabase {
       await db.execute('ALTER TABLE meal_logs ADD COLUMN latitude REAL');
       await db.execute('ALTER TABLE meal_logs ADD COLUMN longitude REAL');
     }
-    if (oldVersion < 5) {
-      await _createAiUsageLogTable(db);
-    }
+    // oldVersion < 5: ai_usage_logテーブルを作成していたが、
+    // クラウドAI判定の廃止に伴いv9で削除するためno-op化
     if (oldVersion < 6) {
       await db.execute('ALTER TABLE meal_photos ADD COLUMN skip_ai INTEGER NOT NULL DEFAULT 0');
     }
@@ -113,6 +111,10 @@ class LocalDatabase {
     }
     if (oldVersion < 8) {
       await db.execute('ALTER TABLE meal_photos ADD COLUMN edit_params TEXT');
+    }
+    if (oldVersion < 9) {
+      // クラウドAI判定の廃止: レート制限用の使用ログテーブルを撤去
+      await db.execute('DROP TABLE IF EXISTS ai_usage_log');
     }
   }
 
@@ -127,57 +129,6 @@ class LocalDatabase {
         created_at TEXT NOT NULL
       )
     ''');
-  }
-
-  static Future<void> _createAiUsageLogTable(Database db) async {
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS ai_usage_log (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        used_at TEXT NOT NULL,
-        source TEXT NOT NULL DEFAULT 'normal'
-      )
-    ''');
-  }
-
-  // --- AI Usage Log ---
-
-  static Future<void> insertAiUsage() async {
-    final db = await database;
-    await db.insert('ai_usage_log', {
-      'used_at': DateTime.now().toIso8601String(),
-      'source': 'normal',
-    });
-  }
-
-  static Future<int> getAiUsageCount(Duration window) async {
-    final db = await database;
-    final since = DateTime.now().subtract(window).toIso8601String();
-    final result = await db.rawQuery(
-      'SELECT COUNT(*) as cnt FROM ai_usage_log WHERE used_at > ?',
-      [since],
-    );
-    return Sqflite.firstIntValue(result) ?? 0;
-  }
-
-  /// 指定ウィンドウ内の最も古いAI使用ログのタイムスタンプを取得
-  static Future<DateTime?> getOldestAiUsageInWindow(Duration window) async {
-    final db = await database;
-    final since = DateTime.now().subtract(window).toIso8601String();
-    final result = await db.rawQuery(
-      'SELECT MIN(used_at) as oldest FROM ai_usage_log WHERE used_at > ?',
-      [since],
-    );
-    final oldest = result.first['oldest'] as String?;
-    return oldest != null ? DateTime.parse(oldest) : null;
-  }
-
-  static Future<void> addBonusAiUsage(int count) async {
-    final db = await database;
-    // ボーナス: 最も古い使用ログをcount件削除（枠を回復）
-    await db.rawDelete(
-      'DELETE FROM ai_usage_log WHERE id IN (SELECT id FROM ai_usage_log ORDER BY used_at ASC LIMIT ?)',
-      [count],
-    );
   }
 
   // --- MealLog CRUD ---
@@ -216,6 +167,13 @@ class LocalDatabase {
   static Future<void> insertMealPhoto(MealPhoto photo) async {
     final db = await database;
     await db.insert('meal_photos', photo.toMap());
+  }
+
+  static Future<MealPhoto?> getMealPhoto(String id) async {
+    final db = await database;
+    final maps = await db.query('meal_photos', where: 'id = ?', whereArgs: [id]);
+    if (maps.isEmpty) return null;
+    return MealPhoto.fromMap(maps.first);
   }
 
   static Future<List<MealPhoto>> getPhotosForMealLog(String mealLogId) async {

@@ -21,15 +21,6 @@ void main() async {
       url: Env.supabaseUrl,
       anonKey: Env.supabaseAnonKey,
     );
-
-    // 未認証の場合は匿名認証を自動実行（Edge Function利用に必要）
-    if (Supabase.instance.client.auth.currentUser == null) {
-      try {
-        await Supabase.instance.client.auth.signInAnonymously();
-      } catch (e) {
-        debugPrint('[Auth] Anonymous sign-in failed: $e');
-      }
-    }
   }
 
   runApp(

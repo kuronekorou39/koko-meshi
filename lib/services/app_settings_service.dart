@@ -3,8 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// AI解析のモード
 /// - off: AI解析を使わない(手動入力のみ)
 /// - onDevice: 端末内Gemma(E2B)で解析(オフライン・無料)
-/// - cloud: クラウド(Edge Function経由)で解析(レガシー)
-enum AiAnalysisMode { off, onDevice, cloud }
+enum AiAnalysisMode { off, onDevice }
 
 class AppSettings {
   AppSettings._();
@@ -35,19 +34,16 @@ class AppSettings {
     await _prefs?.setBool(_keyDeleteAfterUpload, value);
   }
 
-  // --- AI解析モード(オフ / 端末内 / クラウド) ---
+  // --- AI解析モード(オフ / 端末内) ---
   static const _keyAiMode = 'ai_analysis_mode';
 
   static AiAnalysisMode get aiMode {
     switch (_prefs?.getString(_keyAiMode)) {
       case 'off':
         return AiAnalysisMode.off;
-      case 'onDevice':
-        return AiAnalysisMode.onDevice;
-      case 'cloud':
-        return AiAnalysisMode.cloud;
       default:
-        return AiAnalysisMode.cloud; // 既定はクラウド(既存挙動を維持)
+        // 'cloud'(廃止済み)や不明値を含め、既定は端末内AI
+        return AiAnalysisMode.onDevice;
     }
   }
 

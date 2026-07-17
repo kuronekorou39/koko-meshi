@@ -2,23 +2,27 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show ValueListenable, compute;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../../database/local_database.dart';
 import '../../models/meal_log.dart';
 import '../../models/meal_photo.dart';
 import '../../providers/meal_providers.dart';
 import '../../services/ai_analysis_service.dart';
-import '../../services/ai_rate_limit_service.dart';
 import '../../services/app_settings_service.dart';
+import '../../services/gemma_download_manager.dart';
+import '../../services/gemma_ondevice_service.dart';
 import '../../services/photo_service.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/meal_type_style.dart';
 import '../../widgets/cached_photo_image.dart';
-import '../capture/crop_screen.dart';
+import '../editor/photo_edit_core.dart';
+import '../editor/photo_editor_screen.dart';
 import 'photo_viewer_screen.dart';
 
 class MealDetailScreen extends ConsumerStatefulWidget {
@@ -34,8 +38,29 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
   Timer? _refreshTimer;
   int _selectedPhotoIndex = 0;
 
+  /// 端末内AIモデル(E2B)がインストール済みか。null=未確認。
+  /// GemmaDownloadManagerが画面をまたいで保持しているので、この画面を
+  /// 開いたままDLが完了した場合も表示が追従する
+  final ValueListenable<bool?> _e2bInstalled =
+      GemmaDownloadManager.instance.installedOf(GemmaModelKind.e2b);
+
+  @override
+  void initState() {
+    super.initState();
+    _e2bInstalled.addListener(_onE2bInstalledChanged);
+    // 端末内AIモード時のみ最新化を依頼する(結果は_e2bInstalledに反映される)
+    if (AppSettings.aiMode == AiAnalysisMode.onDevice) {
+      GemmaDownloadManager.instance.refreshInstalled(GemmaModelKind.e2b);
+    }
+  }
+
+  void _onE2bInstalledChanged() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    _e2bInstalled.removeListener(_onE2bInstalledChanged);
     _refreshTimer?.cancel();
     super.dispose();
   }
@@ -340,6 +365,12 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
         return _buildCompletedResult(photo);
       case 'pending':
       case 'processing':
+        // 端末内AIモデルが未ダウンロードだと解析は始まらないので、
+        // 「解析中」ではなく設定画面への誘導を出す
+        if (AppSettings.aiMode == AiAnalysisMode.onDevice &&
+            _e2bInstalled.value == false) {
+          return _buildModelMissingNotice();
+        }
         return _buildStatusCard(
           leading: const SizedBox(
             width: 16,
@@ -396,6 +427,24 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
         onPressed: () => _retryForPhoto(photo),
         icon: const Icon(Icons.auto_awesome_outlined, size: 16),
         label: const Text('解析する'),
+        style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+      ),
+    );
+  }
+
+  /// 端末内AIモデル未ダウンロード時の表示（設定画面へのリンク付き）
+  Widget _buildModelMissingNotice() {
+    return _buildStatusCard(
+      leading: Icon(
+        Icons.download_for_offline_outlined,
+        size: 18,
+        color: KokoTokens.of(context).textFaint,
+      ),
+      message: '端末内AIモデルが未ダウンロードです',
+      action: TextButton.icon(
+        onPressed: () => context.push('/settings'),
+        icon: const Icon(Icons.settings_outlined, size: 16),
+        label: const Text('設定'),
         style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
       ),
     );
@@ -566,21 +615,13 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
     );
   }
 
-  /// 個別写真のAI解析リトライ
+  /// 個別写真のAI解析リトライ。
+  /// SnackBarアクションから画面破棄後に呼ばれてもDB更新と解析起動は行われるよう、
+  /// ref/context へのアクセスはすべて mounted ガード後に限定する。
   Future<void> _retryForPhoto(MealPhoto photo) async {
-    final status = await AiRateLimitService.getStatus();
-    if (!status.canUse) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('AI解析の回数上限に達しています')),
-        );
-      }
-      return;
-    }
-
+    // DB更新 → 解析起動（ここまではUIに触れないので画面破棄後でも安全）
     final updated = photo.copyWith(aiStatus: 'pending', skipAi: false);
     await LocalDatabase.updateMealPhoto(updated);
-    ref.invalidate(mealPhotosProvider(widget.mealLogId));
 
     AiAnalysisService.processPendingPhotos().then((_) {
       if (mounted) {
@@ -588,109 +629,247 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
         ref.read(mealLogsProvider.notifier).refresh();
       }
     });
+
+    // 起動直後のUI反映（pending表示への切替）は画面が生きているときだけ
+    if (mounted) {
+      ref.invalidate(mealPhotosProvider(widget.mealLogId));
+    }
   }
 
-  /// 編集用のファイルパスを取得（localPath → originalLocalPath → thumbnailUrl の順で試行）
-  String? _findEditableFile(MealPhoto photo) {
+  /// 編集元のファイルパスを決める（常に真のオリジナルを優先）
+  String? _resolveEditSource(MealPhoto photo) {
+    final original = photo.originalLocalPath;
+    if (original != null && File(original).existsSync()) return original;
     if (File(photo.localPath).existsSync()) return photo.localPath;
-    if (photo.originalLocalPath != null && File(photo.originalLocalPath!).existsSync()) {
-      return photo.originalLocalPath!;
-    }
-    if (photo.thumbnailUrl != null && File(photo.thumbnailUrl!).existsSync()) {
-      return photo.thumbnailUrl!;
-    }
     return null;
   }
 
   Future<void> _editPhoto(MealPhoto photo) async {
-    // 編集可能なファイルを探す
-    final editSource = _findEditableFile(photo);
+    final editSource = _resolveEditSource(photo);
     if (editSource == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('写真ファイルが見つかりません')),
-        );
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('写真ファイルが見つかりません')),
+      );
       return;
     }
 
-    // 保存済み編集パラメータを復元
-    CropEditParams? savedParams;
-    if (photo.editParamsJson != null) {
+    // 保存済み編集パラメータ（v2のみ。v1や欠損はnull=初期状態から）を復元。
+    // オリジナルを失って焼き込み済み画像を編集元にする場合は座標系が合わないため復元しない
+    PhotoEditParams? initialParams;
+    final editingOriginal =
+        photo.originalLocalPath == null || editSource == photo.originalLocalPath;
+    if (editingOriginal && photo.editParamsJson != null) {
       try {
-        savedParams = CropEditParams.fromJson(
+        initialParams = PhotoEditParams.fromJson(
           jsonDecode(photo.editParamsJson!) as Map<String, dynamic>,
         );
-      } catch (_) {}
+      } catch (_) {
+        initialParams = null;
+      }
     }
 
-    // オリジナルが別途存在するか
-    final hasOriginal = photo.originalLocalPath != null &&
-        File(photo.originalLocalPath!).existsSync() &&
-        photo.originalLocalPath != photo.localPath;
+    // 編集済みで、かつオリジナルが別ファイルとして残っている場合のみ「オリジナルに戻す」を出す
+    final canRestoreOriginal = photo.originalLocalPath != null &&
+        photo.originalLocalPath != photo.localPath &&
+        File(photo.originalLocalPath!).existsSync();
 
-    // 直接CropScreenを開く
-    final result = await Navigator.push<CropResult>(
+    final outcome = await Navigator.push<PhotoEditOutcome>(
       context,
       MaterialPageRoute(
-        builder: (_) => CropScreen(
-          filePath: editSource,
-          initialParams: savedParams,
-          hasOriginal: hasOriginal,
+        builder: (_) => PhotoEditorScreen(
+          imagePath: editSource,
+          initialParams: initialParams,
+          canRestoreOriginal: canRestoreOriginal,
         ),
       ),
     );
 
-    if (result == null || !mounted) return;
+    if (outcome == null || !mounted) return;
 
-    // オリジナル復元のシグナル
-    if (result.croppedPath == '_restore_original_') {
-      await _resetToOriginal(photo);
-      return;
-    }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('写真を処理中...')),
-    );
-
-    final newLocalPath = await PhotoService.saveToLocalFromPath(result.croppedPath);
-    final newThumbPath = await PhotoService.generateThumbnail(newLocalPath);
-
-    final updated = photo.copyWith(
-      localPath: newLocalPath,
-      originalLocalPath: editSource,
-      thumbnailUrl: newThumbPath,
-      editParamsJson: jsonEncode(result.editParams.toJson()),
-    );
-    await LocalDatabase.updateMealPhoto(updated);
-    ref.invalidate(mealPhotosProvider(widget.mealLogId));
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('写真を更新しました')),
-      );
+    switch (outcome) {
+      case PhotoEditRestoreOriginal():
+        await _restoreOriginal(photo);
+      case PhotoEditApplied(:final params):
+        await _applyEditToPhoto(photo, editSource, params);
     }
   }
 
-  /// オリジナル画像に復元
-  Future<void> _resetToOriginal(MealPhoto photo) async {
-    final originalPath = photo.originalLocalPath!;
+  /// 編集パラメータをオリジナルへ焼き込み、写真レコードを更新する
+  Future<void> _applyEditToPhoto(
+    MealPhoto photo,
+    String editSource,
+    PhotoEditParams params,
+  ) async {
+    // 恒等（全リセットで確定）はオリジナル復元と同じ扱い
+    if (params.isIdentity) {
+      if (photo.originalLocalPath != null &&
+          photo.originalLocalPath != photo.localPath) {
+        await _restoreOriginal(photo);
+      }
+      return;
+    }
+
+    // 進捗モーダルを出しつつisolateで焼き込み
+    final navigator = Navigator.of(context, rootNavigator: true);
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const PopScope(
+        canPop: false,
+        child: AlertDialog(
+          content: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              SizedBox(width: 16),
+              Text('写真を処理中...'),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    String? newLocalPath;
+    String? newThumbPath;
+    try {
+      final tmpDir = await getTemporaryDirectory();
+      final outputPath =
+          '${tmpDir.path}/edit_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final baked = await compute(
+        bakePhotoEdit,
+        PhotoEditBakeRequest(
+          inputPath: editSource,
+          outputPath: outputPath,
+          params: params,
+        ),
+      );
+      if (baked != null) {
+        newLocalPath = await PhotoService.saveToLocalFromPath(baked);
+        newThumbPath = await PhotoService.generateThumbnail(newLocalPath);
+        // ローカルへコピー済みなので焼き込みの一時ファイルは片付ける
+        try {
+          await File(baked).delete();
+        } catch (_) {}
+      }
+    } finally {
+      navigator.pop(); // 進捗モーダルを閉じる
+    }
+
+    if (!mounted) return;
+    if (newLocalPath == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('写真の処理に失敗しました')),
+      );
+      return;
+    }
+
+    // 書き戻し直前にDBの最新レコードを取得し、編集関連フィールドだけを重ねる。
+    // 編集セッション中に完了したAI解析結果を全列上書きで巻き戻さないため。
+    final current = await LocalDatabase.getMealPhoto(photo.id);
+    if (current == null) return; // レコードが削除済みなら何もしない
+
+    final oldLocalPath = current.localPath;
+    final oldThumbPath = current.thumbnailUrl;
+    // 真のオリジナルは上書きしない（未設定の場合のみ今回の編集元を記録）
+    final resolvedOriginal = current.originalLocalPath ?? editSource;
+
+    final updated = current.copyWith(
+      localPath: newLocalPath,
+      originalLocalPath: resolvedOriginal,
+      thumbnailUrl: newThumbPath,
+      editParamsJson: jsonEncode(params.toJson()),
+      uploadStatus: 'pending', // 再編集後の画像をクラウドへ再アップする
+    );
+    await LocalDatabase.updateMealPhoto(updated);
+
+    // 差し替えで不要になった旧焼き込みファイル・旧サムネイルを削除
+    await _deleteStalePhotoFiles(
+      oldLocalPath: oldLocalPath,
+      oldThumbPath: oldThumbPath,
+      originalPath: resolvedOriginal,
+      newLocalPath: newLocalPath,
+      newThumbPath: newThumbPath,
+    );
+
+    if (!mounted) return;
+    ref.invalidate(mealPhotosProvider(widget.mealLogId));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('写真を更新しました'),
+        action: SnackBarAction(
+          label: 'AIで再解析',
+          onPressed: () => _retryForPhoto(updated),
+        ),
+      ),
+    );
+  }
+
+  /// 画像差し替え後に不要となった旧本体・旧サムネイルを削除する。
+  /// オリジナル（[originalPath]）と新しいファイルは絶対に消さない。
+  Future<void> _deleteStalePhotoFiles({
+    required String oldLocalPath,
+    required String? oldThumbPath,
+    required String? originalPath,
+    required String newLocalPath,
+    required String? newThumbPath,
+  }) async {
+    // 旧本体: オリジナルでも新ファイルでもない焼き込みファイルのみ削除
+    if (oldLocalPath != originalPath && oldLocalPath != newLocalPath) {
+      try {
+        await File(oldLocalPath).delete();
+      } catch (_) {}
+    }
+    // 旧サムネイル: 新サムネイル・オリジナルと異なる場合のみ削除
+    if (oldThumbPath != null &&
+        oldThumbPath != newThumbPath &&
+        oldThumbPath != originalPath) {
+      try {
+        await File(oldThumbPath).delete();
+      } catch (_) {}
+    }
+  }
+
+  /// オリジナル画像に復元（編集パラメータをクリアし、クラウドへ再アップ）
+  Future<void> _restoreOriginal(MealPhoto photo) async {
+    final originalPath = photo.originalLocalPath;
+    if (originalPath == null || !File(originalPath).existsSync()) return;
     final newThumbPath = await PhotoService.generateThumbnail(originalPath);
 
-    final updated = photo.copyWith(
+    // 書き戻し直前にDBの最新レコードを取得し、復元関連フィールドだけを重ねる。
+    // 復元セッション中に完了したAI解析結果を全列上書きで巻き戻さないため。
+    final current = await LocalDatabase.getMealPhoto(photo.id);
+    if (current == null) return; // レコードが削除済みなら何もしない
+
+    final oldLocalPath = current.localPath;
+    final oldThumbPath = current.thumbnailUrl;
+
+    final updated = current.copyWith(
       localPath: originalPath,
       thumbnailUrl: newThumbPath,
       clearEditParams: true,
+      uploadStatus: 'pending', // 復元後の画像をクラウドへ再アップする
     );
     await LocalDatabase.updateMealPhoto(updated);
-    ref.invalidate(mealPhotosProvider(widget.mealLogId));
 
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('オリジナル画像に復元しました')),
-      );
-    }
+    // 差し替えで不要になった旧焼き込みファイル・旧サムネイルを削除。
+    // newLocalPath にオリジナルを渡すことで、オリジナルは削除対象から必ず外れる
+    await _deleteStalePhotoFiles(
+      oldLocalPath: oldLocalPath,
+      oldThumbPath: oldThumbPath,
+      originalPath: originalPath,
+      newLocalPath: originalPath,
+      newThumbPath: newThumbPath,
+    );
+
+    if (!mounted) return;
+    ref.invalidate(mealPhotosProvider(widget.mealLogId));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('オリジナル画像に復元しました')),
+    );
   }
 
   Future<void> _showEditDialog(BuildContext context, MealPhoto photo) async {

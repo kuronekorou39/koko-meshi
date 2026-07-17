@@ -21,7 +21,7 @@
 | モバイル | Flutter (Dart) |
 | バックエンド / DB / Auth | Supabase |
 | 画像ストレージ | Cloudflare R2 |
-| 画像解析（AI） | Claude API (Vision) |
+| 画像解析（AI） | オンデバイス Gemma 4 E2B（端末内解析） |
 | 地図 / 店舗特定 | Google Maps SDK + Places API |
 
 ## セットアップ
