@@ -17,6 +17,7 @@ import '../../services/ai_analysis_service.dart';
 import '../../services/app_settings_service.dart';
 import '../../services/gemma_download_manager.dart';
 import '../../services/gemma_ondevice_service.dart';
+import '../../services/photo_cache_service.dart';
 import '../../services/photo_service.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/meal_type_style.dart';
@@ -386,6 +387,7 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
             leading: Icon(Icons.error_outline, size: 18, color: scheme.error),
             message: '解析に失敗しました',
             messageColor: scheme.error,
+            detail: photo.aiError,
             action: TextButton.icon(
               onPressed: () => _retryForPhoto(photo),
               icon: const Icon(Icons.refresh, size: 16),
@@ -474,25 +476,39 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
     required String message,
     Color? messageColor,
     Widget? action,
+    String? detail,
   }) {
     final tokens = KokoTokens.of(context);
     return Card(
       child: Padding(
         padding: EdgeInsets.fromLTRB(16, 10, action != null ? 8 : 16, 10),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            leading,
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                message,
-                style: TextStyle(
-                  fontSize: 13.5,
-                  color: messageColor ?? tokens.textMuted,
+            Row(
+              children: [
+                leading,
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    message,
+                    style: TextStyle(
+                      fontSize: 13.5,
+                      color: messageColor ?? tokens.textMuted,
+                    ),
+                  ),
+                ),
+                ?action,
+              ],
+            ),
+            if (detail != null)
+              Padding(
+                padding: const EdgeInsets.only(left: 26, top: 2, right: 8),
+                child: Text(
+                  detail,
+                  style: TextStyle(fontSize: 12, color: tokens.textFaint),
                 ),
               ),
-            ),
-            ?action,
           ],
         ),
       ),
@@ -636,8 +652,8 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
     }
   }
 
-  /// 編集元のファイルパスを決める（常に真のオリジナルを優先）
-  String? _resolveEditSource(MealPhoto photo) {
+  /// ローカルにある編集元のファイルパス（常に真のオリジナルを優先）
+  String? _localEditSource(MealPhoto photo) {
     final original = photo.originalLocalPath;
     if (original != null && File(original).existsSync()) return original;
     if (File(photo.localPath).existsSync()) return photo.localPath;
@@ -645,19 +661,52 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
   }
 
   Future<void> _editPhoto(MealPhoto photo) async {
-    final editSource = _resolveEditSource(photo);
+    var editSource = _localEditSource(photo);
+    if (editSource == null) {
+      // ローカル実体が無い(クラウド後削除・復元レコード等)。
+      // 表示系と同じくクラウドのオリジナルをDLして編集元にする
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const PopScope(
+          canPop: false,
+          child: AlertDialog(
+            content: Row(
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(width: 16),
+                Expanded(child: Text('クラウドから写真を取得しています…')),
+              ],
+            ),
+          ),
+        ),
+      );
+      try {
+        editSource = await PhotoCacheService.getOriginalPath(
+          localPath: photo.localPath,
+          originalUrl: photo.originalUrl,
+        );
+      } finally {
+        if (mounted) Navigator.of(context).pop();
+      }
+      if (!mounted) return;
+    }
     if (editSource == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('写真ファイルが見つかりません')),
+        const SnackBar(
+            content: Text('写真ファイルが見つかりません（クラウドからも取得できませんでした）')),
       );
       return;
     }
+
+    // ここから先はnull不可(閉包キャプチャで昇格が効かないためfinalに固定)
+    final srcPath = editSource;
 
     // 保存済み編集パラメータ（v2のみ。v1や欠損はnull=初期状態から）を復元。
     // オリジナルを失って焼き込み済み画像を編集元にする場合は座標系が合わないため復元しない
     PhotoEditParams? initialParams;
     final editingOriginal =
-        photo.originalLocalPath == null || editSource == photo.originalLocalPath;
+        photo.originalLocalPath == null || srcPath == photo.originalLocalPath;
     if (editingOriginal && photo.editParamsJson != null) {
       try {
         initialParams = PhotoEditParams.fromJson(
@@ -677,7 +726,7 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
       context,
       MaterialPageRoute(
         builder: (_) => PhotoEditorScreen(
-          imagePath: editSource,
+          imagePath: srcPath,
           initialParams: initialParams,
           canRestoreOriginal: canRestoreOriginal,
         ),

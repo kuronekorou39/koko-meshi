@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -6,12 +7,36 @@ import '../database/local_database.dart';
 import '../models/meal_photo.dart';
 import '../models/meal_type.dart';
 import '../models/saved_place.dart';
+import 'analysis_foreground_service.dart';
 import 'app_settings_service.dart';
 import 'gemma_ondevice_service.dart';
+import 'photo_cache_service.dart';
 
 class AiAnalysisService {
+  /// バッチの排他制御。トリガーは複数ある(起動時/保存時/モデルDL完了時/
+  /// 手動再解析)ため、並行実行すると同一チャットを同時に使って応答が壊れる。
+  /// 実行中に再度呼ばれた場合は「終わったらもう一周」に畳み込む。
+  static bool _batchRunning = false;
+  static bool _rerunRequested = false;
+
   /// pending状態の写真をすべて解析する
   static Future<void> processPendingPhotos() async {
+    if (_batchRunning) {
+      _rerunRequested = true;
+      return;
+    }
+    _batchRunning = true;
+    try {
+      do {
+        _rerunRequested = false;
+        await _runBatchOnce();
+      } while (_rerunRequested);
+    } finally {
+      _batchRunning = false;
+    }
+  }
+
+  static Future<void> _runBatchOnce() async {
     final mode = AppSettings.aiMode;
     if (mode == AiAnalysisMode.off) return; // AI解析オフ: 何もしない
 
@@ -45,26 +70,53 @@ class AiAnalysisService {
       return;
     }
 
+    // ここから実際に解析する。アプリがバックグラウンドへ回っても解析を完走
+    // できるよう、フォアグラウンドサービスでプロセスを保ちつつ進捗を通知する。
+    // (起動失敗は握られ、通知が出ないだけで解析自体は続行される)
+    await AnalysisForegroundService.start(photos.length);
     try {
-      await svc.load(GemmaModelKind.e2b);
-    } catch (e) {
-      debugPrint('[AI] on-device load failed: $e');
-      return; // ロード失敗(OOM等)。pendingのまま
-    }
+      try {
+        await svc.load(GemmaModelKind.e2b);
+      } catch (e) {
+        debugPrint('[AI] on-device load failed: $e');
+        return; // ロード失敗(OOM等)。pendingのまま(finallyでFGS停止)
+      }
 
-    // 撮影状況コンテキストの組み立てに使う(バッチ中は不変なので1回だけ読む)
-    final savedPlaces = await LocalDatabase.getSavedPlaces();
+      // 撮影状況コンテキストの組み立てに使う(バッチ中は不変なので1回だけ読む)
+      final savedPlaces = await LocalDatabase.getSavedPlaces();
 
-    debugPrint('[AI] Processing ${photos.length} photos on-device (E2B)');
-    try {
-      for (final photo in photos) {
-        await _analyzePhotoOnDevice(photo, svc, savedPlaces);
+      // 直後に別バッチが来たとき(連続撮影等)に毎回20秒のロードを繰り返さない
+      // よう、解放は猶予つきで予約する
+      _disposeTimer?.cancel();
+      _disposeTimer = null;
+
+      debugPrint('[AI] Processing ${photos.length} photos on-device (E2B)');
+      try {
+        var done = 0;
+        for (final photo in photos) {
+          await _analyzePhotoOnDevice(photo, svc, savedPlaces);
+          done++;
+          await AnalysisForegroundService.updateProgress(done, photos.length);
+        }
+      } finally {
+        // バッチ後すぐには解放せず、アイドルが続いたら~3GBのRAMを空ける
+        _disposeTimer?.cancel();
+        _disposeTimer = Timer(_modelIdleTimeout, () {
+          if (!_batchRunning) {
+            debugPrint('[AI] idle timeout -> dispose on-device model');
+            GemmaOnDeviceService.instance.disposeModel();
+          }
+        });
       }
     } finally {
-      // バッチ後にモデルを解放して~3GBのRAMを空ける
-      await svc.disposeModel();
+      // バッチ終了(正常/失敗/例外いずれも)でFGSを停止し通知を消す
+      await AnalysisForegroundService.stop();
     }
   }
+
+  /// モデルをアイドル解放するまでの猶予
+  static const _modelIdleTimeout = Duration(minutes: 3);
+  static Timer? _disposeTimer;
 
   static const _onDeviceModelLabel = 'Gemma 4 E2B（端末内）';
 
@@ -109,12 +161,25 @@ class AiAnalysisService {
   ) async {
     await _writeAiResult(photo.id, aiStatus: 'processing');
     try {
-      final file = File(photo.localPath);
-      if (!await file.exists()) {
-        await _writeAiResult(photo.id, aiStatus: 'failed');
+      // ローカル実体が無い写真(クラウド後削除・復元レコード等)は
+      // クラウドのオリジナルをDLして解析する(表示系と同じフォールバック)
+      final path = await PhotoCacheService.getOriginalPath(
+        localPath: photo.localPath,
+        originalUrl: photo.originalUrl,
+      );
+      if (path == null) {
+        final hasUrl = photo.originalUrl?.isNotEmpty ?? false;
+        debugPrint('[AI] photo file unavailable (local+cloud) for ${photo.id}');
+        await _writeAiResult(
+          photo.id,
+          aiStatus: 'failed',
+          aiError: hasUrl
+              ? '写真ファイルがローカルに無く、クラウドからの取得にも失敗しました。通信環境を確認して再解析してください'
+              : '写真ファイルがローカルに無く、クラウドにも保存されていないため解析できません',
+        );
         return;
       }
-      final bytes = await file.readAsBytes();
+      final bytes = await File(path).readAsBytes();
       final context = await _buildOnDeviceContext(photo, savedPlaces);
       final res = await svc.analyze(bytes, context: context);
 
@@ -143,7 +208,13 @@ class AiAnalysisService {
 
       if (res.parsed == null) {
         debugPrint('[AI] on-device parse failed for ${photo.id}');
-        await _writeAiResult(photo.id, aiStatus: 'failed');
+        final head = res.rawText.trim();
+        await _writeAiResult(
+          photo.id,
+          aiStatus: 'failed',
+          aiError: 'AIの応答を解釈できませんでした'
+              '${head.isEmpty ? '（応答が空）' : '（応答: ${head.length > 60 ? '${head.substring(0, 60)}…' : head}）'}',
+        );
         return;
       }
       await _writeAiResult(
@@ -159,7 +230,13 @@ class AiAnalysisService {
           '(${res.inferenceMs}ms)');
     } catch (e) {
       debugPrint('[AI] on-device analyze error for ${photo.id}: $e');
-      await _writeAiResult(photo.id, aiStatus: 'failed');
+      final msg = e.toString();
+      await _writeAiResult(
+        photo.id,
+        aiStatus: 'failed',
+        aiError:
+            '解析中にエラーが発生しました: ${msg.length > 120 ? '${msg.substring(0, 120)}…' : msg}',
+      );
     }
   }
 
@@ -171,6 +248,7 @@ class AiAnalysisService {
   static Future<void> _writeAiResult(
     String photoId, {
     required String aiStatus,
+    String? aiError,
     String? aiMenuName,
     int? aiEstimatedPrice,
     int? aiEstimatedCalories,
@@ -181,6 +259,9 @@ class AiAnalysisService {
     if (current == null) return;
     await LocalDatabase.updateMealPhoto(current.copyWith(
       aiStatus: aiStatus,
+      // 失敗時は理由を保存し、それ以外の遷移では古い理由を消す
+      aiError: aiError,
+      clearAiError: aiStatus != 'failed',
       aiMenuName: aiMenuName,
       aiEstimatedPrice: aiEstimatedPrice,
       aiEstimatedCalories: aiEstimatedCalories,

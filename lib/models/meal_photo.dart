@@ -6,6 +6,7 @@ class MealPhoto {
   final String? originalUrl;
   final String? thumbnailUrl;
   final String aiStatus; // pending / processing / completed / failed
+  final String? aiError; // 解析失敗の理由(failed時のみ。表示用)
   final String? aiMenuName;
   final int? aiEstimatedPrice;
   final int? aiEstimatedCalories;
@@ -30,6 +31,7 @@ class MealPhoto {
     this.originalUrl,
     this.thumbnailUrl,
     this.aiStatus = 'pending',
+    this.aiError,
     this.aiMenuName,
     this.aiEstimatedPrice,
     this.aiEstimatedCalories,
@@ -65,6 +67,7 @@ class MealPhoto {
       'original_url': originalUrl,
       'thumbnail_url': thumbnailUrl,
       'ai_status': aiStatus,
+      'ai_error': aiError,
       'ai_menu_name': aiMenuName,
       'ai_estimated_price': aiEstimatedPrice,
       'ai_estimated_calories': aiEstimatedCalories,
@@ -92,6 +95,7 @@ class MealPhoto {
       originalUrl: map['original_url'] as String?,
       thumbnailUrl: map['thumbnail_url'] as String?,
       aiStatus: map['ai_status'] as String? ?? 'pending',
+      aiError: map['ai_error'] as String?,
       aiMenuName: map['ai_menu_name'] as String?,
       aiEstimatedPrice: map['ai_estimated_price'] as int?,
       aiEstimatedCalories: map['ai_estimated_calories'] as int?,
@@ -116,6 +120,8 @@ class MealPhoto {
     String? originalUrl,
     String? thumbnailUrl,
     String? aiStatus,
+    String? aiError,
+    bool clearAiError = false,
     String? aiMenuName,
     int? aiEstimatedPrice,
     int? aiEstimatedCalories,
@@ -137,6 +143,7 @@ class MealPhoto {
       originalUrl: originalUrl ?? this.originalUrl,
       thumbnailUrl: thumbnailUrl ?? this.thumbnailUrl,
       aiStatus: aiStatus ?? this.aiStatus,
+      aiError: clearAiError ? null : (aiError ?? this.aiError),
       aiMenuName: aiMenuName ?? this.aiMenuName,
       aiEstimatedPrice: aiEstimatedPrice ?? this.aiEstimatedPrice,
       aiEstimatedCalories: aiEstimatedCalories ?? this.aiEstimatedCalories,

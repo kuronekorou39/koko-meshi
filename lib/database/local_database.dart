@@ -21,7 +21,7 @@ class LocalDatabase {
 
     return openDatabase(
       path,
-      version: 9,
+      version: 10,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -68,6 +68,7 @@ class LocalDatabase {
         original_url TEXT,
         thumbnail_url TEXT,
         ai_status TEXT NOT NULL DEFAULT 'pending',
+        ai_error TEXT,
         ai_menu_name TEXT,
         ai_estimated_price INTEGER,
         ai_estimated_calories INTEGER,
@@ -115,6 +116,10 @@ class LocalDatabase {
     if (oldVersion < 9) {
       // クラウドAI判定の廃止: レート制限用の使用ログテーブルを撤去
       await db.execute('DROP TABLE IF EXISTS ai_usage_log');
+    }
+    if (oldVersion < 10) {
+      // AI解析失敗の理由を保存(詳細画面に表示する)
+      await db.execute('ALTER TABLE meal_photos ADD COLUMN ai_error TEXT');
     }
   }
 

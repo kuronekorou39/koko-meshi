@@ -35,6 +35,22 @@ class PhotoCacheService {
     return null;
   }
 
+  /// AI解析・編集用: オリジナル画質のパスを取得(サムネイルへは落とさない)。
+  /// ローカルに実体があればそれ、無ければクラウドからDLしてキャッシュ。
+  /// どちらも取れなければnull(サムネ品質で解析・編集すると劣化するため)
+  static Future<String?> getOriginalPath({
+    required String? localPath,
+    required String? originalUrl,
+  }) async {
+    if (localPath != null && File(localPath).existsSync()) {
+      return localPath;
+    }
+    if (originalUrl != null && originalUrl.isNotEmpty) {
+      return _downloadAndCache(originalUrl);
+    }
+    return null;
+  }
+
   /// URLからダウンロードしてキャッシュディレクトリに保存
   static Future<String?> _downloadAndCache(String url) async {
     try {
