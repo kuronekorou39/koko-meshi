@@ -13,6 +13,11 @@ import 'gemma_ondevice_service.dart';
 import 'photo_cache_service.dart';
 
 class AiAnalysisService {
+  /// AI解析結果がDBへ書き込まれるたびにインクリメントされる通知。
+  /// 一覧のカード等がこれを購読して表示を自動更新する
+  /// (書き込みは processing 遷移も含むため「解析中」表示も即時に反映される)。
+  static final ValueNotifier<int> resultsVersion = ValueNotifier(0);
+
   /// バッチの排他制御。トリガーは複数ある(起動時/保存時/モデルDL完了時/
   /// 手動再解析)ため、並行実行すると同一チャットを同時に使って応答が壊れる。
   /// 実行中に再度呼ばれた場合は「終わったらもう一周」に畳み込む。
@@ -268,6 +273,7 @@ class AiAnalysisService {
       aiCuisineGenre: aiCuisineGenre,
       aiModel: aiModel,
     ));
+    resultsVersion.value++;
   }
 
   /// オンデバイス解析用の撮影状況コンテキストを組み立てる。

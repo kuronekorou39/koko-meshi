@@ -9,6 +9,7 @@ import '../../models/meal_log.dart';
 import '../../models/meal_photo.dart';
 import '../../providers/meal_providers.dart';
 import '../../theme/app_theme.dart';
+import '../../services/ai_analysis_service.dart';
 import '../../services/photo_service.dart';
 import '../../widgets/meal_card.dart';
 import '../../widgets/meal_grid_tile.dart';
@@ -352,6 +353,15 @@ class _MealLogItemState extends State<_MealLogItem> {
   void initState() {
     super.initState();
     _loadPhotos();
+    // AI解析結果の書き込みを購読し、表示中カードを自動更新する
+    // (「AI解析中」が結果に切り替わらないまま残るのを防ぐ)
+    AiAnalysisService.resultsVersion.addListener(_loadPhotos);
+  }
+
+  @override
+  void dispose() {
+    AiAnalysisService.resultsVersion.removeListener(_loadPhotos);
+    super.dispose();
   }
 
   Future<void> _loadPhotos() async {
@@ -390,6 +400,13 @@ class _MealLogGridItemState extends State<_MealLogGridItem> {
   void initState() {
     super.initState();
     _loadPhotos();
+    AiAnalysisService.resultsVersion.addListener(_loadPhotos);
+  }
+
+  @override
+  void dispose() {
+    AiAnalysisService.resultsVersion.removeListener(_loadPhotos);
+    super.dispose();
   }
 
   Future<void> _loadPhotos() async {
