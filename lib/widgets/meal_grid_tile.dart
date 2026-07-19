@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 
 import '../models/meal_log.dart';
 import '../models/meal_photo.dart';
+import '../models/meal_type.dart';
 import '../theme/app_theme.dart';
 import '../theme/meal_type_style.dart';
 import 'cached_photo_image.dart';
@@ -63,15 +64,17 @@ class MealGridTile extends StatelessWidget {
               ),
               const SizedBox(height: 2),
             ],
-            // 種別 + 日時(常に表示)
+            // 種別(未設定なら省く) + 日時
             Row(
               children: [
-                Icon(
-                  mealLog.mealType.icon,
-                  size: 12,
-                  color: mealLog.mealType.fg(context),
-                ),
-                const SizedBox(width: 4),
+                if (mealLog.mealType != MealType.unset) ...[
+                  Icon(
+                    mealLog.mealType.icon,
+                    size: 12,
+                    color: mealLog.mealType.fg(context),
+                  ),
+                  const SizedBox(width: 4),
+                ],
                 Expanded(
                   child: Text(
                     DateFormat('M/d HH:mm').format(mealLog.eatenAt),

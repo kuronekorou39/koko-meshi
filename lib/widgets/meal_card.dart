@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 
 import '../models/meal_log.dart';
 import '../models/meal_photo.dart';
+import '../models/meal_type.dart';
 import '../theme/app_theme.dart';
 import '../theme/meal_type_style.dart';
 import 'cached_photo_image.dart';
@@ -58,10 +59,11 @@ class MealCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // 食事種別チップ + 時刻
+                  // 食事種別チップ + 時刻(未設定のときはチップを出さず時刻のみ)
                   Row(
                     children: [
-                      MealTypeChip(mealType: mealLog.mealType),
+                      if (mealLog.mealType != MealType.unset)
+                        MealTypeChip(mealType: mealLog.mealType),
                       const Spacer(),
                       Text(
                         DateFormat('HH:mm').format(mealLog.eatenAt),
@@ -129,7 +131,7 @@ class MealCard extends StatelessWidget {
     );
   }
 
-  /// 「¥1,280 ・ 約650kcal」。どちらも無ければ null。
+  /// 「¥1,280 ・ 650kcal」。どちらも無ければ null。
   String? _buildMetaText() {
     final parts = <String>[];
     if (mealLog.totalPrice != null) {
@@ -138,7 +140,7 @@ class MealCard extends StatelessWidget {
     if (photos.any((p) => p.displayCalories != null)) {
       final total =
           photos.fold<int>(0, (sum, p) => sum + (p.displayCalories ?? 0));
-      parts.add('約${NumberFormat('#,###').format(total)}kcal');
+      parts.add('${NumberFormat('#,###').format(total)}kcal');
     }
     return parts.isEmpty ? null : parts.join(' ・ ');
   }

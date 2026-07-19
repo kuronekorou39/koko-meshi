@@ -41,6 +41,40 @@ class AiAnalysisService {
     }
   }
 
+  /// AIが返したメニュー名を「1つの料理名への断定」に整形する純関数。
+  /// プロンプト側でも断定を指示しているが、小型モデルは併記・推測表現を
+  /// 混ぜることがあるため、保険としてDB保存前にここで刈り取る。
+  /// (a)「または」「もしくは」以降を除去 (b)推測表現を含む括弧を丸ごと除去
+  /// (c)前後の空白と末尾の読点を除去 (d)空になったら元の文字列を返す。
+  static String sanitizeMenuName(String raw) {
+    var s = raw;
+
+    // (a) 併記の除去: 「または」「もしくは」以降を切り落とす
+    for (final sep in const ['または', 'もしくは']) {
+      final idx = s.indexOf(sep);
+      if (idx >= 0) s = s.substring(0, idx);
+    }
+
+    // (b) 推測表現を含む括弧(全角/半角)を丸ごと除去。断定的な補足
+    //     (「(大盛り)」等)は残したいので、括弧内が推測語を含む場合のみ削る
+    const guessMarkers = [
+      'おそらく', '恐らく', 'たぶん', '多分', 'かも', '思われ', '推定', '思う',
+    ];
+    s = s.replaceAllMapped(
+      RegExp(r'[（(]([^（()）]*)[)）]'),
+      (m) {
+        final inner = m.group(1) ?? '';
+        return guessMarkers.any(inner.contains) ? '' : m.group(0)!;
+      },
+    );
+
+    // (c) 前後の空白を除去し、末尾に残った読点(、。)を落とす
+    s = s.trim().replaceAll(RegExp(r'[、。]+$'), '').trim();
+
+    // (d) 整形の結果すべて消えてしまったら、元の文字列(前後空白のみ除去)を使う
+    return s.isEmpty ? raw.trim() : s;
+  }
+
   static Future<void> _runBatchOnce() async {
     final mode = AppSettings.aiMode;
     if (mode == AiAnalysisMode.off) return; // AI解析オフ: 何もしない
@@ -222,10 +256,11 @@ class AiAnalysisService {
         );
         return;
       }
+      final menuName = res.menuName;
       await _writeAiResult(
         photo.id,
         aiStatus: 'completed',
-        aiMenuName: res.menuName,
+        aiMenuName: menuName == null ? null : sanitizeMenuName(menuName),
         aiEstimatedPrice: res.price,
         aiEstimatedCalories: res.calories,
         aiCuisineGenre: res.genre,
@@ -302,7 +337,15 @@ class AiAnalysisService {
     // 時間帯は常に確度が高いので必ず入れる(朝食/夕食で価格・料理の傾向が変わる)
     lines.add('時間帯: ${_timeBandLabel(photo.shotAt.hour)}');
 
-    return '撮影状況:\n${lines.join('\n')}';
+    final buf = StringBuffer();
+    // ユーザーが再解析時に入力したキーワードは最優先の手がかり。撮影状況より
+    // 上に置き、料理特定の指針として明示する
+    final hint = photo.aiHint?.trim() ?? '';
+    if (hint.isNotEmpty) {
+      buf.writeln('ユーザーからのヒント: $hint（この料理を特定する最優先の手がかりとして扱うこと）');
+    }
+    buf.write('撮影状況:\n${lines.join('\n')}');
+    return buf.toString();
   }
 
   static String _timeBandLabel(int hour) {

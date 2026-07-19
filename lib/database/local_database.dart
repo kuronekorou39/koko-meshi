@@ -21,7 +21,7 @@ class LocalDatabase {
 
     return openDatabase(
       path,
-      version: 10,
+      version: 11,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -77,6 +77,7 @@ class LocalDatabase {
         user_corrected_name TEXT,
         user_corrected_price INTEGER,
         user_corrected_calories INTEGER,
+        ai_hint TEXT,
         upload_status TEXT NOT NULL DEFAULT 'pending',
         skip_ai INTEGER NOT NULL DEFAULT 0,
         edit_params TEXT,
@@ -120,6 +121,10 @@ class LocalDatabase {
     if (oldVersion < 10) {
       // AI解析失敗の理由を保存(詳細画面に表示する)
       await db.execute('ALTER TABLE meal_photos ADD COLUMN ai_error TEXT');
+    }
+    if (oldVersion < 11) {
+      // 再解析時にユーザーが与える料理特定のキーワード(ローカル専用)
+      await db.execute('ALTER TABLE meal_photos ADD COLUMN ai_hint TEXT');
     }
   }
 

@@ -12,6 +12,7 @@ import 'package:path_provider/path_provider.dart';
 import '../../database/local_database.dart';
 import '../../models/meal_log.dart';
 import '../../models/meal_photo.dart';
+import '../../models/meal_type.dart';
 import '../../providers/meal_providers.dart';
 import '../../services/ai_analysis_service.dart';
 import '../../services/app_settings_service.dart';
@@ -168,7 +169,7 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
 
     return Row(
       children: [
-        MealTypeChip(mealType: mealLog.mealType, compact: false),
+        _buildMealTypeSelector(mealLog),
         if (mealLog.locationTag == 'home') ...[
           const SizedBox(width: 8),
           Container(
@@ -208,6 +209,94 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
         ),
       ],
     );
+  }
+
+  /// タップで食事種別を変更できるチップ。未設定のときは控えめな
+  /// 「種別を設定」の促し表示にする。
+  Widget _buildMealTypeSelector(MealLog mealLog) {
+    final tokens = KokoTokens.of(context);
+    final isUnset = mealLog.mealType == MealType.unset;
+
+    final Widget child = isUnset
+        ? Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: tokens.hairline, width: 1),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.add, size: 16, color: tokens.textMuted),
+                const SizedBox(width: 6),
+                Text(
+                  '種別を設定',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: tokens.textMuted,
+                  ),
+                ),
+              ],
+            ),
+          )
+        : MealTypeChip(mealType: mealLog.mealType, compact: false);
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: () => _showMealTypePicker(mealLog),
+      child: child,
+    );
+  }
+
+  /// 食事種別を選び直すボトムシート(全種別を色/アイコン付きで一覧、現在値にチェック)
+  Future<void> _showMealTypePicker(MealLog mealLog) async {
+    final selected = await showModalBottomSheet<MealType>(
+      context: context,
+      builder: (context) {
+        final scheme = Theme.of(context).colorScheme;
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                child: Text(
+                  '食事種別を選ぶ',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+              ),
+              for (final type in MealType.values)
+                ListTile(
+                  leading: Icon(type.icon, color: type.fg(context)),
+                  title: Text(
+                    type.label,
+                    style: TextStyle(
+                      fontWeight: type == mealLog.mealType
+                          ? FontWeight.w700
+                          : FontWeight.w500,
+                    ),
+                  ),
+                  trailing: type == mealLog.mealType
+                      ? Icon(Icons.check, color: scheme.primary)
+                      : null,
+                  onTap: () => Navigator.pop(context, type),
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (selected == null || selected == mealLog.mealType) return;
+    await LocalDatabase.updateMealLog(mealLog.copyWith(mealType: selected));
+    if (!mounted) return;
+    ref.invalidate(mealLogProvider(widget.mealLogId));
+    ref.read(mealLogsProvider.notifier).refresh();
   }
 
   /// 写真セクション: 選択写真 + サムネ一覧
@@ -533,66 +622,40 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(photo.displayName ?? '不明',
-                          style: textTheme.titleMedium),
-                      if (hasPrice || hasCalories)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 6),
-                          child: Row(
-                            children: [
-                              if (hasPrice)
-                                Text(
-                                  '¥${NumberFormat('#,###').format(photo.displayPrice)}',
-                                  style: tokens.numeral.copyWith(fontSize: 15),
-                                ),
-                              if (hasPrice && hasCalories)
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 8),
-                                  child: Text(
-                                    '/',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      color: tokens.textFaint,
-                                    ),
-                                  ),
-                                ),
-                              if (hasCalories)
-                                Text(
-                                  '${photo.displayCalories} kcal',
-                                  style: tokens.numeral.copyWith(
-                                    fontSize: 15,
-                                    color: tokens.textMuted,
-                                  ),
-                                ),
-                            ],
+            // メニュー名 + 価格/カロリー
+            Text(photo.displayName ?? '不明', style: textTheme.titleMedium),
+            if (hasPrice || hasCalories)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Row(
+                  children: [
+                    if (hasPrice)
+                      Text(
+                        '¥${NumberFormat('#,###').format(photo.displayPrice)}',
+                        style: tokens.numeral.copyWith(fontSize: 15),
+                      ),
+                    if (hasPrice && hasCalories)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        child: Text(
+                          '/',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: tokens.textFaint,
                           ),
                         ),
-                    ],
-                  ),
+                      ),
+                    if (hasCalories)
+                      Text(
+                        '${photo.displayCalories} kcal',
+                        style: tokens.numeral.copyWith(
+                          fontSize: 15,
+                          color: tokens.textMuted,
+                        ),
+                      ),
+                  ],
                 ),
-                const SizedBox(width: 12),
-                FilledButton.tonalIcon(
-                  onPressed: () => _showEditDialog(context, photo),
-                  icon: const Icon(Icons.edit_outlined, size: 16),
-                  label: const Text('編集'),
-                  style: FilledButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    minimumSize: const Size(0, 36),
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    textStyle: const TextStyle(
-                        fontSize: 13, fontWeight: FontWeight.w700),
-                  ),
-                ),
-              ],
-            ),
+              ),
             if (isUserCorrected || photo.aiModel != null)
               Padding(
                 padding: const EdgeInsets.only(top: 10),
@@ -625,6 +688,39 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
                   ],
                 ),
               ),
+            const SizedBox(height: 12),
+            // 操作: 編集 / AIで再解析
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.tonalIcon(
+                    onPressed: () => _showEditDialog(context, photo),
+                    icon: const Icon(Icons.edit_outlined, size: 16),
+                    label: const Text('編集'),
+                    style: FilledButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      minimumSize: const Size(0, 36),
+                      textStyle: const TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _showReanalyzeDialog(photo),
+                    icon: const Icon(Icons.refresh, size: 16),
+                    label: const Text('AIで再解析'),
+                    style: OutlinedButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      minimumSize: const Size(0, 36),
+                      textStyle: const TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ],
         ),
       ),
@@ -634,9 +730,22 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
   /// 個別写真のAI解析リトライ。
   /// SnackBarアクションから画面破棄後に呼ばれてもDB更新と解析起動は行われるよう、
   /// ref/context へのアクセスはすべて mounted ガード後に限定する。
-  Future<void> _retryForPhoto(MealPhoto photo) async {
+  /// [aiHint]/[clearHint] で再解析用キーワードを、[clearUserCorrections] で
+  /// 手動修正値のクリアを指定できる(再解析ダイアログから使う)。
+  Future<void> _retryForPhoto(
+    MealPhoto photo, {
+    String? aiHint,
+    bool clearHint = false,
+    bool clearUserCorrections = false,
+  }) async {
     // DB更新 → 解析起動（ここまではUIに触れないので画面破棄後でも安全）
-    final updated = photo.copyWith(aiStatus: 'pending', skipAi: false);
+    final updated = photo.copyWith(
+      aiStatus: 'pending',
+      skipAi: false,
+      aiHint: aiHint,
+      clearAiHint: clearHint,
+      clearUserCorrections: clearUserCorrections,
+    );
     await LocalDatabase.updateMealPhoto(updated);
 
     AiAnalysisService.processPendingPhotos().then((_) {
@@ -650,6 +759,73 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
     if (mounted) {
       ref.invalidate(mealPhotosProvider(widget.mealLogId));
     }
+  }
+
+  /// 解析済み写真をキーワード付きで再解析するダイアログ。
+  /// キーワードは料理特定のヒントとしてプロンプトに注入され、再解析すると
+  /// 手動修正値はクリアされる(AI結果で上書きし直すため)。
+  Future<void> _showReanalyzeDialog(MealPhoto photo) async {
+    final tokens = KokoTokens.of(context);
+    final hintCtrl = TextEditingController(text: photo.aiHint ?? '');
+    final hasCorrections = photo.userCorrectedName != null ||
+        photo.userCorrectedPrice != null ||
+        photo.userCorrectedCalories != null;
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('AIで再解析'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'この写真をもう一度AIで解析します。うまく認識されないときは、'
+              '料理のキーワードを入力すると特定の手がかりになります。',
+              style: TextStyle(fontSize: 13.5),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: hintCtrl,
+              decoration: const InputDecoration(
+                labelText: 'キーワード（任意）',
+                hintText: '例: ラーメン、カレー',
+              ),
+            ),
+            if (hasCorrections)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Text(
+                  '手動修正した内容は消えます',
+                  style: TextStyle(fontSize: 12, color: tokens.textFaint),
+                ),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('再解析'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true) {
+      final hint = hintCtrl.text.trim();
+      await _retryForPhoto(
+        photo,
+        aiHint: hint.isEmpty ? null : hint,
+        clearHint: hint.isEmpty,
+        clearUserCorrections: true,
+      );
+    }
+
+    hintCtrl.dispose();
   }
 
   /// ローカルにある編集元のファイルパス（常に真のオリジナルを優先）

@@ -15,6 +15,7 @@ class MealPhoto {
   final String? userCorrectedName;
   final int? userCorrectedPrice;
   final int? userCorrectedCalories;
+  final String? aiHint; // 再解析時にユーザーが与える料理特定のキーワード(ローカル専用)
   final String uploadStatus; // pending / uploaded
   final bool skipAi; // AI解析をスキップ（顔写真など）
   final String? editParamsJson; // 切り抜き編集パラメータ（JSON）
@@ -40,6 +41,7 @@ class MealPhoto {
     this.userCorrectedName,
     this.userCorrectedPrice,
     this.userCorrectedCalories,
+    this.aiHint,
     this.uploadStatus = 'pending',
     this.skipAi = false,
     this.editParamsJson,
@@ -76,6 +78,7 @@ class MealPhoto {
       'user_corrected_name': userCorrectedName,
       'user_corrected_price': userCorrectedPrice,
       'user_corrected_calories': userCorrectedCalories,
+      'ai_hint': aiHint,
       'upload_status': uploadStatus,
       'skip_ai': skipAi ? 1 : 0,
       'edit_params': editParamsJson,
@@ -104,6 +107,7 @@ class MealPhoto {
       userCorrectedName: map['user_corrected_name'] as String?,
       userCorrectedPrice: map['user_corrected_price'] as int?,
       userCorrectedCalories: map['user_corrected_calories'] as int?,
+      aiHint: map['ai_hint'] as String?,
       uploadStatus: map['upload_status'] as String? ?? 'pending',
       skipAi: (map['skip_ai'] as int?) == 1,
       editParamsJson: map['edit_params'] as String?,
@@ -130,6 +134,9 @@ class MealPhoto {
     String? userCorrectedName,
     int? userCorrectedPrice,
     int? userCorrectedCalories,
+    bool clearUserCorrections = false,
+    String? aiHint,
+    bool clearAiHint = false,
     String? uploadStatus,
     bool? skipAi,
     String? editParamsJson,
@@ -149,9 +156,14 @@ class MealPhoto {
       aiEstimatedCalories: aiEstimatedCalories ?? this.aiEstimatedCalories,
       aiCuisineGenre: aiCuisineGenre ?? this.aiCuisineGenre,
       aiModel: aiModel ?? this.aiModel,
-      userCorrectedName: userCorrectedName ?? this.userCorrectedName,
-      userCorrectedPrice: userCorrectedPrice ?? this.userCorrectedPrice,
-      userCorrectedCalories: userCorrectedCalories ?? this.userCorrectedCalories,
+      userCorrectedName:
+          clearUserCorrections ? null : (userCorrectedName ?? this.userCorrectedName),
+      userCorrectedPrice:
+          clearUserCorrections ? null : (userCorrectedPrice ?? this.userCorrectedPrice),
+      userCorrectedCalories: clearUserCorrections
+          ? null
+          : (userCorrectedCalories ?? this.userCorrectedCalories),
+      aiHint: clearAiHint ? null : (aiHint ?? this.aiHint),
       uploadStatus: uploadStatus ?? this.uploadStatus,
       skipAi: skipAi ?? this.skipAi,
       editParamsJson: clearEditParams ? null : (editParamsJson ?? this.editParamsJson),
