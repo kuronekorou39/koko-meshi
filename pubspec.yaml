@@ -1,7 +1,7 @@
 name: koko_meshi
 description: "撮るだけで食事を全自動記録する食事ログ＆グルメマップアプリ"
 publish_to: 'none'
-version: 0.7.1+11
+version: 0.8.0+12
 
 environment:
   sdk: ^3.11.0
@@ -88,6 +88,7 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   riverpod_generator: ^2.6.3
   build_runner: ^2.4.15
+  flutter_launcher_icons: ^0.14.4
 
 flutter:
   uses-material-design: true
@@ -95,3 +96,17 @@ flutter:
     - .env
     - assets/
     - assets/poc_test/
+
+# アプリアイコン生成: `dart run flutter_launcher_icons` で mipmap 一式を作り直す。
+# 素材は assets/icon/(assets/ は再帰的に取り込まれないのでAPKには入らない)。
+# 元絵の加工内容は assets/icon/README.md を参照
+flutter_launcher_icons:
+  image_path: "assets/icon/app_icon.png"
+  android: true
+  ios: true
+  # Adaptive Icon: 前景は透過のカメラ、背景はデザインシステムのダーク下地「夜」
+  adaptive_icon_background: "#17130E"
+  adaptive_icon_foreground: "assets/icon/app_icon_foreground.png"
+  # iOSのアイコンはアルファ不可
+  remove_alpha_ios: true
+  background_color_ios: "#17130E"
