@@ -622,128 +622,122 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
     final name = photo.displayName;
 
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // メニュー名。見出しとして主役に置き、タップでそのまま編集に入る
-            InkWell(
-              onTap: () => _showEditSheet(photo),
-              borderRadius: BorderRadius.circular(8),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        name ?? 'メニュー名を追加',
-                        style: textTheme.titleLarge?.copyWith(
-                          fontSize: 19,
-                          height: 1.35,
-                          fontWeight: FontWeight.w700,
-                          color: name == null ? tokens.textFaint : null,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Padding(
-                      padding: const EdgeInsets.only(top: 3),
-                      child: Icon(Icons.edit_outlined,
-                          size: 18, color: tokens.textFaint),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            // 価格・カロリーは罫線で区切った数値組にして「記録」らしく見せる
-            Container(
-              margin: const EdgeInsets.only(top: 6),
-              padding: const EdgeInsets.only(top: 12),
-              decoration: BoxDecoration(
-                border:
-                    Border(top: BorderSide(color: tokens.hairline, width: 0.8)),
-              ),
-              child: IntrinsicHeight(
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: _statCell(
-                        label: '価格',
-                        value: photo.displayPrice == null
-                            ? null
-                            : '¥${NumberFormat('#,###').format(photo.displayPrice)}',
-                      ),
-                    ),
-                    VerticalDivider(
-                        width: 28, thickness: 0.8, color: tokens.hairline),
-                    Expanded(
-                      child: _statCell(
-                        label: 'カロリー',
-                        value: photo.displayCalories == null
-                            ? null
-                            : '${NumberFormat('#,###').format(photo.displayCalories)} kcal',
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            // 値の出所(AIモデル / ユーザー修正)
-            if (isUserCorrected || photo.aiModel != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Row(
-                  children: [
-                    if (isUserCorrected)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: scheme.secondaryContainer,
-                          borderRadius: BorderRadius.circular(999),
-                        ),
+      // ブロック全体のリップルを角丸の内側に収める
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 記録本体(メニュー名 + 価格/カロリー)。ここ全体がひとつの編集導線。
+          // 別に「編集」ボタンを置くと入口が二重になるため、値そのものを
+          // タップさせる形に一本化している
+          InkWell(
+            onTap: () => _showEditSheet(photo),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
                         child: Text(
-                          'ユーザー修正済',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: scheme.onSecondaryContainer,
+                          name ?? 'メニュー名を追加',
+                          style: textTheme.titleLarge?.copyWith(
+                            fontSize: 19,
+                            height: 1.35,
+                            fontWeight: FontWeight.w700,
+                            color: name == null ? tokens.textFaint : null,
                           ),
                         ),
                       ),
-                    const Spacer(),
-                    if (photo.aiModel != null)
-                      Text(
-                        photo.aiModel!,
-                        style:
-                            TextStyle(fontSize: 11, color: tokens.textFaint),
+                      const SizedBox(width: 10),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 3),
+                        child: Icon(Icons.edit_outlined,
+                            size: 18, color: tokens.textMuted),
                       ),
-                  ],
-                ),
-              ),
-            const SizedBox(height: 14),
-            // 操作: 編集 / AIで再解析
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton.tonalIcon(
-                    onPressed: () => _showEditSheet(photo),
-                    icon: const Icon(Icons.edit_outlined, size: 16),
-                    label: const Text('編集'),
-                    style: FilledButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                      minimumSize: const Size(0, 36),
-                      textStyle: const TextStyle(
-                          fontSize: 13, fontWeight: FontWeight.w700),
+                    ],
+                  ),
+
+                  // 価格・カロリーは罫線で区切った数値組にして「記録」らしく見せる
+                  Container(
+                    margin: const EdgeInsets.only(top: 12),
+                    padding: const EdgeInsets.only(top: 12),
+                    decoration: BoxDecoration(
+                      border: Border(
+                          top: BorderSide(color: tokens.hairline, width: 0.8)),
+                    ),
+                    child: IntrinsicHeight(
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: _statCell(
+                              label: '価格',
+                              value: photo.displayPrice == null
+                                  ? null
+                                  : '¥${NumberFormat('#,###').format(photo.displayPrice)}',
+                            ),
+                          ),
+                          VerticalDivider(
+                              width: 28, thickness: 0.8, color: tokens.hairline),
+                          Expanded(
+                            child: _statCell(
+                              label: 'カロリー',
+                              value: photo.displayCalories == null
+                                  ? null
+                                  : '${NumberFormat('#,###').format(photo.displayCalories)} kcal',
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
+                ],
+              ),
+            ),
+          ),
+
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 値の出所(AIモデル / ユーザー修正)
+                if (isUserCorrected || photo.aiModel != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Row(
+                      children: [
+                        if (isUserCorrected)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: scheme.secondaryContainer,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              'ユーザー修正済',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: scheme.onSecondaryContainer,
+                              ),
+                            ),
+                          ),
+                        const Spacer(),
+                        if (photo.aiModel != null)
+                          Text(
+                            photo.aiModel!,
+                            style: TextStyle(
+                                fontSize: 11, color: tokens.textFaint),
+                          ),
+                      ],
+                    ),
+                  ),
+                SizedBox(
+                  width: double.infinity,
                   child: OutlinedButton.icon(
                     onPressed: () => _showReanalyzeDialog(photo),
                     icon: const Icon(Icons.refresh, size: 16),
@@ -758,8 +752,8 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
                 ),
               ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
