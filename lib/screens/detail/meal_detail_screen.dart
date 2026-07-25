@@ -25,6 +25,7 @@ import '../../theme/meal_type_style.dart';
 import '../../widgets/cached_photo_image.dart';
 import '../editor/photo_edit_core.dart';
 import '../editor/photo_editor_screen.dart';
+import 'photo_info_edit_sheet.dart';
 import 'photo_viewer_screen.dart';
 
 class MealDetailScreen extends ConsumerStatefulWidget {
@@ -253,40 +254,45 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
   Future<void> _showMealTypePicker(MealLog mealLog) async {
     final selected = await showModalBottomSheet<MealType>(
       context: context,
+      // 既定の高さ上限(画面の9/16)だと種別7件+見出し+ハンドル+下端の
+      // システムバー分が収まらずオーバーフローする
+      isScrollControlled: true,
       builder: (context) {
         final scheme = Theme.of(context).colorScheme;
         return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-                child: Text(
-                  '食事種別を選ぶ',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                ),
-              ),
-              for (final type in MealType.values)
-                ListTile(
-                  leading: Icon(type.icon, color: type.fg(context)),
-                  title: Text(
-                    type.label,
-                    style: TextStyle(
-                      fontWeight: type == mealLog.mealType
-                          ? FontWeight.w700
-                          : FontWeight.w500,
-                    ),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                  child: Text(
+                    '食事種別を選ぶ',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
                   ),
-                  trailing: type == mealLog.mealType
-                      ? Icon(Icons.check, color: scheme.primary)
-                      : null,
-                  onTap: () => Navigator.pop(context, type),
                 ),
-              const SizedBox(height: 8),
-            ],
+                for (final type in MealType.values)
+                  ListTile(
+                    leading: Icon(type.icon, color: type.fg(context)),
+                    title: Text(
+                      type.label,
+                      style: TextStyle(
+                        fontWeight: type == mealLog.mealType
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                      ),
+                    ),
+                    trailing: type == mealLog.mealType
+                        ? Icon(Icons.check, color: scheme.primary)
+                        : null,
+                    onTap: () => Navigator.pop(context, type),
+                  ),
+                const SizedBox(height: 8),
+              ],
+            ),
           ),
         );
       },
@@ -613,52 +619,83 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
     final isUserCorrected = photo.userCorrectedName != null ||
         photo.userCorrectedPrice != null ||
         photo.userCorrectedCalories != null;
-    final hasPrice = photo.displayPrice != null;
-    final hasCalories = photo.displayCalories != null;
+    final name = photo.displayName;
 
     return Card(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+        padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // メニュー名 + 価格/カロリー
-            Text(photo.displayName ?? '不明', style: textTheme.titleMedium),
-            if (hasPrice || hasCalories)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
+            // メニュー名。見出しとして主役に置き、タップでそのまま編集に入る
+            InkWell(
+              onTap: () => _showEditSheet(photo),
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (hasPrice)
-                      Text(
-                        '¥${NumberFormat('#,###').format(photo.displayPrice)}',
-                        style: tokens.numeral.copyWith(fontSize: 15),
-                      ),
-                    if (hasPrice && hasCalories)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: Text(
-                          '/',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: tokens.textFaint,
-                          ),
+                    Expanded(
+                      child: Text(
+                        name ?? 'メニュー名を追加',
+                        style: textTheme.titleLarge?.copyWith(
+                          fontSize: 19,
+                          height: 1.35,
+                          fontWeight: FontWeight.w700,
+                          color: name == null ? tokens.textFaint : null,
                         ),
                       ),
-                    if (hasCalories)
-                      Text(
-                        '${photo.displayCalories} kcal',
-                        style: tokens.numeral.copyWith(
-                          fontSize: 15,
-                          color: tokens.textMuted,
-                        ),
-                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: Icon(Icons.edit_outlined,
+                          size: 18, color: tokens.textFaint),
+                    ),
                   ],
                 ),
               ),
+            ),
+
+            // 価格・カロリーは罫線で区切った数値組にして「記録」らしく見せる
+            Container(
+              margin: const EdgeInsets.only(top: 6),
+              padding: const EdgeInsets.only(top: 12),
+              decoration: BoxDecoration(
+                border:
+                    Border(top: BorderSide(color: tokens.hairline, width: 0.8)),
+              ),
+              child: IntrinsicHeight(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _statCell(
+                        label: '価格',
+                        value: photo.displayPrice == null
+                            ? null
+                            : '¥${NumberFormat('#,###').format(photo.displayPrice)}',
+                      ),
+                    ),
+                    VerticalDivider(
+                        width: 28, thickness: 0.8, color: tokens.hairline),
+                    Expanded(
+                      child: _statCell(
+                        label: 'カロリー',
+                        value: photo.displayCalories == null
+                            ? null
+                            : '${NumberFormat('#,###').format(photo.displayCalories)} kcal',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            // 値の出所(AIモデル / ユーザー修正)
             if (isUserCorrected || photo.aiModel != null)
               Padding(
-                padding: const EdgeInsets.only(top: 10),
+                padding: const EdgeInsets.only(top: 12),
                 child: Row(
                   children: [
                     if (isUserCorrected)
@@ -688,13 +725,13 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
                   ],
                 ),
               ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 14),
             // 操作: 編集 / AIで再解析
             Row(
               children: [
                 Expanded(
                   child: FilledButton.tonalIcon(
-                    onPressed: () => _showEditDialog(context, photo),
+                    onPressed: () => _showEditSheet(photo),
                     icon: const Icon(Icons.edit_outlined, size: 16),
                     label: const Text('編集'),
                     style: FilledButton.styleFrom(
@@ -724,6 +761,33 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  /// 価格/カロリーの1セル。未入力は「—」にして、編集で埋められることを示す。
+  Widget _statCell({required String label, String? value}) {
+    final tokens = KokoTokens.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.8,
+            color: tokens.textFaint,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          value ?? '—',
+          style: tokens.numeral.copyWith(
+            fontSize: 17,
+            color: value == null ? tokens.textFaint : null,
+          ),
+        ),
+      ],
     );
   }
 
@@ -1097,75 +1161,28 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
     );
   }
 
-  Future<void> _showEditDialog(BuildContext context, MealPhoto photo) async {
-    final nameCtrl = TextEditingController(text: photo.displayName ?? '');
-    final priceCtrl = TextEditingController(
-      text: photo.displayPrice?.toString() ?? '',
-    );
-    final caloriesCtrl = TextEditingController(
-      text: photo.displayCalories?.toString() ?? '',
-    );
+  Future<void> _showEditSheet(MealPhoto photo) async {
+    final edit = await showPhotoInfoEditSheet(context, photo);
+    if (edit == null || !mounted) return;
 
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('メニュー情報を編集'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameCtrl,
-              decoration: const InputDecoration(
-                labelText: 'メニュー名',
-                hintText: '例: 味噌ラーメン',
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: priceCtrl,
-              decoration: const InputDecoration(
-                labelText: '価格 (円)',
-                hintText: '例: 800',
-              ),
-              keyboardType: TextInputType.number,
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: caloriesCtrl,
-              decoration: const InputDecoration(
-                labelText: 'カロリー (kcal)',
-                hintText: '例: 500',
-              ),
-              keyboardType: TextInputType.number,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('キャンセル'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('保存'),
-          ),
-        ],
-      ),
-    );
-
-    if (result == true) {
-      final updated = photo.copyWith(
-        userCorrectedName: nameCtrl.text.trim().isEmpty ? null : nameCtrl.text.trim(),
-        userCorrectedPrice: int.tryParse(priceCtrl.text.trim()),
-        userCorrectedCalories: int.tryParse(caloriesCtrl.text.trim()),
-      );
-      await LocalDatabase.updateMealPhoto(updated);
-      ref.invalidate(mealPhotosProvider(widget.mealLogId));
-    }
-
-    nameCtrl.dispose();
-    priceCtrl.dispose();
-    caloriesCtrl.dispose();
+    // AIの推定値と同じなら修正として記録しない(値を変えずに保存しただけで
+    // 「ユーザー修正済」が付くのを防ぐ)。
+    // また copyWith は userCorrected* に null を渡すと既存値を維持するので、
+    // 一度クリアしてから重ねる。こうしないと入力欄を空にしても前の修正値が
+    // 残り、「AIの推定に戻す」ができない
+    final updated = photo.copyWith(clearUserCorrections: true).copyWith(
+          userCorrectedName:
+              edit.name == photo.aiMenuName ? null : edit.name,
+          userCorrectedPrice:
+              edit.price == photo.aiEstimatedPrice ? null : edit.price,
+          userCorrectedCalories: edit.calories == photo.aiEstimatedCalories
+              ? null
+              : edit.calories,
+        );
+    await LocalDatabase.updateMealPhoto(updated);
+    if (!mounted) return;
+    ref.invalidate(mealPhotosProvider(widget.mealLogId));
+    ref.read(mealLogsProvider.notifier).refresh();
   }
 
   Future<void> _confirmDelete(BuildContext context) async {
