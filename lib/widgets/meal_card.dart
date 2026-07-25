@@ -7,9 +7,10 @@ import '../models/meal_type.dart';
 import '../theme/app_theme.dart';
 import '../theme/meal_type_style.dart';
 import 'cached_photo_image.dart';
+import 'photo_scrim.dart';
 
 /// タイムラインの食事カード。
-/// 写真を上部フルブリードで主役に置き、情報部は罫線調で一歩引かせる。
+/// 写真をカード全面に敷き、下部にスクリムを重ねてその上に情報を載せる。
 /// 余白(外側マージン)は呼び出し側で付ける。
 class MealCard extends StatelessWidget {
   final MealLog mealLog;
@@ -25,7 +26,51 @@ class MealCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final tokens = KokoTokens.of(context);
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        // 情報を写真の中に収めた分、従来(写真180 + 情報部)とほぼ同じ
+        // スクロール密度になる縦横比
+        child: AspectRatio(
+          aspectRatio: 4 / 3,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              _buildPhotoLayer(context, tokens),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: PhotoScrim(
+                  padding: const EdgeInsets.fromLTRB(14, 32, 14, 12),
+                  child: _buildInfo(context),
+                ),
+              ),
+              if (mealLog.mealType != MealType.unset)
+                Positioned(
+                  top: 10,
+                  left: 10,
+                  child: MealTypeChip(mealType: mealLog.mealType, onPhoto: true),
+                ),
+              // クラスタに載りきらない残り枚数
+              if (photos.length > 3)
+                Positioned(
+                  top: 10,
+                  right: 10,
+                  child: _photoCountBadge(context, photos.length - 3),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// スクリム上に載せる情報(メニュー名 / 価格・カロリー / 時刻)
+  Widget _buildInfo(BuildContext context) {
     final tokens = KokoTokens.of(context);
 
     final menuNames = photos
@@ -36,98 +81,85 @@ class MealCard extends StatelessWidget {
         menuNames.isEmpty && photos.any((p) => p.aiStatus == 'pending');
     final metaText = _buildMetaText();
 
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    final children = <Widget>[];
+    if (menuNames.isNotEmpty) {
+      children.add(
+        Text(
+          menuNames,
+          style: const TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+            height: 1.3,
+            color: PhotoScrim.textColor,
+            shadows: PhotoScrim.textShadows,
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      );
+    } else if (isAnalyzing) {
+      children.add(
+        Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            // 写真(フルブリード)
-            if (photos.isNotEmpty)
-              SizedBox(
-                height: 180,
-                width: double.infinity,
-                child: photos.length == 1
-                    ? _photoImage(photos.first)
-                    : _buildPhotoCluster(context),
+            const SizedBox(
+              width: 10,
+              height: 10,
+              child: CircularProgressIndicator(
+                strokeWidth: 1.5,
+                color: PhotoScrim.mutedTextColor,
               ),
-
-            // 情報部
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // 食事種別チップ + 時刻(未設定のときはチップを出さず時刻のみ)
-                  Row(
-                    children: [
-                      if (mealLog.mealType != MealType.unset)
-                        MealTypeChip(mealType: mealLog.mealType),
-                      const Spacer(),
-                      Text(
-                        DateFormat('HH:mm').format(mealLog.eatenAt),
-                        style: tokens.numeral.copyWith(
-                          fontSize: 12.5,
-                          color: tokens.textMuted,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-
-                  // メニュー名 / 解析中表示
-                  if (menuNames.isNotEmpty)
-                    Text(
-                      menuNames,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontSize: 15.5,
-                        fontWeight: FontWeight.w600,
-                        height: 1.35,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    )
-                  else if (isAnalyzing)
-                    Row(
-                      children: [
-                        SizedBox(
-                          width: 10,
-                          height: 10,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 1.5,
-                            color: tokens.textFaint,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'AIが解析中',
-                          style: TextStyle(
-                            fontSize: 12.5,
-                            color: tokens.textFaint,
-                          ),
-                        ),
-                      ],
-                    ),
-
-                  // 価格・カロリー
-                  if (metaText != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: Text(
-                        metaText,
-                        style: tokens.numeral.copyWith(
-                          fontSize: 13,
-                          color: tokens.textMuted,
-                        ),
-                      ),
-                    ),
-                ],
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'AIが解析中',
+              style: TextStyle(
+                fontSize: 12.5,
+                color: PhotoScrim.mutedTextColor,
+                shadows: PhotoScrim.textShadows,
               ),
             ),
           ],
         ),
+      );
+    }
+    if (children.isNotEmpty) children.add(const SizedBox(height: 6));
+
+    children.add(
+      Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Expanded(
+            child: metaText == null
+                ? const SizedBox.shrink()
+                : Text(
+                    metaText,
+                    style: tokens.numeral.copyWith(
+                      fontSize: 13,
+                      color: PhotoScrim.mutedTextColor,
+                      shadows: PhotoScrim.textShadows,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            DateFormat('HH:mm').format(mealLog.eatenAt),
+            style: tokens.numeral.copyWith(
+              fontSize: 12.5,
+              color: PhotoScrim.mutedTextColor,
+              shadows: PhotoScrim.textShadows,
+            ),
+          ),
+        ],
       ),
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: children,
     );
   }
 
@@ -145,6 +177,20 @@ class MealCard extends StatelessWidget {
     return parts.isEmpty ? null : parts.join(' ・ ');
   }
 
+  Widget _buildPhotoLayer(BuildContext context, KokoTokens tokens) {
+    if (photos.isEmpty) {
+      return ColoredBox(
+        color: tokens.photoPlaceholder,
+        child: Center(
+          child: Icon(Icons.restaurant_outlined, color: tokens.textFaint),
+        ),
+      );
+    }
+    return photos.length == 1
+        ? _photoImage(photos.first)
+        : _buildPhotoCluster(context);
+  }
+
   /// 複数枚: 1枚目を大きく、残りを右側に縦2分割で見せる。
   Widget _buildPhotoCluster(BuildContext context) {
     return Row(
@@ -158,11 +204,7 @@ class MealCard extends StatelessWidget {
                   children: [
                     Expanded(child: _photoImage(photos[1])),
                     const SizedBox(height: 2),
-                    Expanded(
-                      child: photos.length == 3
-                          ? _photoImage(photos[2])
-                          : _overflowPhoto(context),
-                    ),
+                    Expanded(child: _photoImage(photos[2])),
                   ],
                 ),
         ),
@@ -170,26 +212,23 @@ class MealCard extends StatelessWidget {
     );
   }
 
-  /// 4枚以上のとき、最後のタイルに残り枚数を重ねる。
-  Widget _overflowPhoto(BuildContext context) {
-    final theme = Theme.of(context);
+  /// 4枚以上のときに右上へ出す「+N」バッジ。
+  /// 情報を下部スクリムへ集約したので、写真の中央には重ねない。
+  Widget _photoCountBadge(BuildContext context, int rest) {
     final tokens = KokoTokens.of(context);
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        _photoImage(photos[2]),
-        ColoredBox(color: theme.colorScheme.scrim.withValues(alpha: 0.4)),
-        Center(
-          child: Text(
-            '+${photos.length - 3}',
-            style: tokens.numeral.copyWith(
-              fontSize: 16,
-              // 写真スクリム上に重ねるためテーマ非依存の白
-              color: Colors.white,
-            ),
-          ),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.scrim.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        '+$rest',
+        style: tokens.numeral.copyWith(
+          fontSize: 11.5,
+          color: PhotoScrim.textColor,
         ),
-      ],
+      ),
     );
   }
 

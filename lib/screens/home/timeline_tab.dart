@@ -163,8 +163,8 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
           crossAxisCount: 2,
           crossAxisSpacing: 12,
           mainAxisSpacing: 12,
-          // 写真 + テキスト2行(メニュー名/日時)が収まる縦横比
-          childAspectRatio: 0.78,
+          // テキストを写真の中(下部スクリム)へ入れたので正方形タイルにする
+          childAspectRatio: 1,
         ),
         itemCount: mealLogs.length,
         itemBuilder: (context, index) {

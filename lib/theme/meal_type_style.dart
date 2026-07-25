@@ -17,8 +17,14 @@ extension MealTypeStyle on MealType {
       };
 
   /// 文字・アイコン色
-  Color fg(BuildContext context) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
+  Color fg(BuildContext context) => _fgFor(Theme.of(context).brightness);
+
+  /// 写真スクリムの上に載せるときの色。背景が常に暗いので、アプリのテーマに
+  /// 関係なくダーク用の明るいトーンを使う。
+  Color get fgOnPhoto => _fgFor(Brightness.dark);
+
+  Color _fgFor(Brightness brightness) {
+    final dark = brightness == Brightness.dark;
     return switch (this) {
       MealType.unset => dark ? const Color(0xFFA79C8B) : const Color(0xFF83786A),
       MealType.eatingOut =>
@@ -64,12 +70,22 @@ class MealTypeChip extends StatelessWidget {
   /// 小: カード内メタ表示用 / 大: 詳細画面用
   final bool compact;
 
-  const MealTypeChip({super.key, required this.mealType, this.compact = true});
+  /// 写真の上に重ねる表示。暗いスクリムを下地にした配色に切り替える。
+  final bool onPhoto;
+
+  const MealTypeChip({
+    super.key,
+    required this.mealType,
+    this.compact = true,
+    this.onPhoto = false,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final fg = mealType.fg(context);
-    final bg = mealType.bg(context);
+    final fg = onPhoto ? mealType.fgOnPhoto : mealType.fg(context);
+    final bg = onPhoto
+        ? Theme.of(context).colorScheme.scrim.withValues(alpha: 0.55)
+        : mealType.bg(context);
     return Container(
       padding: compact
           ? const EdgeInsets.symmetric(horizontal: 8, vertical: 3)
