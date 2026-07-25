@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'package:exif/exif.dart';
 import 'package:flutter/foundation.dart';
-import 'package:gal/gal.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
@@ -9,7 +8,6 @@ import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
 import '../config/constants.dart';
-import 'app_settings_service.dart';
 
 /// EXIF から取得したメタデータ
 class PhotoExifData {
@@ -46,16 +44,6 @@ class PhotoService {
     final fileName = '${_uuid.v4()}$ext';
     final savedPath = p.join(dir.path, fileName);
     await File(file.path).copy(savedPath);
-
-    // カメラロールにも保存（設定が有効な場合）
-    if (AppSettings.saveToCameraRoll) {
-      try {
-        await Gal.putImage(savedPath, album: 'ココメシ');
-      } catch (e) {
-        debugPrint('[Photo] Failed to save to camera roll: $e');
-      }
-    }
-
     return savedPath;
   }
 

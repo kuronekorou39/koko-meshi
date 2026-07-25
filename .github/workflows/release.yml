@@ -3,7 +3,7 @@
 # でビルドだけ通す(その場合のAPKは署名が異なるため既存アプリに上書き不可)。
 #
 # 必要な Secrets (リポジトリ Settings > Secrets and variables > Actions):
-#   DOTENV_BASE64      : .env を base64 したもの (Maps/Supabase キー)
+#   DOTENV_BASE64      : .env を base64 したもの (Google Maps APIキー)
 #   KEYSTORE_BASE64    : android/app/kokomeshi-release.keystore を base64 したもの
 #   KEYSTORE_PASSWORD  : keystore のパスワード
 #   KEY_ALIAS          : キーのエイリアス (kokomeshi)
@@ -33,7 +33,7 @@ jobs:
             echo ".env restored from secret"
           else
             echo "# CI dummy (DOTENV_BASE64 secret 未設定)" > .env
-            echo "WARNING: dummy .env — Maps/Supabase はこのAPKでは動きません"
+            echo "WARNING: dummy .env — 地図機能はこのAPKでは動きません"
           fi
 
       - name: 署名キーを復元 (Secret があれば本番署名)

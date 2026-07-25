@@ -16,10 +16,8 @@ import '../../models/meal_photo.dart';
 import '../../models/meal_type.dart';
 import '../../providers/meal_providers.dart';
 import '../../services/ai_analysis_service.dart';
-import '../../services/auth_service.dart';
 import '../../services/location_service.dart';
 import '../../services/photo_service.dart';
-import '../../services/sync_service.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/meal_type_style.dart';
 import '../editor/photo_edit_core.dart';
@@ -790,11 +788,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
 
       // AI解析（端末内Gemma）
       await AiAnalysisService.processPendingPhotos();
-
-      // ログイン中ならクラウドに同期
-      if (AuthService.isLoggedIn) {
-        SyncService.syncAll();
-      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

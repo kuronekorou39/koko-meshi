@@ -9,18 +9,4 @@ class Env {
       dotenv.isInitialized ? (dotenv.env[key] ?? '') : '';
 
   static String get googleMapsApiKey => _get('GOOGLE_MAPS_API_KEY');
-
-  static String get googleOAuthClientId => _get('GOOGLE_OAUTH_CLIENT_ID');
-
-  static String get supabaseUrl {
-    final url = _get('SUPABASE_URL');
-    return url.isNotEmpty ? url : _get('NEXT_PUBLIC_SUPABASE_URL');
-  }
-
-  static String get supabaseAnonKey {
-    final key = _get('SUPABASE_ANON_KEY');
-    return key.isNotEmpty
-        ? key
-        : _get('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY');
-  }
 }

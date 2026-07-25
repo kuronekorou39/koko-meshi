@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
-import 'screens/auth/login_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'screens/capture/capture_screen.dart';
 import 'screens/detail/meal_detail_screen.dart';
@@ -44,10 +43,6 @@ final _router = GoRouter(
     GoRoute(
       path: '/settings',
       builder: (context, state) => const SettingsScreen(),
-    ),
-    GoRoute(
-      path: '/login',
-      builder: (context, state) => const LoginScreen(),
     ),
   ],
 );

@@ -197,6 +197,20 @@ class LocalDatabase {
     return maps.map((m) => MealPhoto.fromMap(m)).toList();
   }
 
+  /// 全写真レコード(クラウド写真取り込み・バックアップ用)
+  static Future<List<MealPhoto>> getAllMealPhotos() async {
+    final db = await database;
+    final maps = await db.query('meal_photos');
+    return maps.map((m) => MealPhoto.fromMap(m)).toList();
+  }
+
+  /// DBを閉じる(バックアップのエクスポート/復元でファイルを差し替える前に呼ぶ)。
+  /// 次に database ゲッターへアクセスすると自動で再オープンされる。
+  static Future<void> close() async {
+    await _database?.close();
+    _database = null;
+  }
+
   static Future<List<MealPhoto>> getPendingAiPhotos() async {
     final db = await database;
     final maps = await db.query(

@@ -11,10 +11,8 @@ import '../../models/meal_photo.dart';
 import '../../models/meal_type.dart';
 import '../../providers/meal_providers.dart';
 import '../../services/ai_analysis_service.dart';
-import '../../services/auth_service.dart';
 import 'package:geolocator/geolocator.dart';
 import '../../services/photo_service.dart';
-import '../../services/sync_service.dart';
 import '../capture/camera_screen.dart';
 import 'timeline_tab.dart';
 import 'map_tab.dart';
@@ -38,9 +36,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    // アプリ起動時、未解析(pending)のまま残っている写真があれば解析+同期を回す
+    // アプリ起動時、未解析(pending)のまま残っている写真があれば解析を回す
     // (モデルDL前に保存した写真などが「解析中」のまま止まらないように)
-    _runBackgroundAiAndSync();
+    _runBackgroundAi();
   }
 
   @override
@@ -174,7 +172,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
 
     // バックグラウンドAI解析
-    _runBackgroundAiAndSync();
+    _runBackgroundAi();
   }
 
   /// ライブラリ写真 → マージ判定 → CaptureScreen
@@ -260,21 +258,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       );
     }
 
-    _runBackgroundAiAndSync();
+    _runBackgroundAi();
   }
 
-  /// バックグラウンドAI解析 + 同期。
+  /// バックグラウンドAI解析。
   /// 起動時(initState)にも呼ばれるため例外は握って落とさない
-  /// (テスト環境のDB/環境変数未初期化や、起動直後のI/O失敗でクラッシュさせない)
-  Future<void> _runBackgroundAiAndSync() async {
+  /// (テスト環境のDB未初期化や、起動直後のI/O失敗でクラッシュさせない)
+  Future<void> _runBackgroundAi() async {
     try {
-      // 写真本体は先に同期し、AI解析完了後にメタデータを再同期する
-      if (AuthService.isLoggedIn) SyncService.syncAll();
       await AiAnalysisService.processPendingPhotos();
       if (mounted) ref.read(mealLogsProvider.notifier).refresh();
-      if (AuthService.isLoggedIn) SyncService.syncAll();
     } catch (e) {
-      debugPrint('[Home] background AI/sync failed: $e');
+      debugPrint('[Home] background AI failed: $e');
     }
   }
 }

@@ -1,7 +1,7 @@
 name: koko_meshi
 description: "撮るだけで食事を全自動記録する食事ログ＆グルメマップアプリ"
 publish_to: 'none'
-version: 0.6.0+9
+version: 0.7.1+11
 
 environment:
   sdk: ^3.11.0
@@ -37,9 +37,6 @@ dependencies:
   # Google Places（HTTP経由で呼び出し）
   http: ^1.3.0
 
-  # Supabase（認証 + クラウドDB + ストレージ）
-  supabase_flutter: ^2.9.0
-
   # ローカルファイルパス
   path_provider: ^2.1.5
 
@@ -58,9 +55,13 @@ dependencies:
   # 環境変数
   flutter_dotenv: ^5.2.1
   table_calendar: ^3.2.0
-  google_sign_in: ^7.2.0
   shared_preferences: ^2.5.4
   gal: ^2.3.2
+
+  # バックアップ(zipエクスポート/復元・端末移行)
+  archive: ^4.0.0
+  share_plus: ^11.0.0
+  file_picker: ^10.0.0
 
   # EXIF メタデータ読み取り
   exif: ^3.3.0
