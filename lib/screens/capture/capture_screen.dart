@@ -59,6 +59,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   bool _loadingLocation = true;
   late DateTime _capturedAt;
 
+  /// _capturedAt が写真のEXIF由来か(falseなら記録した時刻)
+  bool _capturedAtFromExif = false;
+
   @override
   void initState() {
     super.initState();
@@ -108,61 +111,79 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         ? oldest
         : withGps.firstOrNull;
 
+    // 写真を消したときも通るので、EXIF由来の値は毎回引き直す
     setState(() {
-      if (oldest != null) _capturedAt = oldest.exifDateTime!;
-      // 端末のGPSが取れているならそちらが今いる場所として正しい
-      if (_position == null && gpsSource != null) {
-        _exifPosition =
-            (lat: gpsSource.exifLatitude!, lng: gpsSource.exifLongitude!);
-        _loadingLocation = true;
+      if (oldest != null) {
+        _capturedAt = oldest.exifDateTime!;
+        _capturedAtFromExif = true;
+      } else if (_capturedAtFromExif) {
+        _capturedAt = DateTime.now();
+        _capturedAtFromExif = false;
       }
     });
 
-    if (_position == null && gpsSource != null) {
-      _fetchAddressFromCoords(gpsSource.exifLatitude!, gpsSource.exifLongitude!);
-    }
+    // 利用者が明示的に消したものは復活させない
+    if (_locationCleared) return;
+
+    final next = gpsSource == null
+        ? null
+        : (lat: gpsSource.exifLatitude!, lng: gpsSource.exifLongitude!);
+    if (_exifPosition == next) return;
+
+    setState(() => _exifPosition = next);
+    _resolveAddress();
   }
+
+  /// 記録に使う位置。**写真のEXIFを優先**する。
+  ///
+  /// 端末のGPSは「いま画面を開いている場所」でしかない。過去の写真を
+  /// 取り込んだときに現在地を使うと、まったく違う場所の記録になる。
+  ({double lat, double lng})? get _effectivePosition =>
+      _exifPosition ??
+      (_position == null
+          ? null
+          : (lat: _position!.latitude, lng: _position!.longitude));
 
   Future<void> _fetchLocation() async {
     final pos = await LocationService.getCurrentPosition();
     if (!mounted) return;
-
-    setState(() {
-      _position = pos;
-      _loadingLocation = pos != null; // 住所取得中はまだloading
-    });
-
-    if (pos != null) {
-      final addr = await LocationService.getAddressFromPosition(pos);
-      if (mounted) {
-        setState(() {
-          _address = addr;
-          _loadingLocation = false;
-        });
-      }
-    }
+    setState(() => _position = pos);
+    await _resolveAddress();
   }
 
-  Future<void> _fetchAddressFromCoords(double lat, double lng) async {
-    final pos = Position(
-      latitude: lat,
-      longitude: lng,
-      timestamp: DateTime.now(),
-      accuracy: 0,
-      altitude: 0,
-      altitudeAccuracy: 0,
-      heading: 0,
-      headingAccuracy: 0,
-      speed: 0,
-      speedAccuracy: 0,
-    );
-    final addr = await LocationService.getAddressFromPosition(pos);
-    if (mounted) {
+  /// いま採用している位置の住所を引き直す。
+  Future<void> _resolveAddress() async {
+    final target = _effectivePosition;
+    if (target == null) {
       setState(() {
-        _address = addr;
+        _address = null;
         _loadingLocation = false;
       });
+      return;
     }
+    setState(() => _loadingLocation = true);
+
+    final addr = await LocationService.getAddressFromPosition(
+      Position(
+        latitude: target.lat,
+        longitude: target.lng,
+        timestamp: DateTime.now(),
+        accuracy: 0,
+        altitude: 0,
+        altitudeAccuracy: 0,
+        heading: 0,
+        headingAccuracy: 0,
+        speed: 0,
+        speedAccuracy: 0,
+      ),
+    );
+    if (!mounted) return;
+    // 引いている間に写真が増減して位置が変わっていたら、その結果は捨てる
+    if (_effectivePosition != target) return;
+    setState(() {
+      _address = addr;
+      _loadingLocation = false;
+    });
   }
 
   @override
@@ -310,32 +331,34 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   }
 
   Widget _buildMetadataBar(DateFormat dateFormat) {
-    final hasLocation = _position != null || _exifPosition != null;
+    final position = _effectivePosition;
+    final hasLocation = position != null;
     final tokens = KokoTokens.of(context);
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surfaceContainerHigh,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: tokens.hairline, width: 0.8),
       ),
-      child: Row(
+      child: Column(
         children: [
           // 日時
-          Icon(Icons.schedule_outlined, size: 16, color: tokens.textMuted),
-          const SizedBox(width: 4),
-          Text(
-            dateFormat.format(_capturedAt),
-            style: tokens.numeral
-                .copyWith(fontSize: 12, color: tokens.textMuted),
+          _metaRow(
+            icon: Icons.schedule_outlined,
+            child: Text(
+              dateFormat.format(_capturedAt),
+              style:
+                  tokens.numeral.copyWith(fontSize: 12, color: tokens.textMuted),
+            ),
+            source: _capturedAtFromExif ? '写真の日時' : '記録した時刻',
           ),
-          const SizedBox(width: 12),
+          const SizedBox(height: 8),
           // 位置情報
-          Icon(Icons.location_on_outlined, size: 16,
-            color: hasLocation ? tokens.textMuted : tokens.textFaint),
-          const SizedBox(width: 4),
-          Expanded(
+          _metaRow(
+            icon: Icons.location_on_outlined,
+            dim: !hasLocation,
             child: _loadingLocation
                 ? const SizedBox(
                     width: 12,
@@ -345,33 +368,81 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                 : hasLocation
                     ? Text(
                         _address ??
-                            '${(_position?.latitude ?? _exifPosition?.lat)?.toStringAsFixed(4)}, '
-                            '${(_position?.longitude ?? _exifPosition?.lng)?.toStringAsFixed(4)}',
+                            '${position.lat.toStringAsFixed(4)}, '
+                            '${position.lng.toStringAsFixed(4)}',
                         style: TextStyle(fontSize: 12, color: tokens.textMuted),
                         overflow: TextOverflow.ellipsis,
                       )
                     : GestureDetector(
-                        onTap: _locationCleared ? _refetchLocation : () {
-                          setState(() => _loadingLocation = true);
-                          _fetchLocation();
-                        },
+                        onTap: _locationCleared
+                            ? _refetchLocation
+                            : () {
+                                setState(() => _loadingLocation = true);
+                                _fetchLocation();
+                              },
                         child: Text(
-                          _locationCleared ? '位置情報なし (タップで再取得)' : '取得できません (タップで再取得)',
-                          style: TextStyle(fontSize: 12, color: tokens.textFaint),
+                          _locationCleared
+                              ? '位置情報なし (タップで再取得)'
+                              : '取得できません (タップで再取得)',
+                          style:
+                              TextStyle(fontSize: 12, color: tokens.textFaint),
                         ),
                       ),
+            source: _loadingLocation
+                ? null
+                : _exifPosition != null
+                    ? '写真の位置'
+                    : _position != null
+                        ? '今いる場所'
+                        : null,
+            trailing: hasLocation && !_loadingLocation
+                ? GestureDetector(
+                    onTap: _clearLocation,
+                    child: Padding(
+                      padding: const EdgeInsets.all(4),
+                      child:
+                          Icon(Icons.close, size: 16, color: tokens.textFaint),
+                    ),
+                  )
+                : null,
           ),
-          // 位置情報クリア/再取得
-          if (hasLocation && !_loadingLocation)
-            GestureDetector(
-              onTap: _clearLocation,
-              child: Padding(
-                padding: const EdgeInsets.only(left: 4),
-                child: Icon(Icons.close, size: 16, color: tokens.textFaint),
-              ),
-            ),
         ],
       ),
+    );
+  }
+
+  /// メタデータの1行。値の右に「どこから来た値か」を出す。
+  /// 写真のEXIFなのか、いま端末から取ったものなのかで意味が変わるため
+  Widget _metaRow({
+    required IconData icon,
+    required Widget child,
+    String? source,
+    Widget? trailing,
+    bool dim = false,
+  }) {
+    final tokens = KokoTokens.of(context);
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: dim ? tokens.textFaint : tokens.textMuted),
+        const SizedBox(width: 6),
+        Expanded(child: child),
+        if (source != null) ...[
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: tokens.hairline, width: 0.8),
+            ),
+            child: Text(
+              source,
+              style: TextStyle(fontSize: 10.5, color: tokens.textFaint),
+            ),
+          ),
+        ],
+        // 右端の操作が無い行も、下の行と左右の幅をそろえる
+        trailing ?? const SizedBox(width: 24, height: 24),
+      ],
     );
   }
 
@@ -522,7 +593,11 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
           right: 2,
           child: _tileButton(
             icon: Icons.close,
-            onTap: () => setState(() => _selectedPhotos.removeAt(index)),
+            onTap: () {
+              setState(() => _selectedPhotos.removeAt(index));
+              // 日時や場所をその写真から採っていたかもしれないので引き直す
+              _adoptExifMetadata();
+            },
           ),
         ),
       ],
@@ -653,9 +728,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     try {
       final mealLogId = _uuid.v4();
 
-      // 位置情報: GPS > EXIF の優先順
-      final lat = _position?.latitude ?? _exifPosition?.lat;
-      final lng = _position?.longitude ?? _exifPosition?.lng;
+      // 位置情報: 写真のEXIF > 端末のGPS(画面に出ている値と同じ順)
+      final lat = _effectivePosition?.lat;
+      final lng = _effectivePosition?.lng;
 
       // 自宅判定: GPSと保存済み場所を比較
       String? locationTag;
