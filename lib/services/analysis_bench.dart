@@ -64,6 +64,9 @@ class AnalysisBench {
       throw StateError('端末内AIモデルが未ダウンロードです');
     }
 
+    // 直前のバッチ解析が仕掛けたアイドル解放タイマーに、実行の途中で
+    // モデルを落とされないようにする
+    AiAnalysisService.beginModelHold();
     final loadMs = await svc.load(GemmaModelKind.e2b);
     final savedPlaces = await LocalDatabase.getSavedPlaces();
     final cases = <BenchCase>[];
@@ -74,6 +77,7 @@ class AnalysisBench {
         onProgress?.call(i + 1, photos.length);
       }
     } finally {
+      AiAnalysisService.endModelHold();
       // ベンチは単発なのでモデルを掴んだままにしない(~3GB)
       await svc.disposeModel();
     }

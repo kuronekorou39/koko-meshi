@@ -7,6 +7,7 @@ import '../database/local_database.dart';
 import '../models/meal_photo.dart';
 import '../models/meal_type.dart';
 import '../models/saved_place.dart';
+import '../models/sensitive_mood.dart';
 import 'analysis_foreground_service.dart';
 import 'app_settings_service.dart';
 import 'gemma_ondevice_service.dart';
@@ -154,7 +155,7 @@ class AiAnalysisService {
         // バッチ後すぐには解放せず、アイドルが続いたら~3GBのRAMを空ける
         _disposeTimer?.cancel();
         _disposeTimer = Timer(_modelIdleTimeout, () {
-          if (!_batchRunning) {
+          if (!_batchRunning && _modelHolds == 0) {
             debugPrint('[AI] idle timeout -> dispose on-device model');
             GemmaOnDeviceService.instance.disposeModel();
           }
@@ -172,39 +173,6 @@ class AiAnalysisService {
 
   static const _onDeviceModelLabel = 'Gemma 4 E2B（端末内）';
 
-  /// センシティブ画像(悪ふざけ入力)に付けるタイトルの「雰囲気」パターン。
-  /// タイトル文言はモデルが写真を踏まえて生成する(モデルの結果を尊重)。
-  /// ここで決めるのは口調・方向性だけで、写真ごとにハッシュで決定的に選ぶ。
-  /// fallbackはモデルがタイトル生成を拒否した場合の、雰囲気だけの単独文言
-  /// (拒否時は写真の描写も取れていないことが多いため内容には触れない)。
-  static const List<({String label, String instruction, String fallback})>
-      _sensitiveMoods = [
-    (
-      label: '妖艶',
-      instruction: '妖艶で思わせぶりな、大人の色気を漂わせる口調',
-      fallback: 'ふふ…これは…大人の時間ね…',
-    ),
-    (
-      label: '興奮ツッコミ',
-      instruction: '見た瞬間に思わず叫んでしまった勢いのツッコミ口調（「エッチ！！」のようなノリ）',
-      fallback: 'って、エッチ！！',
-    ),
-    (
-      label: '恥じらい',
-      instruction: '恥ずかしくてどもりながら小声になってしまう口調',
-      fallback: 'こ、これは…お見せできません…///',
-    ),
-    (
-      label: 'てんぱり',
-      instruction: '慌てふためいて完全にテンパっている口調',
-      fallback: 'え、えっと、これ記録していいやつ！？',
-    ),
-    (
-      label: '食いしん坊',
-      instruction: '何を見ても食べ物に見える食いしん坊が、あくまで料理として大真面目に評価してしまう口調',
-      fallback: '本日の一皿…カロリー計測不能',
-    ),
-  ];
 
   static Future<void> _analyzePhotoOnDevice(
     MealPhoto photo,
@@ -241,8 +209,7 @@ class AiAnalysisService {
       // 同じ扱いにする(拒否応答自体を判定シグナルとして使う)
       if (res.imageType == 'sensitive' ||
           (res.parsed == null && _looksLikeSafetyRefusal(res.rawText))) {
-        final mood =
-            _sensitiveMoods[photo.id.hashCode.abs() % _sensitiveMoods.length];
+        final mood = SensitiveMood.forPhotoId(photo.id);
         final title = await _generateSensitiveTitle(svc, mood);
         await _writeAiResult(
           photo.id,
@@ -327,6 +294,23 @@ class AiAnalysisService {
   /// バッチ解析中か。解析ベンチが同じモデルを取り合わないための確認用。
   static bool get isBusy => _batchRunning;
 
+  /// モデルを掴み続けたい処理の数。
+  /// バッチ解析はアイドル3分でモデルを解放するタイマーを仕掛けるが、
+  /// その後に解析ベンチや口調プレビューを始めると、実行の途中で解放されて
+  /// 「モデルが未ロードです」で落ちる。走っている間はカウントを上げて防ぐ。
+  static int _modelHolds = 0;
+
+  /// [endModelHold] と必ず対で呼ぶこと(finallyで解放する)。
+  static void beginModelHold() {
+    _modelHolds++;
+    _disposeTimer?.cancel();
+    _disposeTimer = null;
+  }
+
+  static void endModelHold() {
+    if (_modelHolds > 0) _modelHolds--;
+  }
+
   /// オンデバイス解析用の撮影状況コンテキストを組み立てる。
   /// 生のGPS座標は端末内モデルには解釈できない(かつ誤ったコンテキストは
   /// 逆効果になる)ため入れず、確度の高い情報だけを渡す。
@@ -386,14 +370,16 @@ class AiAnalysisService {
   /// 返した場合は、雰囲気だけの固定fallback文言に落とす。
   static Future<String> _generateSensitiveTitle(
     GemmaOnDeviceService svc,
-    ({String label, String instruction, String fallback}) mood,
+    SensitiveMood mood,
   ) async {
     try {
+      // 「露骨・下品な表現は避けて」という一文は入れていない。
+      // ぼかす方向の口調では元々不要で、踏み込む口調には効かなかったうえ、
+      // 全体を無難な語(「サプライズ」等)へ逃がして口調の差を潰していたため。
       final raw = await svc.followUpText(
           'この写真に、食事ログアプリ用のふざけたタイトルを付け直します。'
           '写真に写っているものを踏まえつつ、${mood.instruction}で、'
           '短いタイトルを1つだけ考えてください。'
-          '露骨・下品な表現は避けて、冗談として笑える範囲にしてください。'
           'JSONや説明文は不要です。タイトルの文字列だけを25文字以内で返してください。');
       final title = _cleanupGeneratedTitle(raw);
       if (title != null && !_looksLikeTitleRefusal(title)) {
