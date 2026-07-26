@@ -120,7 +120,12 @@ Maps SDK と違って `http` はこれを送らない。制限をかけると検
 | `SearchMediaRequest per minute` | 600 | **0** |
 | `SearchReviewPostsRequest per minute` | 600 | **0** |
 
-`SearchMedia` / `SearchReviewPosts` は日次が「無制限」なので分単位で塞ぐ。
+`SearchMedia` / `SearchReviewPosts` は日次が「無制限」で日次側に蓋ができないので、
+分単位で塞ぐ。逆に**日次を0にできた種別は分単位を触らなくてよい**（日次のほうが
+上位の制約になるので、分単位が何であれ1件も通らない）。
+
+設定後、一覧に戻って**0がちゃんと保存されているか**を確認すること。0が拒否されても
+エラーが出ず元の値のまま、ということがある。その場合は分単位を0にして塞ぐ。
 
 Places の写真を表示するようにしたら `GetPhotoMedia` を戻すこと
 （現在はフィールドマスクから写真を外しているので呼ばれない）。
