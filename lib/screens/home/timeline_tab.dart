@@ -17,6 +17,11 @@ import '../../widgets/meal_grid_tile.dart';
 
 enum ViewMode { list, grid, calendar }
 
+/// カレンダーの日付セルに何を出すか。
+/// 既定は記録の有無だけ(点)。数字を常に出すと読み取りづらいので、
+/// 合計の「カロリー」「金額」をタップしたときだけその値に切り替える。
+enum CalendarMetric { none, calories, price }
+
 class TimelineTab extends ConsumerStatefulWidget {
   final VoidCallback? onLibraryPressed;
   const TimelineTab({super.key, this.onLibraryPressed});
@@ -35,6 +40,8 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
   /// 集計用の写真(記録ID→写真)。カロリーと金額は写真側にしか無いので、
   /// カレンダー表示に切り替えたときにまとめて読む。
   Map<String, List<MealPhoto>>? _photosByLog;
+
+  CalendarMetric _calendarMetric = CalendarMetric.none;
 
   Future<void> _loadPhotosForStats() async {
     final photos = await LocalDatabase.getAllMealPhotos();
@@ -234,23 +241,11 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
             // 上の月合計を切り替えるので setState が要る
             setState(() => _focusedDay = focused);
           },
-          // 既定の点マーカーの代わりに、その日のカロリーを出す
+          // 常に同じ高さの枠を返してセルの高さを一定に保つ(中身が
+          // 点だったり数字だったりで行の高さが動かないように)
           calendarBuilders: CalendarBuilders<MealLog>(
-            markerBuilder: (context, day, events) {
-              final kcal =
-                  summary.caloriesByDay[DateTime(day.year, day.month, day.day)];
-              if (kcal == null || kcal == 0) return null;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 1),
-                child: Text(
-                  NumberFormat('#,###').format(kcal),
-                  style: KokoTokens.of(context).numeral.copyWith(
-                        fontSize: 9,
-                        color: KokoTokens.of(context).textFaint,
-                      ),
-                ),
-              );
-            },
+            markerBuilder: (context, day, events) =>
+                _buildDayMarker(day, events, summary),
           ),
           // table_calendarの既定文字色はテーマ非連動(ライトで白文字等)なので
           // 明示的にトークンから指定する
@@ -328,19 +323,76 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
                     style: TextStyle(color: KokoTokens.of(context).textFaint),
                   ),
                 )
-              : ListView.builder(
-                  padding: const EdgeInsets.only(top: 4, bottom: 100),
+              // カレンダーの下は縦が狭いので、1件でも2列で並べて写真を大きく見せる
+              : GridView.builder(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+                  gridDelegate:
+                      const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                    childAspectRatio: 1,
+                  ),
                   itemCount: selectedLogs.length,
                   itemBuilder: (context, index) {
-                    return _MealLogItem(
+                    return _MealLogGridItem(
                       key: ValueKey(selectedLogs[index].id),
                       mealLog: selectedLogs[index],
-                      onTap: () => context.push('/meal/${selectedLogs[index].id}'),
+                      onTap: () =>
+                          context.push('/meal/${selectedLogs[index].id}'),
                     );
                   },
                 ),
         ),
       ],
+    );
+  }
+
+  /// 日付セルの下に出す表示。高さは常に固定。
+  Widget _buildDayMarker(
+      DateTime day, List<MealLog> events, MonthlySummary summary) {
+    final tokens = KokoTokens.of(context);
+    const height = 14.0;
+    if (events.isEmpty) return const SizedBox(height: height);
+
+    final key = DateTime(day.year, day.month, day.day);
+    final value = switch (_calendarMetric) {
+      CalendarMetric.none => null,
+      CalendarMetric.calories => summary.caloriesByDay[key],
+      CalendarMetric.price => summary.priceByDay[key],
+    };
+
+    // 値が無い日と、0の日(センシティブ判定などで0が入る)は数字を出さず、
+    // 「記録はある」ことだけ示す
+    if (value == null || value == 0) {
+      return SizedBox(
+        height: height,
+        child: Center(
+          child: Container(
+            width: 5,
+            height: 5,
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primary,
+              shape: BoxShape.circle,
+            ),
+          ),
+        ),
+      );
+    }
+
+    final text = _calendarMetric == CalendarMetric.price
+        ? '¥${NumberFormat('#,###').format(value)}'
+        : NumberFormat('#,###').format(value);
+    return SizedBox(
+      height: height,
+      child: Center(
+        child: Text(
+          text,
+          style: tokens.numeral.copyWith(fontSize: 9, color: tokens.textMuted),
+          maxLines: 1,
+          overflow: TextOverflow.visible,
+        ),
+      ),
     );
   }
 
@@ -372,13 +424,19 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
                     children: [
                       Expanded(
                         child: _summaryCell(
-                            'カロリー', '${fmt.format(s.totalCalories)} kcal'),
+                          label: 'カロリー',
+                          value: '${fmt.format(s.totalCalories)} kcal',
+                          metric: CalendarMetric.calories,
+                        ),
                       ),
                       VerticalDivider(
-                          width: 28, thickness: 0.8, color: tokens.hairline),
+                          width: 12, thickness: 0.8, color: tokens.hairline),
                       Expanded(
                         child: _summaryCell(
-                            '金額', '¥${fmt.format(s.totalPrice)}'),
+                          label: '金額',
+                          value: '¥${fmt.format(s.totalPrice)}',
+                          metric: CalendarMetric.price,
+                        ),
                       ),
                     ],
                   ),
@@ -411,23 +469,51 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
     return parts.join('　');
   }
 
-  Widget _summaryCell(String label, String value) {
+  /// 合計の1項目。タップするとカレンダーの日付セルがその値の表示に切り替わる
+  /// (もう一度押すと解除)。
+  Widget _summaryCell({
+    required String label,
+    required String value,
+    required CalendarMetric metric,
+  }) {
     final tokens = KokoTokens.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 0.8,
-            color: tokens.textFaint,
+    final scheme = Theme.of(context).colorScheme;
+    final selected = _calendarMetric == metric;
+
+    return Material(
+      color: selected ? scheme.primaryContainer : Colors.transparent,
+      borderRadius: BorderRadius.circular(10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () => setState(() =>
+            _calendarMetric = selected ? CalendarMetric.none : metric),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.8,
+                  color:
+                      selected ? scheme.onPrimaryContainer : tokens.textFaint,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                value,
+                style: tokens.numeral.copyWith(
+                  fontSize: 18,
+                  color: selected ? scheme.onPrimaryContainer : null,
+                ),
+              ),
+            ],
           ),
         ),
-        const SizedBox(height: 3),
-        Text(value, style: tokens.numeral.copyWith(fontSize: 18)),
-      ],
+      ),
     );
   }
 

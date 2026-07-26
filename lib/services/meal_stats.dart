@@ -52,6 +52,7 @@ class MealStats {
     var logCount = 0;
     final days = <DateTime>{};
     final caloriesByDay = <DateTime, int>{};
+    final priceByDay = <DateTime, int>{};
 
     for (final log in logs) {
       final at = log.eatenAt;
@@ -61,15 +62,18 @@ class MealStats {
       days.add(DateTime(at.year, at.month, at.day));
       if (log.mealType == MealType.eatingOut) eatingOut++;
 
+      final day = DateTime(at.year, at.month, at.day);
       final photos = photosByLog[log.id] ?? const <MealPhoto>[];
       final kcal = caloriesOf(photos);
       if (kcal != null) {
         calories += kcal;
-        final day = DateTime(at.year, at.month, at.day);
         caloriesByDay[day] = (caloriesByDay[day] ?? 0) + kcal;
       }
       final p = priceOf(log, photos);
-      if (p != null) price += p;
+      if (p != null) {
+        price += p;
+        priceByDay[day] = (priceByDay[day] ?? 0) + p;
+      }
     }
 
     return MonthlySummary(
@@ -80,6 +84,7 @@ class MealStats {
       recordedDays: days.length,
       eatingOutCount: eatingOut,
       caloriesByDay: caloriesByDay,
+      priceByDay: priceByDay,
     );
   }
 
@@ -103,6 +108,7 @@ class MonthlySummary {
     required this.recordedDays,
     required this.eatingOutCount,
     required this.caloriesByDay,
+    required this.priceByDay,
   });
 
   final DateTime month;
@@ -118,6 +124,9 @@ class MonthlySummary {
 
   /// 日付(時刻なし) → その日のカロリー合計
   final Map<DateTime, int> caloriesByDay;
+
+  /// 日付(時刻なし) → その日の金額合計
+  final Map<DateTime, int> priceByDay;
 
   bool get isEmpty => logCount == 0;
 
