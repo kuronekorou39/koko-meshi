@@ -11,6 +11,7 @@ import '../models/sensitive_mood.dart';
 import 'analysis_foreground_service.dart';
 import 'app_settings_service.dart';
 import 'gemma_ondevice_service.dart';
+import 'meal_stats.dart';
 import 'photo_cache_service.dart';
 
 class AiAnalysisService {
@@ -369,12 +370,9 @@ class AiAnalysisService {
     return buf.toString();
   }
 
-  static String _timeBandLabel(int hour) {
-    if (hour >= 4 && hour < 11) return '朝';
-    if (hour >= 11 && hour < 16) return '昼';
-    if (hour >= 16 && hour < 23) return '夜';
-    return '深夜';
-  }
+  /// 時間帯の区切りは集計側と共有する(ずれると解析の文脈と振り返りの
+  /// グラフで違う「夜」を指してしまう)
+  static String _timeBandLabel(int hour) => TimeBand.ofHour(hour).label;
 
   /// センシティブ画像用のタイトルを、同じ会話(画像が文脈に残っている)への
   /// 追い質問でモデル自身に生成させる。写真の内容を踏まえた文言に、指定の

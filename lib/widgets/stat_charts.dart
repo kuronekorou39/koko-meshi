@@ -106,6 +106,161 @@ class _BarPainter extends CustomPainter {
       old.values != values || old.maxValue != maxValue;
 }
 
+/// 横向きの1本バー。「項目名 / 量 / 実数」を縦に並べて読ませたいときに使う
+/// (スコアの内訳、時間帯ごとの回数、よく食べたものの回数)。
+class MetricBar extends StatelessWidget {
+  const MetricBar({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.max,
+    required this.valueLabel,
+    this.labelWidth = 88,
+    this.color,
+  });
+
+  final String label;
+  final num value;
+  final num max;
+
+  /// バーの右に出す実数(単位つき)
+  final String valueLabel;
+  final double labelWidth;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = KokoTokens.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final ratio = max <= 0 ? 0.0 : (value / max).clamp(0.0, 1.0).toDouble();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: labelWidth,
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: tokens.textMuted),
+            ),
+          ),
+          Expanded(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(3),
+              child: LinearProgressIndicator(
+                value: ratio,
+                minHeight: 6,
+                backgroundColor: tokens.hairline,
+                color: color ?? scheme.primary,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 62,
+            child: Text(
+              valueLabel,
+              textAlign: TextAlign.right,
+              maxLines: 1,
+              style: tokens.numeral.copyWith(fontSize: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// ラベル付きの縦棒。項目が少なく、名前を軸に出したいとき(曜日別など)。
+///
+/// [DailyBarChart] と違い件数が少ないので、CustomPaint ではなく素の Widget で
+/// 組んでいる。こちらは値のテキストを出すので、フォント設定が効くほうが良い。
+class CategoryBarChart extends StatelessWidget {
+  const CategoryBarChart({
+    super.key,
+    required this.labels,
+    required this.values,
+    this.height = 96,
+    this.valueLabels,
+  });
+
+  final List<String> labels;
+  final List<int> values;
+  final double height;
+
+  /// 棒の上に出す文字。省略すると値をそのまま出す
+  final List<String>? valueLabels;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = KokoTokens.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final maxValue = values.isEmpty ? 0 : values.reduce(math.max);
+    final top = maxValue == 0 ? 1 : maxValue;
+    // 棒の上に出す数字ぶんを引いてから高さを配分する
+    final barArea = height - 18;
+
+    return Column(
+      children: [
+        SizedBox(
+          height: height,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              for (var i = 0; i < labels.length; i++)
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      Text(
+                        values[i] == 0
+                            ? ''
+                            : (valueLabels?[i] ?? '${values[i]}'),
+                        maxLines: 1,
+                        style: tokens.numeral
+                            .copyWith(fontSize: 9, color: tokens.textFaint),
+                      ),
+                      const SizedBox(height: 2),
+                      Container(
+                        width: 14,
+                        // 記録が無い日も存在は示す(細い残り)
+                        height: values[i] == 0
+                            ? 2
+                            : math.max(3, barArea * values[i] / top),
+                        decoration: BoxDecoration(
+                          color: values[i] == 0
+                              ? tokens.hairline
+                              : scheme.primary,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 5),
+        Row(
+          children: [
+            for (final label in labels)
+              Expanded(
+                child: Text(
+                  label,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 10, color: tokens.textFaint),
+                ),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
 /// ジャンル構成のレーダーチャート。
 class GenreRadarChart extends StatelessWidget {
   const GenreRadarChart({
@@ -134,7 +289,10 @@ class GenreRadarChart extends StatelessWidget {
           gridColor: tokens.hairline,
           fillColor: scheme.primary.withValues(alpha: 0.22),
           lineColor: scheme.primary,
-          labelColor: tokens.textMuted,
+          // CustomPaint の中は Theme が効かないので、フォントごと渡す
+          labelStyle: (Theme.of(context).textTheme.labelSmall ??
+                  const TextStyle())
+              .copyWith(fontSize: 10, color: tokens.textMuted),
         ),
         child: const SizedBox.expand(),
       ),
@@ -149,7 +307,7 @@ class _RadarPainter extends CustomPainter {
     required this.gridColor,
     required this.fillColor,
     required this.lineColor,
-    required this.labelColor,
+    required this.labelStyle,
   });
 
   final List<String> labels;
@@ -157,7 +315,7 @@ class _RadarPainter extends CustomPainter {
   final Color gridColor;
   final Color fillColor;
   final Color lineColor;
-  final Color labelColor;
+  final TextStyle labelStyle;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -215,10 +373,7 @@ class _RadarPainter extends CustomPainter {
     // ラベル
     for (var i = 0; i < n; i++) {
       final tp = TextPainter(
-        text: TextSpan(
-          text: labels[i],
-          style: TextStyle(fontSize: 10, color: labelColor),
-        ),
+        text: TextSpan(text: labels[i], style: labelStyle),
         textDirection: TextDirection.ltr,
       )..layout();
       final p = pointAt(i, 1.0);

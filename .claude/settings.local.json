@@ -40,7 +40,32 @@
       "Bash(git tag:*)",
       "Bash(gh release:*)",
       "Bash(wmic:*)",
-      "Bash(powershell -NoProfile -Command \"systeminfo | Select-String 'Memory'\" 2>&1)"
+      "Bash(powershell -NoProfile -Command \"systeminfo | Select-String 'Memory'\" 2>&1)",
+      "PowerShell(flutter analyze *)",
+      "PowerShell(flutter test *)",
+      "PowerShell(git rm *)",
+      "PowerShell(git add *)",
+      "PowerShell(git reset *)",
+      "PowerShell(Remove-Item *)",
+      "PowerShell(flutter devices *)",
+      "PowerShell(flutter build *)",
+      "PowerShell(\\(Get-Command adb -ErrorAction SilentlyContinue\\).Source; Get-Content android/app/build.gradle.kts -ErrorAction SilentlyContinue | Select-String -Pattern \"applicationId\")",
+      "PowerShell(& C:\\\\Android\\\\platform-tools\\\\adb.exe shell \"run-as com.kokomeshi.koko_meshi.poc ls -l databases app_flutter 2>&1\")",
+      "PowerShell(& C:\\\\Android\\\\platform-tools\\\\adb.exe shell \"run-as com.kokomeshi.koko_meshi.poc ls app_flutter/photos | wc -l\")",
+      "PowerShell(& C:\\\\Android\\\\platform-tools\\\\adb.exe install -r build/app/outputs/flutter-apk/app-debug.apk 2>&1 | Select-Object -Last 3)",
+      "PowerShell(& C:\\\\Android\\\\platform-tools\\\\adb.exe shell am start -n com.kokomeshi.koko_meshi.poc/com.kokomeshi.koko_meshi.MainActivity 2>&1 | Select-Object -Last 3)",
+      "PowerShell($sp = \"C:\\\\Users\\\\KURONE~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--projects-koko-meshi\\\\64d44cc0-fd86-42ee-89f7-154b4ddea237\\\\scratchpad\"; & C:\\\\Android\\\\platform-tools\\\\adb.exe exec-out screencap -p > \"$sp\\\\list.png\"; \\(Get-Item \"$sp\\\\list.png\"\\).Length)",
+      "PowerShell(& C:\\\\Android\\\\platform-tools\\\\adb.exe shell input tap 890 225; & C:\\\\Android\\\\platform-tools\\\\adb.exe shell screencap -p /sdcard/koko_grid.png; & C:\\\\Android\\\\platform-tools\\\\adb.exe pull /sdcard/koko_grid.png \"C:\\\\Users\\\\KURONE~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--projects-koko-meshi\\\\64d44cc0-fd86-42ee-89f7-154b4ddea237\\\\scratchpad\\\\grid.png\")",
+      "PowerShell(& C:\\\\Android\\\\platform-tools\\\\adb.exe shell screencap -p /sdcard/koko_list2.png; & C:\\\\Android\\\\platform-tools\\\\adb.exe pull /sdcard/koko_list2.png \"C:\\\\Users\\\\KURONE~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--projects-koko-meshi\\\\64d44cc0-fd86-42ee-89f7-154b4ddea237\\\\scratchpad\\\\list2.png\")",
+      "PowerShell(& C:\\\\Android\\\\platform-tools\\\\adb.exe shell input swipe 540 1800 540 500 300; Start-Sleep -Milliseconds 700; & C:\\\\Android\\\\platform-tools\\\\adb.exe shell screencap -p /sdcard/koko_list3.png; & C:\\\\Android\\\\platform-tools\\\\adb.exe pull /sdcard/koko_list3.png \"C:\\\\Users\\\\KURONE~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--projects-koko-meshi\\\\64d44cc0-fd86-42ee-89f7-154b4ddea237\\\\scratchpad\\\\list3.png\")",
+      "PowerShell(& C:\\\\Android\\\\platform-tools\\\\adb.exe shell screencap -p /sdcard/koko_1line.png; & C:\\\\Android\\\\platform-tools\\\\adb.exe pull /sdcard/koko_1line.png \"C:\\\\Users\\\\KURONE~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--projects-koko-meshi\\\\64d44cc0-fd86-42ee-89f7-154b4ddea237\\\\scratchpad\\\\oneline.png\"; & C:\\\\Android\\\\platform-tools\\\\adb.exe shell rm -f /sdcard/koko_1line.png)",
+      "PowerShell(& C:\\\\Android\\\\platform-tools\\\\adb.exe shell input tap 379 1676; Start-Sleep -Milliseconds 800; & C:\\\\Android\\\\platform-tools\\\\adb.exe shell screencap -p /sdcard/koko_1line2.png; & C:\\\\Android\\\\platform-tools\\\\adb.exe pull /sdcard/koko_1line2.png \"C:\\\\Users\\\\KURONE~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--projects-koko-meshi\\\\64d44cc0-fd86-42ee-89f7-154b4ddea237\\\\scratchpad\\\\oneline2.png\"; & C:\\\\Android\\\\platform-tools\\\\adb.exe shell rm -f /sdcard/koko_1line2.png)",
+      "PowerShell(& C:\\\\Android\\\\platform-tools\\\\adb.exe shell input keyevent KEYCODE_BACK; Start-Sleep -Milliseconds 900; & C:\\\\Android\\\\platform-tools\\\\adb.exe shell screencap -p /sdcard/koko_1line3.png; & C:\\\\Android\\\\platform-tools\\\\adb.exe pull /sdcard/koko_1line3.png \"C:\\\\Users\\\\KURONE~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--projects-koko-meshi\\\\64d44cc0-fd86-42ee-89f7-154b4ddea237\\\\scratchpad\\\\oneline3.png\"; & C:\\\\Android\\\\platform-tools\\\\adb.exe shell rm -f /sdcard/koko_1line3.png)",
+      "PowerShell(& C:\\\\Android\\\\platform-tools\\\\adb.exe shell screencap -p /sdcard/koko_err.png; & C:\\\\Android\\\\platform-tools\\\\adb.exe pull /sdcard/koko_err.png \"C:\\\\Users\\\\KURONE~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--projects-koko-meshi\\\\64d44cc0-fd86-42ee-89f7-154b4ddea237\\\\scratchpad\\\\err.png\"; & C:\\\\Android\\\\platform-tools\\\\adb.exe shell rm -f /sdcard/koko_err.png)",
+      "PowerShell(Get-Content *)",
+      "PowerShell(& C:\\\\Android\\\\platform-tools\\\\adb.exe logcat -d -s flutter 2>&1 | Select-Object -Last 80)",
+      "PowerShell(flutter run *)",
+      "PowerShell(Out-Null *)"
     ]
   }
 }

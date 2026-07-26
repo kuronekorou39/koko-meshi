@@ -50,6 +50,18 @@ void main() {
     });
   });
 
+  group('cleanupBody', () {
+    test('マークダウンの強調記号を落とす', () {
+      // プレーンテキストで出すので「**」がそのまま見えてしまう
+      expect(DietAdviceService.cleanupBody('1. **総評:** よく続いています'),
+          '1. 総評: よく続いています');
+    });
+
+    test('コードブロックの囲みを落とす', () {
+      expect(DietAdviceService.cleanupBody('```\n本文\n```'), '本文');
+    });
+  });
+
   group('buildPeriodPrompt', () {
     final logs = [
       _log('l1', DateTime(2026, 7, 20, 12)),
@@ -100,6 +112,43 @@ void main() {
       // 改行で行を増やせない
       final dataPart = p.split('=== 記録ここから ===')[1].split('=== 記録ここまで ===')[0];
       expect(dataPart.trim().split('\n').length, 1);
+    });
+
+    test('集計を渡すとスコアと数字を前置きする', () {
+      // 3回・3日ぶん。MealScore が出る最低条件を満たす
+      final scored = [
+        _log('a', DateTime(2026, 7, 20, 12)),
+        _log('b', DateTime(2026, 7, 21, 19)),
+        _log('c', DateTime(2026, 7, 22, 12)),
+      ];
+      final scoredPhotos = MealStats.groupPhotos([
+        _photo('p1', 'a', name: '寿司', kcal: 600),
+        _photo('p2', 'b', name: 'カレー', kcal: 700),
+        _photo('p3', 'c', name: 'ラーメン', kcal: 800),
+      ]);
+      final s = MealStats.forRange(
+          DateTime(2026, 7, 20), DateTime(2026, 7, 27), scored, scoredPhotos);
+      final p = DietAdviceService.buildPeriodPrompt(
+        period: AdvicePeriod.week,
+        start: DateTime(2026, 7, 20),
+        logs: scored,
+        photosByLog: scoredPhotos,
+        summary: s,
+      );
+      expect(p.contains('食べ方スコア: ${MealScore.of(s)!.total}点'), isTrue);
+      expect(p.contains('合計2,100kcal'), isTrue);
+      expect(p.contains('自分で数え直さない'), isTrue);
+    });
+
+    test('集計を渡さなければ前置きは入らない', () {
+      expect(build().contains('食べ方スコア'), isFalse);
+      expect(build().contains('集計はアプリが計算済み'), isFalse);
+    });
+
+    test('集計の前置きにもデータ区切りを壊す文字は入らない', () {
+      final s = MealStats.forRange(
+          DateTime(2026, 7, 20), DateTime(2026, 7, 27), logs, photos);
+      expect(DietAdviceService.statsBlock(s).contains('==='), isFalse);
     });
 
     test('カロリーが無い記録でも行が作れる', () {

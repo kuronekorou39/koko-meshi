@@ -26,6 +26,7 @@ MealPhoto _photo(
   int? userPrice,
   int? userCalories,
   String? genre,
+  String? name,
 }) =>
     MealPhoto(
       id: id,
@@ -34,6 +35,7 @@ MealPhoto _photo(
       aiEstimatedPrice: aiPrice,
       aiEstimatedCalories: aiCalories,
       aiCuisineGenre: genre,
+      aiMenuName: name,
       userCorrectedPrice: userPrice,
       userCorrectedCalories: userCalories,
       shotAt: DateTime(2026, 7, 1),
@@ -201,6 +203,155 @@ void main() {
     });
   });
 
+  group('TimeBand', () {
+    test('時刻を4つの帯へ割り当てる', () {
+      expect(TimeBand.ofHour(7), TimeBand.morning);
+      expect(TimeBand.ofHour(12), TimeBand.noon);
+      expect(TimeBand.ofHour(19), TimeBand.evening);
+      expect(TimeBand.ofHour(23), TimeBand.night);
+      expect(TimeBand.ofHour(2), TimeBand.night);
+    });
+
+    test('境界は次の帯の始まり', () {
+      expect(TimeBand.ofHour(4), TimeBand.morning);
+      expect(TimeBand.ofHour(11), TimeBand.noon);
+      expect(TimeBand.ofHour(16), TimeBand.evening);
+    });
+  });
+
+  group('時間帯・曜日・よく食べたもの・連続日数', () {
+    PeriodSummary build(List<MealLog> logs, List<MealPhoto> photos) =>
+        MealStats.forRange(DateTime(2026, 7, 20), DateTime(2026, 7, 27), logs,
+            MealStats.groupPhotos(photos));
+
+    test('時間帯ごとに回数とカロリーを分ける', () {
+      final s = build([
+        _log('l1', DateTime(2026, 7, 20, 8)),
+        _log('l2', DateTime(2026, 7, 20, 20)),
+        _log('l3', DateTime(2026, 7, 21, 1)),
+      ], [
+        _photo('p1', 'l1', aiCalories: 300),
+        _photo('p2', 'l2', aiCalories: 700),
+        _photo('p3', 'l3', aiCalories: 500),
+      ]);
+      expect(s.logsByBand[TimeBand.morning], 1);
+      expect(s.logsByBand[TimeBand.evening], 1);
+      expect(s.logsByBand[TimeBand.night], 1);
+      expect(s.caloriesByBand[TimeBand.evening], 700);
+    });
+
+    test('曜日ごとの平均は記録があった日数で割る', () {
+      // 7/20と7/27は月曜だが7/27は期間外。7/20に2食で計900
+      final s = build([
+        _log('l1', DateTime(2026, 7, 20, 12)),
+        _log('l2', DateTime(2026, 7, 20, 19)),
+      ], [
+        _photo('p1', 'l1', aiCalories: 400),
+        _photo('p2', 'l2', aiCalories: 500),
+      ]);
+      expect(s.averageCaloriesByWeekday[DateTime.monday], 900);
+      expect(s.daysByWeekday[DateTime.monday], 1);
+    });
+
+    test('よく食べたものを多い順に、同数は名前順で固定する', () {
+      final s = build([
+        _log('l1', DateTime(2026, 7, 20, 12)),
+      ], [
+        _photo('p1', 'l1', genre: '和食'),
+      ]);
+      // 名前が無い写真は数えない
+      expect(s.topDishes(), isEmpty);
+
+      final s2 = build([
+        _log('l1', DateTime(2026, 7, 20, 12)),
+      ], [
+        _photo('p1', 'l1', genre: 'ラーメン', name: '味噌ラーメン'),
+        _photo('p2', 'l1', genre: 'ラーメン', name: '味噌ラーメン'),
+        _photo('p3', 'l1', genre: '和食', name: 'あじの開き'),
+        _photo('p4', 'l1', genre: '写真', name: 'ギター'),
+      ]);
+      final top = s2.topDishes();
+      expect(top.first.key, '味噌ラーメン');
+      expect(top.first.value, 2);
+      // 料理以外(「写真」)は混ぜない
+      expect(top.map((e) => e.key).contains('ギター'), isFalse);
+    });
+
+    test('連続して記録した最長日数', () {
+      final s = build([
+        _log('a', DateTime(2026, 7, 20, 12)),
+        _log('b', DateTime(2026, 7, 21, 12)),
+        _log('c', DateTime(2026, 7, 22, 12)),
+        // 1日空く
+        _log('d', DateTime(2026, 7, 24, 12)),
+      ], const []);
+      expect(s.longestStreak, 3);
+      expect(s.recordedDays, 4);
+    });
+  });
+
+  group('MealScore', () {
+    PeriodSummary build(List<MealLog> logs, List<MealPhoto> photos) =>
+        MealStats.forRange(DateTime(2026, 7, 20), DateTime(2026, 7, 27), logs,
+            MealStats.groupPhotos(photos));
+
+    test('記録が少なすぎるときは出さない', () {
+      final s = build([
+        _log('a', DateTime(2026, 7, 20, 12)),
+        _log('b', DateTime(2026, 7, 20, 19)),
+      ], const []);
+      // 2件・1日だけ。「安定している」と言っても意味が無いので null
+      expect(MealScore.of(s), isNull);
+    });
+
+    test('毎日・ジャンルもばらけて・深夜なしなら高得点', () {
+      final logs = <MealLog>[];
+      final photos = <MealPhoto>[];
+      const genres = ['和食', '洋食', '中華', 'ラーメン', 'パン・サンドイッチ', 'カフェ・スイーツ', '寿司'];
+      for (var i = 0; i < 7; i++) {
+        logs.add(_log('l$i', DateTime(2026, 7, 20 + i, 12)));
+        photos.add(_photo('p$i', 'l$i', aiCalories: 600, genre: genres[i]));
+      }
+      final score = MealScore.of(build(logs, photos))!;
+      expect(score.consistency, 30); // 7日/7日
+      expect(score.variety, 30); // 6軸すべて使った
+      expect(score.timing, 20); // 深夜なし
+      expect(score.stability, 20); // 毎日同じカロリー
+      expect(score.total, 100);
+    });
+
+    test('深夜に偏ると時間の点が下がる', () {
+      final logs = <MealLog>[];
+      final photos = <MealPhoto>[];
+      for (var i = 0; i < 4; i++) {
+        logs.add(_log('l$i', DateTime(2026, 7, 20 + i, 2)));
+        photos.add(_photo('p$i', 'l$i', aiCalories: 600, genre: '和食'));
+      }
+      final score = MealScore.of(build(logs, photos))!;
+      expect(score.timing, 0); // 全部深夜
+      expect(score.total, lessThan(60));
+    });
+
+    test('日ごとの量がばらつくと安定の点が下がる', () {
+      final logs = [
+        _log('a', DateTime(2026, 7, 20, 12)),
+        _log('b', DateTime(2026, 7, 21, 12)),
+        _log('c', DateTime(2026, 7, 22, 12)),
+      ];
+      final steady = build(logs, [
+        for (var i = 0; i < 3; i++)
+          _photo('p$i', ['a', 'b', 'c'][i], aiCalories: 600, genre: '和食'),
+      ]);
+      final swingy = build(logs, [
+        _photo('p0', 'a', aiCalories: 100, genre: '和食'),
+        _photo('p1', 'b', aiCalories: 2000, genre: '和食'),
+        _photo('p2', 'c', aiCalories: 300, genre: '和食'),
+      ]);
+      expect(MealScore.of(steady)!.stability,
+          greaterThan(MealScore.of(swingy)!.stability));
+    });
+  });
+
   group('PeriodDelta', () {
     PeriodSummary summary(int kcal, int price, int count) => PeriodSummary(
           start: DateTime(2026, 7, 20),
@@ -213,6 +364,12 @@ void main() {
           caloriesByDay: const {},
           priceByDay: const {},
           genreCounts: const {},
+          logsByBand: const {},
+          caloriesByBand: const {},
+          caloriesByWeekday: const {},
+          daysByWeekday: const {},
+          dishCounts: const {},
+          longestStreak: 0,
         );
 
     test('増減と変化率を出す', () {

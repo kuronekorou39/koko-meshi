@@ -1,4 +1,6 @@
-﻿import 'package:flutter/material.dart';
+﻿import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../database/local_database.dart';
@@ -184,6 +186,9 @@ class _DietAdviceScreenState extends State<DietAdviceScreen> {
               ),
             )
           else ...[
+            _sectionLabel('食べ方スコア', tokens),
+            _scoreCard(summary, tokens),
+            const SizedBox(height: 16),
             _totalsCard(summary, tokens),
             const SizedBox(height: 16),
             _sectionLabel('日ごとのカロリー', tokens),
@@ -191,6 +196,15 @@ class _DietAdviceScreenState extends State<DietAdviceScreen> {
             const SizedBox(height: 16),
             _sectionLabel('ジャンルの偏り', tokens),
             _genreCard(summary, tokens),
+            const SizedBox(height: 16),
+            _sectionLabel('食べた時間帯', tokens),
+            _timeBandCard(summary, tokens),
+            const SizedBox(height: 16),
+            _sectionLabel('曜日ごとの平均', tokens),
+            _weekdayCard(summary, tokens),
+            const SizedBox(height: 16),
+            _sectionLabel('よく食べたもの', tokens),
+            _topDishesCard(summary, tokens),
             const SizedBox(height: 16),
             _sectionLabel('AIのコメント', tokens),
             _adviceSection(tokens),
@@ -204,6 +218,83 @@ class _DietAdviceScreenState extends State<DietAdviceScreen> {
         padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
         child: Text(text, style: tokens.sectionLabel),
       );
+
+  /// 補足の1行(カードの下端に置く注記)
+  Widget _note(String text, KokoTokens tokens) => Padding(
+        padding: const EdgeInsets.only(top: 10),
+        child: Text(text,
+            style: TextStyle(fontSize: 11.5, height: 1.5, color: tokens.textMuted)),
+      );
+
+  // ─── 食べ方スコア ───
+
+  Widget _scoreCard(PeriodSummary s, KokoTokens tokens) {
+    final score = MealScore.of(s);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+        child: score == null
+            ? Text(
+                'スコアは記録が3回・2日ぶんたまってから出します。'
+                '1日だけの記録では「続いている」「安定している」を測れないためです。',
+                style: TextStyle(
+                    fontSize: 12.5, height: 1.6, color: tokens.textMuted),
+              )
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
+                    children: [
+                      Text('${score.total}',
+                          style: tokens.numeral
+                              .copyWith(fontSize: 38, height: 1.0)),
+                      const SizedBox(width: 3),
+                      Text('/ 100',
+                          style:
+                              TextStyle(fontSize: 12, color: tokens.textFaint)),
+                      const Spacer(),
+                      Text(
+                        _scoreWord(score.total),
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: tokens.textMuted,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  for (final item in score.breakdown)
+                    MetricBar(
+                      label: item.label,
+                      value: item.value,
+                      max: item.max,
+                      valueLabel: '${item.value} / ${item.max}',
+                      // 「時間の規則正しさ」が省略されない幅
+                      labelWidth: 106,
+                    ),
+                  _note(
+                    '${s.dayCount}日のうち${s.recordedDays}日を記録・'
+                    '最長${s.longestStreak}日連続。\n'
+                    'これは健康の点数ではありません。栄養素までは分からないので、'
+                    '記録から見える食べ方の傾向だけを点にしています。',
+                    tokens,
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+
+  /// 点数だけだと高い低いの手触りが無いので、ひと言そえる。
+  static String _scoreWord(int total) {
+    if (total >= 80) return 'いい調子';
+    if (total >= 60) return 'まずまず';
+    if (total >= 40) return 'ムラがある';
+    return 'これから';
+  }
 
   // ─── 合計と前期間との差 ───
 
@@ -381,6 +472,124 @@ class _DietAdviceScreenState extends State<DietAdviceScreen> {
                   ),
                 ],
               ),
+      ),
+    );
+  }
+
+  // ─── 時間帯 ───
+
+  Widget _timeBandCard(PeriodSummary s, KokoTokens tokens) {
+    final fmt = NumberFormat('#,###');
+    final counts = {
+      for (final b in TimeBand.values) b: s.logsByBand[b] ?? 0,
+    };
+    final maxCount = counts.values.fold(0, math.max);
+
+    // カロリーが一番集まっている時間帯。回数より偏りが見えるので注記に使う
+    MapEntry<TimeBand, int>? heaviest;
+    for (final b in TimeBand.values) {
+      final kcal = s.caloriesByBand[b] ?? 0;
+      if (kcal > 0 && (heaviest == null || kcal > heaviest.value)) {
+        heaviest = MapEntry(b, kcal);
+      }
+    }
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final b in TimeBand.values)
+              MetricBar(
+                label: '${b.label}（${b.fromHour}時〜）',
+                value: counts[b]!,
+                max: maxCount,
+                valueLabel: '${counts[b]}回',
+                labelWidth: 96,
+              ),
+            if (heaviest != null)
+              _note(
+                'カロリーが一番多い時間帯は${heaviest.key.label}'
+                '（${fmt.format(heaviest.value)}kcal・全体の'
+                '${(heaviest.value / s.totalCalories * 100).round()}%）。',
+                tokens,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─── 曜日 ───
+
+  static const _weekdayLabels = ['月', '火', '水', '木', '金', '土', '日'];
+
+  Widget _weekdayCard(PeriodSummary s, KokoTokens tokens) {
+    final fmt = NumberFormat('#,###');
+    final avg = s.averageCaloriesByWeekday;
+    final values = [
+      for (var w = DateTime.monday; w <= DateTime.sunday; w++) avg[w] ?? 0,
+    ];
+    final maxValue = values.fold(0, math.max);
+    final peak = values.indexOf(maxValue);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+        child: maxValue == 0
+            ? Text('カロリーが分かる記録がありません。',
+                style: TextStyle(fontSize: 13, color: tokens.textMuted))
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  CategoryBarChart(
+                    labels: _weekdayLabels,
+                    values: values,
+                    valueLabels: values.map(fmt.format).toList(),
+                  ),
+                  _note(
+                    '1日あたりの平均。多いのは${_weekdayLabels[peak]}曜'
+                    '（${fmt.format(maxValue)}kcal）。',
+                    tokens,
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+
+  // ─── よく食べたもの ───
+
+  Widget _topDishesCard(PeriodSummary s, KokoTokens tokens) {
+    final top = s.topDishes();
+    final maxCount = top.isEmpty ? 0 : top.first.value;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+        child: top.isEmpty
+            ? Text('料理名が入っている記録がありません。',
+                style: TextStyle(fontSize: 13, color: tokens.textMuted))
+            // 全部1回ずつだとバーが全部満杯になって何も読み取れない
+            : maxCount < 2
+                ? Text(
+                    '同じものを2回以上は食べていません'
+                    '（${top.length}種類を1回ずつ）。',
+                    style: TextStyle(fontSize: 13, color: tokens.textMuted))
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (final dish in top)
+                        MetricBar(
+                          label: dish.key,
+                          value: dish.value,
+                          max: maxCount,
+                          valueLabel: '${dish.value}回',
+                          labelWidth: 116,
+                        ),
+                    ],
+                  ),
       ),
     );
   }
