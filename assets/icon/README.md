@@ -6,6 +6,7 @@
 | `app_icon.png` | 通常アイコン（1024x1024・不透明）。iOSとAndroid 7以下 |
 | `app_icon_foreground.png` | Adaptive Icon の前景（1024x1024・透過） |
 | `preview-background.png` | 背景色候補の比較（`--preview` で生成。gitignore対象） |
+| `preview-scale.png` | 前景の倍率候補の比較（`--preview-scale` で生成。gitignore対象） |
 
 このディレクトリは `pubspec.yaml` の `assets:` に `assets/` としか書いていないため
 APKには含まれない（Flutterのアセット指定はサブディレクトリを再帰的に取り込まない）。
@@ -22,19 +23,22 @@ values/colors.xml）と `ios/Runner/Assets.xcassets/`。
 
 ## 設計判断
 
-**背景色は薄紫 `#D4C6F7`**。元絵の背景つきバージョンと同じ色で、作者の指定。
-アプリ内のデザインシステム（和の食記録帳）には無い色だが、アイコンはホーム画面で
-他のアプリと並ぶものなので、絵柄ごと1つの作品として扱っている。
-（一時期はダーク下地の夜 `#17130E` にしていた。白フチのステッカーが際立つが、
-絵の意図とは別の見た目になっていた）。候補の比較は次のコマンドで作れる:
+**背景色は薄紫 `#CABCD6`**。同じ作者の OmniVerse がホーム画面で見せている色と
+そろえた（Nova ランチャーが描いたタイルから採色）。アプリ内のデザインシステム
+（和の食記録帳）には無い色だが、アイコンはホーム画面で他のアプリと並ぶものなので、
+絵柄ごと1つの作品として扱っている。候補の比較は次のコマンドで作れる:
 
 ```bash
 python tool/make_app_icon.py --preview   # 薄紫 / 漆 / 生成り / 夜 / 抹茶
 ```
 
-**前景の倍率は 0.70**。Adaptive Icon は 108dp のうち中央 72dp（66%）しか表示が
-保証されないため、最も削られる円マスクでもカメラが切れないことを実機で確認して
-決めた。
+**前景の倍率は 0.78**。Adaptive Icon は 108dp のうち中央 72dp（66%）しか表示が
+保証されないが、元絵は角の丸いカメラなので、正方形の保証枠より少しはみ出せる。
+0.84 まで上げると円マスクでカメラの左右が切れる:
+
+```bash
+python tool/make_app_icon.py --preview-scale   # 0.70 / 0.78 / 0.84 / 0.90
+```
 
 色を変えるときは `tool/make_app_icon.py` の `BACKGROUND` と `pubspec.yaml` の
 `adaptive_icon_background` / `background_color_ios` の3か所を揃えること。

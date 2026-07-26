@@ -1,7 +1,8 @@
 """元絵(assets/icon/source-koko-meshi-icon.png)からアプリアイコン素材を作る。
 
-    python tool/make_app_icon.py            素材を書き出す
-    python tool/make_app_icon.py --preview  背景色の候補を比較する
+    python tool/make_app_icon.py                 素材を書き出す
+    python tool/make_app_icon.py --preview       背景色の候補を比較する
+    python tool/make_app_icon.py --preview-scale 前景の倍率の候補を比較する
 
 書き出したあと `dart run flutter_launcher_icons` で mipmap 一式を再生成する。
 
@@ -23,14 +24,15 @@ SRC = ICON_DIR / "source-koko-meshi-icon.png"
 
 MASTER = 1024
 
-# 背景色。元絵の背景つきバージョンと同じ薄紫。
+# 背景色。同じ作者の OmniVerse がホーム画面で見せている薄紫にそろえる。
 # アプリ内のデザインシステム(和の食記録帳)には無い色だが、アイコンは
 # ホーム画面で他のアプリと並ぶもので、絵柄ごと1つの作品として扱う
-BACKGROUND = (0xD4, 0xC6, 0xF7)
+BACKGROUND = (0xCA, 0xBC, 0xD6)
 
 # Adaptive Icon は 108dp のうち中央 72dp(66%)しか表示保証がない。
-# 円マスクでも切れず、かつ小さく見えすぎない大きさ(実機で確認して決定)
-FOREGROUND_SCALE = 0.70
+# ただし元絵は角の丸いカメラなので、正方形の保証枠より少しはみ出せる。
+# 0.84 まで上げると円マスクでカメラの左右が切れる(--preview-scale で確認)
+FOREGROUND_SCALE = 0.78
 # 通常アイコンはマスクで削られないぶん少し大きくできる
 ICON_SCALE = FOREGROUND_SCALE + 0.06
 
@@ -58,19 +60,15 @@ def place(image, scale, background=None):
     return canvas
 
 
-def preview(art):
-    """背景色の候補を、円マスク(上段)と角丸マスク(下段)で並べる。"""
-    candidates = [
-        ("薄紫", (0xD4, 0xC6, 0xF7)),
-        ("漆", (0xB0, 0x49, 0x2A)),
-        ("生成り", (0xF7, 0xF2, 0xEA)),
-        ("夜", (0x17, 0x13, 0x0E)),
-        ("抹茶", (0x69, 0x79, 0x3F)),
-    ]
+def sheet(composed_list, path):
+    """候補を、円マスク(上段)と角丸マスク(下段)で並べて書き出す。
+
+    ランチャーのマスクは端末や設定で変わる。最も削られる円で切れないかを
+    見るための確認用。
+    """
     cell = MASTER // 2
-    sheet = Image.new("RGB", (cell * len(candidates), cell * 2), (128, 128, 128))
-    for i, (_, bg) in enumerate(candidates):
-        composed = place(art, FOREGROUND_SCALE, bg + (255,)).convert("RGB")
+    out_sheet = Image.new("RGB", (cell * len(composed_list), cell * 2), (40, 40, 40))
+    for i, composed in enumerate(composed_list):
         for j, shape in enumerate(("circle", "squircle")):
             mask = Image.new("L", (MASTER, MASTER), 0)
             d = ImageDraw.Draw(mask)
@@ -78,13 +76,37 @@ def preview(art):
                 d.ellipse((0, 0, MASTER - 1, MASTER - 1), fill=255)
             else:
                 d.rounded_rectangle((0, 0, MASTER - 1, MASTER - 1), radius=230, fill=255)
-            out = Image.new("RGB", (MASTER, MASTER), (128, 128, 128))
+            out = Image.new("RGB", (MASTER, MASTER), (40, 40, 40))
             out.paste(composed, (0, 0), mask)
-            sheet.paste(out.resize((cell, cell), Image.LANCZOS), (i * cell, j * cell))
-    path = ICON_DIR / "preview-background.png"
-    sheet.save(path)
+            out_sheet.paste(out.resize((cell, cell), Image.LANCZOS), (i * cell, j * cell))
+    out_sheet.save(path)
     print(f"wrote {path}")
+
+
+def preview_background(art):
+    """背景色の候補を並べる。"""
+    candidates = [
+        ("薄紫", (0xCA, 0xBC, 0xD6)),
+        ("漆", (0xB0, 0x49, 0x2A)),
+        ("生成り", (0xF7, 0xF2, 0xEA)),
+        ("夜", (0x17, 0x13, 0x0E)),
+        ("抹茶", (0x69, 0x79, 0x3F)),
+    ]
+    sheet(
+        [place(art, FOREGROUND_SCALE, bg + (255,)).convert("RGB") for _, bg in candidates],
+        ICON_DIR / "preview-background.png",
+    )
     print("左から:", " / ".join(name for name, _ in candidates))
+
+
+def preview_scale(art):
+    """前景の倍率の候補を並べる。円マスクで切れ始める境目を見る。"""
+    scales = [0.70, 0.78, 0.84, 0.90]
+    sheet(
+        [place(art, s, BACKGROUND + (255,)).convert("RGB") for s in scales],
+        ICON_DIR / "preview-scale.png",
+    )
+    print("左から:", " / ".join(str(s) for s in scales))
 
 
 def main():
@@ -92,7 +114,10 @@ def main():
     print("content size:", art.size)
 
     if "--preview" in sys.argv:
-        preview(art)
+        preview_background(art)
+        return
+    if "--preview-scale" in sys.argv:
+        preview_scale(art)
         return
 
     # 通常アイコン: iOSはアルファ不可なので不透明で書き出す

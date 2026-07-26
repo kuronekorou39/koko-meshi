@@ -54,5 +54,6 @@ android/key.properties
 # リリースビルドの成果物(アプリ名+バージョンでリポジトリ直下に置くため)
 *.apk
 
-# アイコン背景色の確認用(tool/make_app_icon.py --preview で再生成できる)
+# アイコンの確認用(tool/make_app_icon.py --preview / --preview-scale で再生成できる)
 assets/icon/preview-background.png
+assets/icon/preview-scale.png

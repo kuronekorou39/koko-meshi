@@ -120,8 +120,8 @@ flutter_launcher_icons:
   android: true
   ios: true
   # Adaptive Icon: 前景は透過のカメラ、背景は元絵と同じ薄紫
-  adaptive_icon_background: "#D4C6F7"
+  adaptive_icon_background: "#CABCD6"
   adaptive_icon_foreground: "assets/icon/app_icon_foreground.png"
   # iOSのアイコンはアルファ不可
   remove_alpha_ios: true
-  background_color_ios: "#D4C6F7"
+  background_color_ios: "#CABCD6"
