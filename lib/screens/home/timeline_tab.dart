@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:table_calendar/table_calendar.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../database/local_database.dart';
 import '../../models/meal_log.dart';
@@ -11,6 +12,7 @@ import '../../providers/meal_providers.dart';
 import '../../theme/app_theme.dart';
 import '../../services/ai_analysis_service.dart';
 import '../../services/meal_stats.dart';
+import '../../services/update_service.dart';
 import '../../services/photo_service.dart';
 import '../../widgets/meal_card.dart';
 import '../../widgets/meal_grid_tile.dart';
@@ -56,6 +58,15 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
   /// この値で高さを固定して、計算と実際のレイアウトがずれないようにする。
   static const double _dateHeaderHeight = 44;
 
+  /// 出ている新しいバージョン(無ければ null)
+  AppUpdate? _update;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkUpdate();
+  }
+
   @override
   void dispose() {
     _listController.dispose();
@@ -80,6 +91,62 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
   Future<void> _loadPhotosForStats() async {
     final photos = await LocalDatabase.getAllMealPhotos();
     if (mounted) setState(() => _photosByLog = MealStats.groupPhotos(photos));
+  }
+
+  /// 新しいバージョンの知らせ。
+  ///
+  /// ストア配布ではないので、更新に気づく手段がアプリの中にしか無い。
+  /// ただし記録の邪魔をしたいわけではないので、閉じたらその版では出さない。
+  Future<void> _checkUpdate() async {
+    final update = await UpdateService.check();
+    if (mounted) setState(() => _update = update);
+  }
+
+  Widget _buildUpdateBanner() {
+    final update = _update;
+    if (update == null || update.dismissed) return const SizedBox.shrink();
+
+    final tokens = KokoTokens.of(context);
+    final scheme = Theme.of(context).colorScheme;
+
+    return Material(
+      color: scheme.primaryContainer,
+      child: InkWell(
+        onTap: () => launchUrl(
+          Uri.parse(update.url),
+          mode: LaunchMode.externalApplication,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
+          child: Row(
+            children: [
+              Icon(Icons.system_update_alt,
+                  size: 18, color: scheme.onPrimaryContainer),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '新しいバージョン v${update.version} があります',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: scheme.onPrimaryContainer,
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, size: 18),
+                color: tokens.textMuted,
+                tooltip: '閉じる',
+                onPressed: () async {
+                  await UpdateService.dismiss(update.version);
+                  if (mounted) setState(() => _update = null);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -114,18 +181,25 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
           ),
         ],
       ),
-      body: mealLogsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('エラー: $e')),
-        data: (mealLogs) {
-          if (mealLogs.isEmpty) return _buildEmptyState();
+      body: Column(
+        children: [
+          _buildUpdateBanner(),
+          Expanded(
+            child: mealLogsAsync.when(
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => Center(child: Text('エラー: $e')),
+              data: (mealLogs) {
+                if (mealLogs.isEmpty) return _buildEmptyState();
 
-          return switch (_viewMode) {
-            ViewMode.list => _buildListView(mealLogs),
-            ViewMode.grid => _buildGridView(mealLogs),
-            ViewMode.calendar => _buildCalendarView(mealLogs),
-          };
-        },
+                return switch (_viewMode) {
+                  ViewMode.list => _buildListView(mealLogs),
+                  ViewMode.grid => _buildGridView(mealLogs),
+                  ViewMode.calendar => _buildCalendarView(mealLogs),
+                };
+              },
+            ),
+          ),
+        ],
       ),
     );
   }

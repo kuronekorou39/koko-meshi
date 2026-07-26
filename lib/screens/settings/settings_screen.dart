@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../database/local_database.dart';
 import '../../models/saved_place.dart';
@@ -15,6 +16,7 @@ import '../../services/backup_service.dart';
 import '../../services/cloud_photo_rescue.dart';
 import '../../services/gemma_download_manager.dart';
 import '../../services/gemma_ondevice_service.dart';
+import '../../services/update_service.dart';
 import '../../theme/app_theme.dart';
 import 'analysis_bench_screen.dart';
 import 'font_settings_screen.dart';
@@ -30,6 +32,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   List<SavedPlace> _savedPlaces = [];
   String _appVersion = '';
 
+  /// 出ている新しいバージョン(無ければ null)
+  AppUpdate? _update;
+  bool _checkingUpdate = false;
+
   /// AIで自動解析するか(= 端末内Gemmaを使うか)
   bool _aiEnabled = true;
 
@@ -43,6 +49,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     _loadSavedPlaces();
     _loadVersion();
     _loadCloudPending();
+    _checkUpdate();
     GemmaDownloadManager.instance.refreshInstalled(GemmaModelKind.e2b);
   }
 
@@ -67,6 +74,28 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _loadVersion() async {
     final info = await PackageInfo.fromPlatform();
     if (mounted) setState(() => _appVersion = info.version);
+  }
+
+  Future<void> _checkUpdate({bool force = false}) async {
+    if (_checkingUpdate) return;
+    setState(() => _checkingUpdate = true);
+    final update = await UpdateService.check(force: force);
+    if (!mounted) return;
+    setState(() {
+      _update = update;
+      _checkingUpdate = false;
+    });
+    if (force && update == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('お使いのバージョンが最新です')),
+      );
+    }
+  }
+
+  Future<void> _openUpdatePage() async {
+    final update = _update;
+    if (update == null) return;
+    await launchUrl(Uri.parse(update.url), mode: LaunchMode.externalApplication);
   }
 
   Future<void> _loadSavedPlaces() async {
@@ -447,12 +476,33 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     .toList(),
           ),
 
+          // ストア配布ではないので、更新は自分から知らせるしかない
           Padding(
             padding: const EdgeInsets.only(top: 32),
             child: Center(
-              child: Text(
-                'ココメシ v$_appVersion',
-                style: TextStyle(fontSize: 12, color: tokens.textFaint),
+              child: Column(
+                children: [
+                  Text(
+                    'ココメシ v$_appVersion',
+                    style: TextStyle(fontSize: 12, color: tokens.textFaint),
+                  ),
+                  const SizedBox(height: 6),
+                  if (_update != null)
+                    FilledButton.tonalIcon(
+                      onPressed: _openUpdatePage,
+                      icon: const Icon(Icons.system_update_alt, size: 16),
+                      label: Text('v${_update!.version} が出ています'),
+                    )
+                  else
+                    TextButton(
+                      onPressed:
+                          _checkingUpdate ? null : () => _checkUpdate(force: true),
+                      child: Text(
+                        _checkingUpdate ? '確認中…' : '更新を確認',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                ],
               ),
             ),
           ),
