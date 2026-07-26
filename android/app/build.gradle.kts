@@ -74,9 +74,21 @@ android {
 
     buildTypes {
         debug {
-            // PoC は別アプリとして並列インストール（既存のリリース版とデータを保護）
-            applicationIdSuffix = ".poc"
-            manifestPlaceholders["appLabel"] = "ココメシPoC"
+            // リリース版と同じ applicationId・同じ署名にして、開発ビルドを
+            // そのまま上書きインストールできるようにする（記録が消えない）。
+            //
+            // 以前は .poc サフィックスで別アプリにしていた。バックアップと
+            // 復元(BackupService)が入って、まっさらから戻せるようになったので統合した。
+            //
+            // 署名まで揃えないと、同じ applicationId で鍵だけ違う状態になり
+            // INSTALL_FAILED_UPDATE_INCOMPATIBLE でアンインストールが必要になる。
+            // key.properties が無い環境（クリーンなクローン・CI）では既定の
+            // デバッグ署名に落ちる
+            signingConfig = if (keyPropertiesFile.exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
         release {
             signingConfig = if (keyPropertiesFile.exists()) {
