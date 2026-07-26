@@ -105,7 +105,8 @@ class _MapTabState extends ConsumerState<MapTab> {
 
       // MealLog自体にlocationTagがあればそれを使う
       if (log.locationTag != null) {
-        placeLogMap.putIfAbsent(log.locationTag!, () => [])
+        placeLogMap
+            .putIfAbsent(log.locationTag!, () => [])
             .add(_MealLogWithPhotos(log, photos));
         continue;
       }
@@ -116,10 +117,16 @@ class _MapTabState extends ConsumerState<MapTab> {
       if (lat != null && lng != null) {
         bool grouped = false;
         for (final place in savedPlaces) {
-          final distance = _distanceBetween(lat, lng, place.latitude, place.longitude);
+          final distance = _distanceBetween(
+            lat,
+            lng,
+            place.latitude,
+            place.longitude,
+          );
           if (distance <= 100) {
             final key = place.iconType == 'home' ? 'home' : place.id;
-            placeLogMap.putIfAbsent(key, () => [])
+            placeLogMap
+                .putIfAbsent(key, () => [])
                 .add(_MealLogWithPhotos(log, photos));
             grouped = true;
             break;
@@ -138,12 +145,15 @@ class _MapTabState extends ConsumerState<MapTab> {
           bool grouped = false;
           for (final place in savedPlaces) {
             final distance = _distanceBetween(
-              photoWithLocation.latitude!, photoWithLocation.longitude!,
-              place.latitude, place.longitude,
+              photoWithLocation.latitude!,
+              photoWithLocation.longitude!,
+              place.latitude,
+              place.longitude,
             );
             if (distance <= 100) {
               final key = place.iconType == 'home' ? 'home' : place.id;
-              placeLogMap.putIfAbsent(key, () => [])
+              placeLogMap
+                  .putIfAbsent(key, () => [])
                   .add(_MealLogWithPhotos(log, photos));
               grouped = true;
               break;
@@ -178,7 +188,9 @@ class _MapTabState extends ConsumerState<MapTab> {
           onTap: count > 0
               ? () => _showGroupedMealSheet(place.name, logs)
               : null,
-          infoWindow: count == 0 ? InfoWindow(title: place.name) : InfoWindow.noText,
+          infoWindow: count == 0
+              ? InfoWindow(title: place.name)
+              : InfoWindow.noText,
         ),
       );
     }
@@ -194,8 +206,8 @@ class _MapTabState extends ConsumerState<MapTab> {
       final pos = lat != null && lng != null
           ? LatLng(lat, lng)
           : photoWithLocation != null
-              ? LatLng(photoWithLocation.latitude!, photoWithLocation.longitude!)
-              : null;
+          ? LatLng(photoWithLocation.latitude!, photoWithLocation.longitude!)
+          : null;
       if (pos == null) continue;
 
       final hue = switch (item.log.mealType) {
@@ -222,17 +234,28 @@ class _MapTabState extends ConsumerState<MapTab> {
     if (mounted) setState(() => _mealMarkers = markers);
   }
 
-  static double _distanceBetween(double lat1, double lng1, double lat2, double lng2) {
+  static double _distanceBetween(
+    double lat1,
+    double lng1,
+    double lat2,
+    double lng2,
+  ) {
     const p = 0.017453292519943295; // pi / 180
-    final a = 0.5 -
+    final a =
+        0.5 -
         math.cos((lat2 - lat1) * p) / 2 +
-        math.cos(lat1 * p) * math.cos(lat2 * p) *
-            (1 - math.cos((lng2 - lng1) * p)) / 2;
+        math.cos(lat1 * p) *
+            math.cos(lat2 * p) *
+            (1 - math.cos((lng2 - lng1) * p)) /
+            2;
     return 12742000 * math.asin(math.sqrt(a)); // 2 * R * asin (meters)
   }
 
   /// 件数バッジ付きマーカーを生成
-  Future<BitmapDescriptor> _createCountBadgeMarker(IconData icon, int count) async {
+  Future<BitmapDescriptor> _createCountBadgeMarker(
+    IconData icon,
+    int count,
+  ) async {
     final dpr = MediaQuery.of(context).devicePixelRatio;
     final scheme = Theme.of(context).colorScheme;
     final size = 48.0 * dpr;
@@ -277,7 +300,11 @@ class _MapTabState extends ConsumerState<MapTab> {
     // バッジ（右上）
     if (count > 0) {
       final badgeCenter = Offset(size - badgeSize / 2, badgeSize / 2);
-      canvas.drawCircle(badgeCenter, badgeSize / 2, Paint()..color = scheme.error);
+      canvas.drawCircle(
+        badgeCenter,
+        badgeSize / 2,
+        Paint()..color = scheme.error,
+      );
       canvas.drawCircle(
         badgeCenter,
         badgeSize / 2,
@@ -300,7 +327,10 @@ class _MapTabState extends ConsumerState<MapTab> {
       )..layout();
       badgeText.paint(
         canvas,
-        Offset(badgeCenter.dx - badgeText.width / 2, badgeCenter.dy - badgeText.height / 2),
+        Offset(
+          badgeCenter.dx - badgeText.width / 2,
+          badgeCenter.dy - badgeText.height / 2,
+        ),
       );
     }
 
@@ -392,7 +422,7 @@ class _MapTabState extends ConsumerState<MapTab> {
     setState(() => _isSearching = true);
 
     final searchCenter = _currentCenter;
-    final places = await PlacesService.searchNearbyRestaurants(
+    final result = await PlacesService.searchNearbyRestaurants(
       latitude: searchCenter.latitude,
       longitude: searchCenter.longitude,
       radiusMeters: _searchRadiusMeters,
@@ -400,8 +430,24 @@ class _MapTabState extends ConsumerState<MapTab> {
 
     if (!mounted) return;
 
+    // 失敗を0件として黙って返すと「この辺に店が無い」と読めてしまう
+    if (!result.ok) {
+      setState(() => _isSearching = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(result.error!.message)));
+      return;
+    }
+    if (result.places.isEmpty) {
+      setState(() => _isSearching = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('この辺りにお店は見つかりませんでした')));
+      return;
+    }
+
     // 結果を蓄積（重複はplaceIdで除外）
-    for (final place in places) {
+    for (final place in result.places) {
       if (_placeInfoMap.containsKey(place.id)) continue;
 
       _placeInfoMap[place.id] = place;
@@ -508,8 +554,10 @@ class _MapTabState extends ConsumerState<MapTab> {
               padding: const EdgeInsets.fromLTRB(16, 4, 8, 8),
               child: Row(
                 children: [
-                  Text('マイプレイス',
-                      style: Theme.of(context).textTheme.titleMedium),
+                  Text(
+                    'マイプレイス',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                   const Spacer(),
                   IconButton(
                     icon: const Icon(Icons.close),
@@ -547,8 +595,10 @@ class _MapTabState extends ConsumerState<MapTab> {
                 color: tokens.textMuted,
               ),
             )
-          : Text('未設定',
-              style: TextStyle(fontSize: 12.5, color: tokens.textFaint)),
+          : Text(
+              '未設定',
+              style: TextStyle(fontSize: 12.5, color: tokens.textFaint),
+            ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -640,9 +690,7 @@ class _MapTabState extends ConsumerState<MapTab> {
       strokeWidth: 2,
     );
 
-    final allCircles = {
-      if (_showSearchButton) previewCircle,
-    };
+    final allCircles = {if (_showSearchButton) previewCircle};
 
     return Scaffold(
       appBar: AppBar(
@@ -731,9 +779,7 @@ class _MapTabState extends ConsumerState<MapTab> {
                     top: 16,
                     left: 0,
                     right: 0,
-                    child: Center(
-                      child: _buildSearchButton(),
-                    ),
+                    child: Center(child: _buildSearchButton()),
                   ),
 
                 // マイプレイス・現在地ボタン
@@ -792,7 +838,8 @@ class _MapTabState extends ConsumerState<MapTab> {
             children: [
               if (_isSearching)
                 const SizedBox(
-                  width: 16, height: 16,
+                  width: 16,
+                  height: 16,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               else
@@ -866,7 +913,8 @@ class _MapTabState extends ConsumerState<MapTab> {
                 children: [
                   const Spacer(),
                   Container(
-                    width: 40, height: 4,
+                    width: 40,
+                    height: 4,
                     decoration: BoxDecoration(
                       color: theme.colorScheme.outlineVariant,
                       borderRadius: BorderRadius.circular(999),
@@ -897,7 +945,10 @@ class _MapTabState extends ConsumerState<MapTab> {
     );
   }
 
-  Widget _buildGroupedMealContent(String placeName, List<_MealLogWithPhotos> items) {
+  Widget _buildGroupedMealContent(
+    String placeName,
+    List<_MealLogWithPhotos> items,
+  ) {
     final theme = Theme.of(context);
     final tokens = KokoTokens.of(context);
     final dateFormat = DateFormat('M/d (E) HH:mm', 'ja');
@@ -922,8 +973,10 @@ class _MapTabState extends ConsumerState<MapTab> {
               const SizedBox(width: 8),
               Text(
                 '${items.length}件',
-                style: tokens.numeral
-                    .copyWith(fontSize: 13, color: tokens.textMuted),
+                style: tokens.numeral.copyWith(
+                  fontSize: 13,
+                  color: tokens.textMuted,
+                ),
               ),
             ],
           ),
@@ -935,7 +988,9 @@ class _MapTabState extends ConsumerState<MapTab> {
             itemCount: items.length,
             itemBuilder: (context, index) {
               final item = items[index];
-              final firstPhoto = item.photos.isNotEmpty ? item.photos.first : null;
+              final firstPhoto = item.photos.isNotEmpty
+                  ? item.photos.first
+                  : null;
               final menuName = item.photos
                   .where((p) => p.displayName != null)
                   .map((p) => p.displayName!)
@@ -957,8 +1012,11 @@ class _MapTabState extends ConsumerState<MapTab> {
                           width: 48,
                           height: 48,
                           color: tokens.photoPlaceholder,
-                          child: Icon(Icons.restaurant_outlined,
-                              size: 24, color: tokens.textFaint),
+                          child: Icon(
+                            Icons.restaurant_outlined,
+                            size: 24,
+                            color: tokens.textFaint,
+                          ),
                         ),
                 ),
                 title: Text(
@@ -971,8 +1029,11 @@ class _MapTabState extends ConsumerState<MapTab> {
                   dateFormat.format(item.log.eatenAt),
                   style: theme.textTheme.bodySmall,
                 ),
-                trailing: Icon(Icons.chevron_right,
-                    size: 20, color: tokens.textFaint),
+                trailing: Icon(
+                  Icons.chevron_right,
+                  size: 20,
+                  color: tokens.textFaint,
+                ),
                 onTap: () {
                   _closeSheet();
                   context.push('/meal/${item.log.id}');
@@ -1028,18 +1089,25 @@ class _MapTabState extends ConsumerState<MapTab> {
                   children: [
                     if (photos.any((p) => p.displayName != null))
                       Text(
-                        photos.where((p) => p.displayName != null).map((p) => p.displayName!).join('、'),
+                        photos
+                            .where((p) => p.displayName != null)
+                            .map((p) => p.displayName!)
+                            .join('、'),
                         style: theme.textTheme.titleSmall,
-                        maxLines: 1, overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       )
                     else
-                      Text(log.mealType.label,
-                          style: theme.textTheme.titleSmall),
+                      Text(
+                        log.mealType.label,
+                        style: theme.textTheme.titleSmall,
+                      ),
                     const SizedBox(height: 4),
                     Text(
                       dateFormat.format(log.eatenAt),
-                      style: theme.textTheme.bodySmall
-                          ?.copyWith(color: tokens.textMuted),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: tokens.textMuted,
+                      ),
                     ),
                   ],
                 ),
@@ -1090,14 +1158,18 @@ class _MapTabState extends ConsumerState<MapTab> {
                 Text(
                   place.name,
                   style: theme.textTheme.titleMedium,
-                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 4),
                 if (place.rating != null)
                   Row(
                     children: [
-                      Icon(Icons.star,
-                          size: 16, color: theme.colorScheme.tertiary),
+                      Icon(
+                        Icons.star,
+                        size: 16,
+                        color: theme.colorScheme.tertiary,
+                      ),
                       const SizedBox(width: 2),
                       Text(
                         place.rating!.toStringAsFixed(1),
@@ -1119,7 +1191,8 @@ class _MapTabState extends ConsumerState<MapTab> {
                   Text(
                     place.address!,
                     style: theme.textTheme.bodySmall,
-                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 const SizedBox(height: 8),
                 Align(
@@ -1156,13 +1229,17 @@ class _MapTabState extends ConsumerState<MapTab> {
                 children: [
                   Row(
                     children: [
-                      Text('フィルタ',
-                          style: Theme.of(context).textTheme.titleMedium),
+                      Text(
+                        'フィルタ',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
                       const Spacer(),
                       if (tempFilter.isActive)
                         TextButton(
                           onPressed: () {
-                            setSheetState(() => tempFilter = const _MapFilter());
+                            setSheetState(
+                              () => tempFilter = const _MapFilter(),
+                            );
                           },
                           child: const Text('リセット'),
                         ),
@@ -1184,38 +1261,61 @@ class _MapTabState extends ConsumerState<MapTab> {
                     spacing: 8,
                     children: [
                       _filterChip('全期間', tempFilter.dateRange == null, () {
-                        setSheetState(() => tempFilter = tempFilter.copyWith(clearDateRange: true));
+                        setSheetState(
+                          () => tempFilter = tempFilter.copyWith(
+                            clearDateRange: true,
+                          ),
+                        );
                       }),
                       _filterChip('1週間', tempFilter.dateRangeLabel == '1w', () {
                         final now = DateTime.now();
-                        setSheetState(() => tempFilter = tempFilter.copyWith(
-                          dateFrom: now.subtract(const Duration(days: 7)),
-                          dateTo: now,
-                          dateRangeLabel: '1w',
-                        ));
+                        setSheetState(
+                          () => tempFilter = tempFilter.copyWith(
+                            dateFrom: now.subtract(const Duration(days: 7)),
+                            dateTo: now,
+                            dateRangeLabel: '1w',
+                          ),
+                        );
                       }),
                       _filterChip('1ヶ月', tempFilter.dateRangeLabel == '1m', () {
                         final now = DateTime.now();
-                        setSheetState(() => tempFilter = tempFilter.copyWith(
-                          dateFrom: DateTime(now.year, now.month - 1, now.day),
-                          dateTo: now,
-                          dateRangeLabel: '1m',
-                        ));
+                        setSheetState(
+                          () => tempFilter = tempFilter.copyWith(
+                            dateFrom: DateTime(
+                              now.year,
+                              now.month - 1,
+                              now.day,
+                            ),
+                            dateTo: now,
+                            dateRangeLabel: '1m',
+                          ),
+                        );
                       }),
                       _filterChip('3ヶ月', tempFilter.dateRangeLabel == '3m', () {
                         final now = DateTime.now();
-                        setSheetState(() => tempFilter = tempFilter.copyWith(
-                          dateFrom: DateTime(now.year, now.month - 3, now.day),
-                          dateTo: now,
-                          dateRangeLabel: '3m',
-                        ));
+                        setSheetState(
+                          () => tempFilter = tempFilter.copyWith(
+                            dateFrom: DateTime(
+                              now.year,
+                              now.month - 3,
+                              now.day,
+                            ),
+                            dateTo: now,
+                            dateRangeLabel: '3m',
+                          ),
+                        );
                       }),
                       ActionChip(
-                        label: Text(tempFilter.dateRangeLabel == 'custom'
-                            ? '${DateFormat('M/d').format(tempFilter.dateFrom!)}〜${DateFormat('M/d').format(tempFilter.dateTo!)}'
-                            : 'カスタム'),
-                        avatar: Icon(Icons.calendar_today_outlined,
-                            size: 16, color: tokens.textMuted),
+                        label: Text(
+                          tempFilter.dateRangeLabel == 'custom'
+                              ? '${DateFormat('M/d').format(tempFilter.dateFrom!)}〜${DateFormat('M/d').format(tempFilter.dateTo!)}'
+                              : 'カスタム',
+                        ),
+                        avatar: Icon(
+                          Icons.calendar_today_outlined,
+                          size: 16,
+                          color: tokens.textMuted,
+                        ),
                         onPressed: () async {
                           final range = await showDateRangePicker(
                             context: context,
@@ -1224,11 +1324,13 @@ class _MapTabState extends ConsumerState<MapTab> {
                             locale: const Locale('ja'),
                           );
                           if (range != null) {
-                            setSheetState(() => tempFilter = tempFilter.copyWith(
-                              dateFrom: range.start,
-                              dateTo: range.end,
-                              dateRangeLabel: 'custom',
-                            ));
+                            setSheetState(
+                              () => tempFilter = tempFilter.copyWith(
+                                dateFrom: range.start,
+                                dateTo: range.end,
+                                dateRangeLabel: 'custom',
+                              ),
+                            );
                           }
                         },
                       ),
@@ -1284,7 +1386,8 @@ class _MapTabState extends ConsumerState<MapTab> {
   Widget _placeholderImage() {
     final tokens = KokoTokens.of(context);
     return Container(
-      width: 80, height: 80,
+      width: 80,
+      height: 80,
       color: tokens.photoPlaceholder,
       child: Icon(Icons.restaurant_outlined, color: tokens.textFaint),
     );
@@ -1344,15 +1447,17 @@ class _MapFilter {
   bool get isActive =>
       dateFrom != null || (keyword != null && keyword!.isNotEmpty);
 
-  DateTimeRange? get dateRange =>
-      dateFrom != null && dateTo != null
-          ? DateTimeRange(start: dateFrom!, end: dateTo!)
-          : null;
+  DateTimeRange? get dateRange => dateFrom != null && dateTo != null
+      ? DateTimeRange(start: dateFrom!, end: dateTo!)
+      : null;
 
   bool matches(MealLog log, List<MealPhoto> photos) {
     // 日付フィルタ
     if (dateFrom != null && log.eatenAt.isBefore(dateFrom!)) return false;
-    if (dateTo != null && log.eatenAt.isAfter(dateTo!.add(const Duration(days: 1)))) return false;
+    if (dateTo != null &&
+        log.eatenAt.isAfter(dateTo!.add(const Duration(days: 1)))) {
+      return false;
+    }
 
     // キーワード
     if (keyword != null && keyword!.isNotEmpty) {
@@ -1365,7 +1470,8 @@ class _MapFilter {
           .map((p) => p.aiCuisineGenre!.toLowerCase());
       final note = log.note?.toLowerCase() ?? '';
 
-      final matched = menuNames.any((n) => n.contains(kw)) ||
+      final matched =
+          menuNames.any((n) => n.contains(kw)) ||
           genres.any((g) => g.contains(kw)) ||
           note.contains(kw);
       if (!matched) return false;
@@ -1384,7 +1490,9 @@ class _MapFilter {
     return _MapFilter(
       dateFrom: clearDateRange ? null : (dateFrom ?? this.dateFrom),
       dateTo: clearDateRange ? null : (dateTo ?? this.dateTo),
-      dateRangeLabel: clearDateRange ? null : (dateRangeLabel ?? this.dateRangeLabel),
+      dateRangeLabel: clearDateRange
+          ? null
+          : (dateRangeLabel ?? this.dateRangeLabel),
       keyword: keyword ?? this.keyword,
     );
   }

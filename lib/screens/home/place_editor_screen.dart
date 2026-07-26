@@ -1,15 +1,13 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
 
-import '../../config/env.dart';
 import '../../models/saved_place.dart';
 import '../../services/location_service.dart';
+import '../../services/places_service.dart';
 import '../../theme/app_theme.dart';
 
 /// マイプレイス編集画面
@@ -61,6 +59,9 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
   List<_SearchResult> _searchResults = [];
+
+  /// 結果が出せなかった理由(0件・上限・通信断)。null なら出せている
+  String? _searchError;
   bool _isSearching = false;
   bool _showSearchResults = false;
   Timer? _searchDebounce;
@@ -97,9 +98,7 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
 
     if (pos != null) {
       _centerPosition = LatLng(pos.latitude, pos.longitude);
-      _mapController?.animateCamera(
-        CameraUpdate.newLatLng(_centerPosition),
-      );
+      _mapController?.animateCamera(CameraUpdate.newLatLng(_centerPosition));
     }
 
     setState(() => _loadingPosition = false);
@@ -111,17 +110,15 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
     final pos = await LocationService.getCurrentPosition();
     if (!mounted || pos == null) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('現在地を取得できませんでした')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('現在地を取得できませんでした')));
       }
       return;
     }
 
     final target = LatLng(pos.latitude, pos.longitude);
-    _mapController?.animateCamera(
-      CameraUpdate.newLatLngZoom(target, 17),
-    );
+    _mapController?.animateCamera(CameraUpdate.newLatLngZoom(target, 17));
   }
 
   /// マップカメラ移動完了時
@@ -188,71 +185,38 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
     if (query.trim().isEmpty) {
       setState(() {
         _searchResults = [];
+        _searchError = null;
         _showSearchResults = false;
         _isSearching = false;
       });
       return;
     }
 
-    final apiKey = Env.googleMapsApiKey;
-    if (apiKey.isEmpty) return;
+    setState(() {
+      _isSearching = true;
+      _searchError = null;
+    });
 
-    setState(() => _isSearching = true);
+    final result = await PlacesService.searchByText(query);
+    if (!mounted) return;
 
-    try {
-      final url =
-          Uri.parse('https://places.googleapis.com/v1/places:searchText');
-      final response = await http.post(
-        url,
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Goog-Api-Key': apiKey,
-          'X-Goog-FieldMask':
-              'places.displayName,places.formattedAddress,places.location',
-        },
-        body: jsonEncode({
-          'textQuery': query,
-          'languageCode': 'ja',
-        }),
-      );
-
-      if (!mounted) return;
-
-      if (response.statusCode != 200) {
-        setState(() {
-          _searchResults = [];
-          _isSearching = false;
-        });
-        return;
-      }
-
-      final data = jsonDecode(response.body);
-      final places = data['places'] as List<dynamic>? ?? [];
-
-      setState(() {
-        _searchResults = places.map((p) {
-          final location = p['location'] as Map<String, dynamic>;
-          final displayName = p['displayName'] as Map<String, dynamic>?;
-          return _SearchResult(
-            name: displayName?['text'] as String? ?? '',
-            address: p['formattedAddress'] as String? ?? '',
-            position: LatLng(
-              (location['latitude'] as num).toDouble(),
-              (location['longitude'] as num).toDouble(),
+    setState(() {
+      _isSearching = false;
+      // 失敗を0件として黙って返すと「そんな店は無い」と読めてしまう
+      _searchError = result.ok
+          ? (result.places.isEmpty ? '見つかりませんでした' : null)
+          : result.error!.message;
+      _searchResults = result.places
+          .map(
+            (p) => _SearchResult(
+              name: p.name,
+              address: p.address ?? '',
+              position: LatLng(p.latitude, p.longitude),
             ),
-          );
-        }).toList();
-        _showSearchResults = _searchResults.isNotEmpty;
-        _isSearching = false;
-      });
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _searchResults = [];
-          _isSearching = false;
-        });
-      }
-    }
+          )
+          .toList();
+      _showSearchResults = _searchResults.isNotEmpty || _searchError != null;
+    });
   }
 
   /// 検索結果を選択
@@ -274,9 +238,9 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
   Future<void> _save() async {
     final name = _nameController.text.trim();
     if (name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('名前を入力してください')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('名前を入力してください')));
       return;
     }
 
@@ -305,9 +269,7 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
 
     return Scaffold(
       resizeToAvoidBottomInset: false,
-      appBar: AppBar(
-        title: Text(title),
-      ),
+      appBar: AppBar(title: Text(title)),
       body: _loadingPosition
           ? const Center(child: CircularProgressIndicator())
           : Column(
@@ -353,8 +315,9 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
                             shadows: [
                               Shadow(
                                 blurRadius: 8,
-                                color: colorScheme.shadow
-                                    .withValues(alpha: 0.38),
+                                color: colorScheme.shadow.withValues(
+                                  alpha: 0.38,
+                                ),
                                 offset: const Offset(0, 2),
                               ),
                             ],
@@ -368,8 +331,7 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
                           width: 6,
                           height: 6,
                           decoration: BoxDecoration(
-                            color:
-                                colorScheme.shadow.withValues(alpha: 0.45),
+                            color: colorScheme.shadow.withValues(alpha: 0.45),
                             shape: BoxShape.circle,
                           ),
                         ),
@@ -421,15 +383,15 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
                   },
                 )
               : (_isSearching
-                  ? const Padding(
-                      padding: EdgeInsets.all(12),
-                      child: SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    )
-                  : null),
+                    ? const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      )
+                    : null),
         ),
         textInputAction: TextInputAction.search,
         onChanged: (value) {
@@ -460,43 +422,49 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
         color: bg,
         clipBehavior: Clip.antiAlias,
         shape: RoundedRectangleBorder(
-          borderRadius:
-              const BorderRadius.vertical(bottom: Radius.circular(12)),
+          borderRadius: const BorderRadius.vertical(
+            bottom: Radius.circular(12),
+          ),
           side: BorderSide(color: tokens.hairline, width: 0.8),
         ),
         child: Container(
           constraints: const BoxConstraints(maxHeight: 280),
-          child: ListView.separated(
-            padding: EdgeInsets.zero,
-            shrinkWrap: true,
-            itemCount: _searchResults.length,
-            separatorBuilder: (_, _) => const Divider(height: 1),
-            itemBuilder: (context, index) {
-              final result = _searchResults[index];
-              return ListTile(
-                leading: Icon(
-                  Icons.place_outlined,
-                  color: colorScheme.primary,
-                ),
-                title: Text(
-                  result.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text(
-                  result.address,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: tokens.textMuted,
+          child: _searchError != null
+              ? Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                  child: Text(
+                    _searchError!,
+                    style: TextStyle(fontSize: 13, color: tokens.textMuted),
                   ),
+                )
+              : ListView.separated(
+                  padding: EdgeInsets.zero,
+                  shrinkWrap: true,
+                  itemCount: _searchResults.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final result = _searchResults[index];
+                    return ListTile(
+                      leading: Icon(
+                        Icons.place_outlined,
+                        color: colorScheme.primary,
+                      ),
+                      title: Text(
+                        result.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(
+                        result.address,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 12, color: tokens.textMuted),
+                      ),
+                      dense: true,
+                      onTap: () => _selectSearchResult(result),
+                    );
+                  },
                 ),
-                dense: true,
-                onTap: () => _selectSearchResult(result),
-              );
-            },
-          ),
         ),
       ),
     );
@@ -539,9 +507,7 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
     return Container(
       decoration: BoxDecoration(
         color: colorScheme.surface,
-        border: Border(
-          top: BorderSide(color: tokens.hairline, width: 0.8),
-        ),
+        border: Border(top: BorderSide(color: tokens.hairline, width: 0.8)),
       ),
       child: SafeArea(
         child: Padding(
@@ -653,7 +619,8 @@ class _PlaceEditorScreenState extends State<PlaceEditorScreen> {
                               child: const Text('キャンセル'),
                             ),
                             FilledButton(
-                              onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+                              onPressed: () =>
+                                  Navigator.pop(ctx, controller.text.trim()),
                               child: const Text('OK'),
                             ),
                           ],
