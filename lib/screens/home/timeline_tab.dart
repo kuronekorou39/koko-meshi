@@ -43,6 +43,39 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
 
   CalendarMetric _calendarMetric = CalendarMetric.none;
 
+  /// カレンダーで選んでいた日。表示を切り替えたときに、その日のあたりから
+  /// 見えるようにするために持ち越す(先頭へ飛ばされると、どこを見ていたのか
+  /// 分からなくなるため)。
+  DateTime? _pendingScrollDay;
+
+  final _listController = ScrollController();
+  final _gridController = ScrollController();
+
+  /// 日付見出しの高さ。スクロール位置を数えるのに使うので、見出し側も
+  /// この値で高さを固定して、計算と実際のレイアウトがずれないようにする。
+  static const double _dateHeaderHeight = 44;
+
+  @override
+  void dispose() {
+    _listController.dispose();
+    _gridController.dispose();
+    super.dispose();
+  }
+
+  /// 切り替え直後にスクロール位置を合わせる。
+  /// ビルド後でないとスクロール量が確定しないので1フレーム待つ。
+  void _scrollToPendingDay(
+      ScrollController controller, double Function(DateTime day) offsetFor) {
+    final day = _pendingScrollDay;
+    if (day == null) return;
+    _pendingScrollDay = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!controller.hasClients) return;
+      final max = controller.position.maxScrollExtent;
+      controller.jumpTo(offsetFor(day).clamp(0.0, max));
+    });
+  }
+
   Future<void> _loadPhotosForStats() async {
     final photos = await LocalDatabase.getAllMealPhotos();
     if (mounted) setState(() => _photosByLog = MealStats.groupPhotos(photos));
@@ -118,12 +151,17 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
   }
 
   void _cycleViewMode() {
+    final leavingCalendar = _viewMode == ViewMode.calendar;
     setState(() {
       _viewMode = ViewMode.values[(_viewMode.index + 1) % ViewMode.values.length];
     });
     // カレンダーの集計は写真が要る。切り替えるたびに読み直して、
     // 直前の解析結果も反映されるようにする
-    if (_viewMode == ViewMode.calendar) _loadPhotosForStats();
+    if (_viewMode == ViewMode.calendar) {
+      _loadPhotosForStats();
+    } else if (leavingCalendar && _selectedDay != null) {
+      _pendingScrollDay = _selectedDay;
+    }
   }
 
   // ─── リスト表示（日付でグルーピング） ───
@@ -142,9 +180,15 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
       items.add(log);
     }
 
+    _scrollToPendingDay(
+      _listController,
+      (day) => _listOffsetFor(day, items, MediaQuery.sizeOf(context).width),
+    );
+
     return RefreshIndicator(
       onRefresh: () => ref.read(mealLogsProvider.notifier).refresh(),
       child: ListView.builder(
+        controller: _listController,
         padding: const EdgeInsets.only(bottom: 100),
         itemCount: items.length,
         itemBuilder: (context, index) {
@@ -161,13 +205,38 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
     );
   }
 
-  /// 「7月17日 木曜日」形式のセクション見出し
+  /// [day] の見出しが先頭に来るスクロール量。
+  /// 一覧は新しい順なので、その日以前で最初に現れる見出しで止める
+  /// (選んだ日に記録が無くても近いところに着地する)。
+  ///
+  /// カードの高さは幅から縦横比(4:3)で決まり、見出しは高さを固定してあるので
+  /// 積み上げれば正確に出せる。
+  double _listOffsetFor(DateTime day, List<Object> items, double width) {
+    final target = DateTime(day.year, day.month, day.day);
+    final cardHeight = (width - 32) * 3 / 4 + 12; // 上下のPadding6ぶんを足す
+    var offset = 0.0;
+    for (final item in items) {
+      if (item is DateTime) {
+        if (!item.isAfter(target)) return offset;
+        offset += _dateHeaderHeight;
+      } else {
+        offset += cardHeight;
+      }
+    }
+    return offset;
+  }
+
+  /// 「7月17日 木曜日」形式のセクション見出し。
+  /// 高さは [_dateHeaderHeight] に固定する(スクロール位置の計算とずらさないため)。
   Widget _buildDateHeader(DateTime day) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
-      child: Text(
-        DateFormat('M月d日 EEEE', 'ja').format(day),
-        style: KokoTokens.of(context).sectionLabel,
+    return SizedBox(
+      height: _dateHeaderHeight,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+        child: Text(
+          DateFormat('M月d日 EEEE', 'ja').format(day),
+          style: KokoTokens.of(context).sectionLabel,
+        ),
       ),
     );
   }
@@ -175,9 +244,15 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
   // ─── グリッド表示 ───
 
   Widget _buildGridView(List<MealLog> mealLogs) {
+    _scrollToPendingDay(
+      _gridController,
+      (day) => _gridOffsetFor(day, mealLogs, MediaQuery.sizeOf(context).width),
+    );
+
     return RefreshIndicator(
       onRefresh: () => ref.read(mealLogsProvider.notifier).refresh(),
       child: GridView.builder(
+        controller: _gridController,
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: 2,
@@ -196,6 +271,21 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
         },
       ),
     );
+  }
+
+  /// [day] 以前で最初に現れる記録の行が先頭に来るスクロール量。
+  /// タイルは正方形2列なので、行数から直接出せる。
+  double _gridOffsetFor(DateTime day, List<MealLog> logs, double width) {
+    final target = DateTime(day.year, day.month, day.day);
+    final index = logs.indexWhere((log) {
+      final d =
+          DateTime(log.eatenAt.year, log.eatenAt.month, log.eatenAt.day);
+      return !d.isAfter(target);
+    });
+    if (index < 0) return 0;
+    const spacing = 12.0;
+    final tile = (width - 32 - spacing) / 2; // 左右padding16x2 + 列間
+    return 8 + (index ~/ 2) * (tile + spacing); // 上padding8
   }
 
   // ─── カレンダー表示 ───
@@ -261,12 +351,12 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
             todayTextStyle: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w700,
-              color: Theme.of(context).colorScheme.onSurface,
+              color: Theme.of(context).colorScheme.primary,
             ),
             selectedTextStyle: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w700,
-              color: Theme.of(context).colorScheme.onPrimary,
+              color: Theme.of(context).colorScheme.onSurface,
             ),
             markerDecoration: BoxDecoration(
               color: Theme.of(context).colorScheme.primary,
@@ -274,13 +364,16 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
             ),
             markerSize: 6,
             markersMaxCount: 3,
-            todayDecoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.3),
-              shape: BoxShape.circle,
-            ),
+            // 今日は文字色だけで示す(選択の輪郭と競合させない)
+            todayDecoration: const BoxDecoration(shape: BoxShape.circle),
+            // 選択は塗りつぶさず輪郭にする。塗ると下に出る数字が円の縁に
+            // かぶって読めなくなるため
             selectedDecoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.primary,
               shape: BoxShape.circle,
+              border: Border.all(
+                color: Theme.of(context).colorScheme.primary,
+                width: 2,
+              ),
             ),
           ),
           daysOfWeekStyle: DaysOfWeekStyle(
