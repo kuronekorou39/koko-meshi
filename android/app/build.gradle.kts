@@ -74,21 +74,18 @@ android {
 
     buildTypes {
         debug {
-            // リリース版と同じ applicationId・同じ署名にして、開発ビルドを
-            // そのまま上書きインストールできるようにする（記録が消えない）。
+            // 開発ビルドは別アプリとして入れる。理由は2つ:
             //
-            // 以前は .poc サフィックスで別アプリにしていた。バックアップと
-            // 復元(BackupService)が入って、まっさらから戻せるようになったので統合した。
+            // 1. 実利用しているアプリを壊さない。開発中のビルドで記録が
+            //    おかしくなっても、普段使いのほうは無傷でいられる
+            // 2. Google Play で公開すると、ストア版は Play App Signing により
+            //    Google の鍵で署名される。手元のビルドは署名が違うので、
+            //    同じ applicationId だと入れ替えのたびにアンインストールが要る
             //
-            // 署名まで揃えないと、同じ applicationId で鍵だけ違う状態になり
-            // INSTALL_FAILED_UPDATE_INCOMPATIBLE でアンインストールが必要になる。
-            // key.properties が無い環境（クリーンなクローン・CI）では既定の
-            // デバッグ署名に落ちる
-            signingConfig = if (keyPropertiesFile.exists()) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
-            }
+            // 署名は既定のデバッグ鍵のまま。applicationId が違うので衝突せず、
+            // リリース鍵を開発機やCIに置く必要も無い
+            applicationIdSuffix = ".dev"
+            manifestPlaceholders["appLabel"] = "ココメシ(開発)"
         }
         release {
             signingConfig = if (keyPropertiesFile.exists()) {
