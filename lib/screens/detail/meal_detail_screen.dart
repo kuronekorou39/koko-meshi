@@ -21,8 +21,8 @@ import '../../services/gemma_ondevice_service.dart';
 import '../../services/photo_cache_service.dart';
 import '../../services/photo_service.dart';
 import '../../theme/app_theme.dart';
-import '../../theme/meal_type_style.dart';
 import '../../widgets/cached_photo_image.dart';
+import '../../widgets/meal_type_picker.dart';
 import '../editor/photo_edit_core.dart';
 import '../editor/photo_editor_screen.dart';
 import 'photo_info_edit_sheet.dart';
@@ -213,93 +213,13 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
     );
   }
 
-  /// タップで食事種別を変更できるチップ。未設定のときは控えめな
-  /// 「種別を設定」の促し表示にする。
-  Widget _buildMealTypeSelector(MealLog mealLog) {
-    final tokens = KokoTokens.of(context);
-    final isUnset = mealLog.mealType == MealType.unset;
+  /// タップで食事種別を変更できるチップ(記録画面と共通)
+  Widget _buildMealTypeSelector(MealLog mealLog) => MealTypeField(
+        value: mealLog.mealType,
+        onChanged: (selected) => _applyMealType(mealLog, selected),
+      );
 
-    final Widget child = isUnset
-        ? Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: tokens.hairline, width: 1),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.add, size: 16, color: tokens.textMuted),
-                const SizedBox(width: 6),
-                Text(
-                  '種別を設定',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: tokens.textMuted,
-                  ),
-                ),
-              ],
-            ),
-          )
-        : MealTypeChip(mealType: mealLog.mealType, compact: false);
-
-    return InkWell(
-      borderRadius: BorderRadius.circular(999),
-      onTap: () => _showMealTypePicker(mealLog),
-      child: child,
-    );
-  }
-
-  /// 食事種別を選び直すボトムシート(全種別を色/アイコン付きで一覧、現在値にチェック)
-  Future<void> _showMealTypePicker(MealLog mealLog) async {
-    final selected = await showModalBottomSheet<MealType>(
-      context: context,
-      // 既定の高さ上限(画面の9/16)だと種別7件+見出し+ハンドル+下端の
-      // システムバー分が収まらずオーバーフローする
-      isScrollControlled: true,
-      builder: (context) {
-        final scheme = Theme.of(context).colorScheme;
-        return SafeArea(
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-                  child: Text(
-                    '食事種別を選ぶ',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                  ),
-                ),
-                for (final type in MealType.values)
-                  ListTile(
-                    leading: Icon(type.icon, color: type.fg(context)),
-                    title: Text(
-                      type.label,
-                      style: TextStyle(
-                        fontWeight: type == mealLog.mealType
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                      ),
-                    ),
-                    trailing: type == mealLog.mealType
-                        ? Icon(Icons.check, color: scheme.primary)
-                        : null,
-                    onTap: () => Navigator.pop(context, type),
-                  ),
-                const SizedBox(height: 8),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-
-    if (selected == null || selected == mealLog.mealType) return;
+  Future<void> _applyMealType(MealLog mealLog, MealType selected) async {
     await LocalDatabase.updateMealLog(mealLog.copyWith(mealType: selected));
     if (!mounted) return;
     ref.invalidate(mealLogProvider(widget.mealLogId));

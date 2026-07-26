@@ -19,7 +19,7 @@ import '../../services/ai_analysis_service.dart';
 import '../../services/location_service.dart';
 import '../../services/photo_service.dart';
 import '../../theme/app_theme.dart';
-import '../../theme/meal_type_style.dart';
+import '../../widgets/meal_type_picker.dart';
 import '../editor/photo_edit_core.dart';
 import '../editor/photo_editor_screen.dart';
 
@@ -35,7 +35,6 @@ class CaptureScreen extends ConsumerStatefulWidget {
 
 class _SelectedPhoto {
   final XFile originalFile; // 常にオリジナルを保持
-  bool skipAi = false;
   PhotoEditParams? editParams; // 編集パラメータ v2（nullなら未編集）
   DateTime? exifDateTime;
   double? exifLatitude;
@@ -82,23 +81,45 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         item.exifLongitude = exif.longitude;
       }
     }
+    if (mounted) _adoptExifMetadata();
+  }
 
-    final firstWithDate = _selectedPhotos.where((i) => i.exifDateTime != null).firstOrNull;
-    final firstWithGps = _selectedPhotos.where((i) => i.exifLatitude != null).firstOrNull;
+  /// 記録(MealLog)の日時と場所を、選んだ写真から決める。
+  ///
+  /// 記録は日時と場所をひとつしか持てない。選択順の1枚目を使うと、
+  /// 並び順で結果が変わってしまうので**一番古い写真**を基準にする
+  /// (食事はその最初の1枚から始まっている)。写真ごとの日時・位置は
+  /// 各写真にそのまま保存するので、ここで捨てているわけではない。
+  void _adoptExifMetadata() {
+    final withDate = _selectedPhotos
+        .where((p) =>
+            p.exifDateTime != null && p.exifDateTime!.isBefore(DateTime.now()))
+        .toList()
+      ..sort((a, b) => a.exifDateTime!.compareTo(b.exifDateTime!));
+    final oldest = withDate.firstOrNull;
 
-    if (mounted) {
-      setState(() {
-        if (firstWithDate != null && firstWithDate.exifDateTime!.isBefore(DateTime.now())) {
-          _capturedAt = firstWithDate.exifDateTime!;
-        }
-        if (_position == null && firstWithGps != null) {
-          _exifPosition = (lat: firstWithGps.exifLatitude!, lng: firstWithGps.exifLongitude!);
-          _loadingLocation = true;
-        }
-      });
-      if (firstWithGps != null && _position == null) {
-        _fetchAddressFromCoords(firstWithGps.exifLatitude!, firstWithGps.exifLongitude!);
+    // 位置は日時を採った写真のものを優先し、無ければ位置がある一番古い写真
+    final withGps = _selectedPhotos
+        .where((p) => p.exifLatitude != null && p.exifLongitude != null)
+        .toList()
+      ..sort((a, b) => (a.exifDateTime ?? DateTime(9999))
+          .compareTo(b.exifDateTime ?? DateTime(9999)));
+    final gpsSource = (oldest != null && oldest.exifLatitude != null)
+        ? oldest
+        : withGps.firstOrNull;
+
+    setState(() {
+      if (oldest != null) _capturedAt = oldest.exifDateTime!;
+      // 端末のGPSが取れているならそちらが今いる場所として正しい
+      if (_position == null && gpsSource != null) {
+        _exifPosition =
+            (lat: gpsSource.exifLatitude!, lng: gpsSource.exifLongitude!);
+        _loadingLocation = true;
       }
+    });
+
+    if (_position == null && gpsSource != null) {
+      _fetchAddressFromCoords(gpsSource.exifLatitude!, gpsSource.exifLongitude!);
     }
   }
 
@@ -178,21 +199,22 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                   ),
                   const SizedBox(height: 20),
 
-                  // 食事種別選択
+                  // 食事種別選択(詳細画面と同じボトムシート)
                   Text('食事の種類', style: KokoTokens.of(context).sectionLabel),
                   const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: MealType.values
-                        .map((type) =>
-                            _mealTypeChoice(type, type == _selectedType))
-                        .toList(),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: MealTypeField(
+                      value: _selectedType,
+                      onChanged: (type) =>
+                          setState(() => _selectedType = type),
+                    ),
                   ),
                   const SizedBox(height: 14),
 
                   // 日時・位置情報
                   _buildMetadataBar(dateFormat),
+                  _buildMixedMetadataNotice(),
                 ],
               ),
             ),
@@ -353,44 +375,79 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     );
   }
 
-  /// 食事種別の選択チップ(MealTypeStyleの色/アイコンを使用)
-  Widget _mealTypeChoice(MealType type, bool selected) {
+  /// 選んだ写真の撮影日時・位置がばらついているときの注意書き。
+  ///
+  /// 記録は1件につき日時と場所をひとつしか持てないので、離れた写真を
+  /// まとめると片方が捨てられたように見える。写真ごとの日時・位置は
+  /// そのまま保存しているが、記録として何が採られたかは伝える。
+  Widget _buildMixedMetadataNotice() {
+    final message = _mixedMetadataMessage();
+    if (message == null) return const SizedBox.shrink();
     final tokens = KokoTokens.of(context);
-    final scheme = Theme.of(context).colorScheme;
-    final fg = selected ? type.fg(context) : tokens.textMuted;
-    return Material(
-      color: selected ? type.bg(context) : scheme.surfaceContainerHigh,
-      shape: StadiumBorder(
-        side: BorderSide(
-          color: selected
-              ? type.fg(context).withValues(alpha: 0.4)
-              : tokens.hairline,
-          width: 0.8,
-        ),
-      ),
-      child: InkWell(
-        customBorder: const StadiumBorder(),
-        onTap: () => setState(() => _selectedType = type),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(type.icon, size: 15, color: fg),
-              const SizedBox(width: 4),
-              Text(
-                type.label,
-                style: TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
-                  color: fg,
-                ),
-              ),
-            ],
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.info_outline, size: 14, color: tokens.warning),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                  fontSize: 11.5, height: 1.5, color: tokens.warning),
+            ),
           ),
-        ),
+        ],
       ),
     );
+  }
+
+  /// 同じ食事とみなすには離れすぎている閾値
+  static const _mixedTimeGap = Duration(hours: 2);
+  static const _mixedDistanceMeters = 300.0;
+
+  String? _mixedMetadataMessage() {
+    final times = _selectedPhotos
+        .map((p) => p.exifDateTime)
+        .whereType<DateTime>()
+        .toList();
+    final reasons = <String>[];
+
+    if (times.length > 1) {
+      times.sort();
+      final gap = times.last.difference(times.first);
+      if (gap > _mixedTimeGap) {
+        final label = gap.inHours >= 24
+            ? '${(gap.inHours / 24).floor()}日'
+            : '${gap.inHours}時間';
+        reasons.add('撮影日時が最大$label離れています');
+      }
+    }
+
+    final points = _selectedPhotos
+        .where((p) => p.exifLatitude != null && p.exifLongitude != null)
+        .toList();
+    if (points.length > 1) {
+      var maxDistance = 0.0;
+      for (var i = 1; i < points.length; i++) {
+        final d = Geolocator.distanceBetween(
+          points.first.exifLatitude!,
+          points.first.exifLongitude!,
+          points[i].exifLatitude!,
+          points[i].exifLongitude!,
+        );
+        if (d > maxDistance) maxDistance = d;
+      }
+      if (maxDistance > _mixedDistanceMeters) {
+        reasons.add('撮影場所が最大${(maxDistance / 1000).toStringAsFixed(1)}km離れています');
+      }
+    }
+
+    if (reasons.isEmpty) return null;
+    return '${reasons.join('、')}。'
+        'この記録には一番古い写真の日時と場所を使います。'
+        '別の食事なら分けて記録してください。';
   }
 
   Widget _buildPhotoPlaceholder() {
@@ -436,6 +493,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     );
   }
 
+  /// 写真タイル。写真の上に置くのは「その写真への操作」だけにする。
+  /// 撮影日時とAIの入り切りは記録ごとの設定で、下のメタデータ欄に出ている
   Widget _photoTile(int index) {
     final item = _selectedPhotos[index];
     final scheme = Theme.of(context).colorScheme;
@@ -446,45 +505,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         ClipRRect(
           borderRadius: BorderRadius.circular(12),
           child: _buildPhotoThumbnail(item),
-        ),
-        // AI解析スキップ時は写真ごと暗くして、一目で分かるようにする
-        if (item.skipAi)
-          Positioned.fill(
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.black38,
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-        // 下部: AI切り替えと撮影日時。別々に置くと重なるので1本の帯にまとめる
-        Positioned(
-          left: 0,
-          right: 0,
-          bottom: 0,
-          child: Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.bottomCenter,
-                end: Alignment.topCenter,
-                colors: [Colors.black87, Colors.transparent],
-              ),
-              borderRadius:
-                  BorderRadius.vertical(bottom: Radius.circular(12)),
-            ),
-            padding: const EdgeInsets.fromLTRB(6, 20, 8, 6),
-            child: Row(
-              children: [
-                _aiSkipToggle(item),
-                const Spacer(),
-                if (item.exifDateTime != null)
-                  Text(
-                    DateFormat('M/d HH:mm').format(item.exifDateTime!),
-                    style: const TextStyle(color: Colors.white, fontSize: 11),
-                  ),
-              ],
-            ),
-          ),
         ),
         // 編集(編集済みならボタン自体を色で示す。別バッジは出さない)
         Positioned(
@@ -526,41 +546,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
           width: 36,
           height: 36,
           child: Icon(icon, size: 19, color: foreground),
-        ),
-      ),
-    );
-  }
-
-  Widget _aiSkipToggle(_SelectedPhoto item) {
-    final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: item.skipAi ? scheme.tertiary : Colors.black54,
-      borderRadius: BorderRadius.circular(6),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(6),
-        onTap: () => setState(() => item.skipAi = !item.skipAi),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                item.skipAi
-                    ? Icons.visibility_off_outlined
-                    : Icons.auto_awesome,
-                size: 13,
-                color: item.skipAi ? scheme.onTertiary : Colors.white,
-              ),
-              const SizedBox(width: 3),
-              Text(
-                item.skipAi ? 'AI OFF' : 'AI',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: item.skipAi ? scheme.onTertiary : Colors.white,
-                ),
-              ),
-            ],
-          ),
         ),
       ),
     );
@@ -635,25 +620,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       items.add(item);
     }
 
-    // 最初のEXIF情報でメタデータを補完（GPSや日時が未取得の場合）
-    final firstWithDate = items.where((i) => i.exifDateTime != null).firstOrNull;
-    final firstWithGps = items.where((i) => i.exifLatitude != null).firstOrNull;
-
-    setState(() {
-      _selectedPhotos.addAll(items);
-
-      // ライブラリ画像のEXIF日時を使用（現在の日時より過去なら採用）
-      if (firstWithDate != null && firstWithDate.exifDateTime!.isBefore(DateTime.now())) {
-        _capturedAt = firstWithDate.exifDateTime!;
-      }
-
-      // GPS未取得時にEXIFのGPSを使用
-      if (_position == null && firstWithGps != null) {
-        _exifPosition = (lat: firstWithGps.exifLatitude!, lng: firstWithGps.exifLongitude!);
-        _loadingLocation = true;
-        _fetchAddressFromCoords(firstWithGps.exifLatitude!, firstWithGps.exifLongitude!);
-      }
-    });
+    if (!mounted) return;
+    setState(() => _selectedPhotos.addAll(items));
+    _adoptExifMetadata();
   }
 
   Future<void> _editPhoto(int index) async {
@@ -767,8 +736,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
           localPath: localPath,
           originalLocalPath: originalPath,
           thumbnailUrl: thumbnailPath,
-          skipAi: item.skipAi || !_aiEnabled,
-          aiStatus: (item.skipAi || !_aiEnabled) ? 'skipped' : 'pending',
+          skipAi: !_aiEnabled,
+          aiStatus: _aiEnabled ? 'pending' : 'skipped',
           editParamsJson: editParamsJson,
           shotAt: photoShotAt,
           latitude: photoLat,
