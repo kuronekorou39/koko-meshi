@@ -1,6 +1,7 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 
+import '../models/diet_advice.dart';
 import '../models/meal_log.dart';
 import '../models/meal_photo.dart';
 import '../models/restaurant.dart';
@@ -21,7 +22,7 @@ class LocalDatabase {
 
     return openDatabase(
       path,
-      version: 11,
+      version: 12,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -78,6 +79,7 @@ class LocalDatabase {
         user_corrected_price INTEGER,
         user_corrected_calories INTEGER,
         ai_hint TEXT,
+        ai_advice TEXT,
         upload_status TEXT NOT NULL DEFAULT 'pending',
         skip_ai INTEGER NOT NULL DEFAULT 0,
         edit_params TEXT,
@@ -89,6 +91,7 @@ class LocalDatabase {
       )
     ''');
     await _createSavedPlacesTable(db);
+    await _createDietAdvicesTable(db);
   }
 
   static Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -126,6 +129,24 @@ class LocalDatabase {
       // 再解析時にユーザーが与える料理特定のキーワード(ローカル専用)
       await db.execute('ALTER TABLE meal_photos ADD COLUMN ai_hint TEXT');
     }
+    if (oldVersion < 12) {
+      // 食事のアドバイス(写真単位と期間単位)。生成に時間がかかるので保存する
+      await db.execute('ALTER TABLE meal_photos ADD COLUMN ai_advice TEXT');
+      await _createDietAdvicesTable(db);
+    }
+  }
+
+  static Future<void> _createDietAdvicesTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS diet_advices (
+        id TEXT PRIMARY KEY,
+        period_type TEXT NOT NULL,
+        period_start TEXT NOT NULL,
+        body TEXT NOT NULL,
+        log_count INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      )
+    ''');
   }
 
   static Future<void> _createSavedPlacesTable(Database db) async {
@@ -139,6 +160,29 @@ class LocalDatabase {
         created_at TEXT NOT NULL
       )
     ''');
+  }
+
+  // --- DietAdvice CRUD ---
+
+  static Future<void> saveDietAdvice(DietAdvice advice) async {
+    final db = await database;
+    await db.insert(
+      'diet_advices',
+      advice.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  static Future<DietAdvice?> getDietAdvice(
+      AdvicePeriod type, DateTime start) async {
+    final db = await database;
+    final maps = await db.query(
+      'diet_advices',
+      where: 'id = ?',
+      whereArgs: [DietAdvice.idFor(type, start)],
+      limit: 1,
+    );
+    return maps.isEmpty ? null : DietAdvice.fromMap(maps.first);
   }
 
   // --- MealLog CRUD ---

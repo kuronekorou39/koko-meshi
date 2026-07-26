@@ -14,6 +14,7 @@ import '../../services/meal_stats.dart';
 import '../../services/photo_service.dart';
 import '../../widgets/meal_card.dart';
 import '../../widgets/meal_grid_tile.dart';
+import 'diet_advice_screen.dart';
 
 enum ViewMode { list, grid, calendar }
 
@@ -538,6 +539,27 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
                 Text(
                   _summaryFooter(s, fmt),
                   style: TextStyle(fontSize: 11.5, color: tokens.textMuted),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => DietAdviceScreen(
+                          initialDay: _selectedDay ?? _focusedDay,
+                        ),
+                      ),
+                    ),
+                    icon: const Icon(Icons.auto_awesome_outlined, size: 16),
+                    label: const Text('食事のアドバイス'),
+                    style: OutlinedButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      minimumSize: const Size(0, 36),
+                      textStyle: const TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w700),
+                    ),
+                  ),
                 ),
               ],
             ],

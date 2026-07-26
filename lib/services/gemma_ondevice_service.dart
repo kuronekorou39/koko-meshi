@@ -249,6 +249,40 @@ image_typeは次の3つから1つ選んでください:
     );
   }
 
+  /// 画像なしでテキストだけ生成する(期間のアドバイスなど)。
+  /// 履歴は毎回作り直すので、前の会話に引きずられない。
+  Future<String> generateText(String prompt) async {
+    if (_model == null) {
+      throw StateError('モデルが未ロードです');
+    }
+    await _chat?.close();
+    final chat = _chat = await _newChat();
+    await chat.addQueryChunk(Message.text(text: prompt, isUser: true));
+    final ModelResponse resp = await chat.generateChatResponse();
+    return resp is TextResponse ? resp.token : resp.toString();
+  }
+
+  /// 画像と一緒に任意のプロンプトを投げて、生テキストを返す
+  /// (解析用のJSONプロンプトではなく、写真1枚へのコメント生成などに使う)。
+  Future<String> generateWithImage(
+    Uint8List originalBytes,
+    String prompt,
+  ) async {
+    if (_model == null) {
+      throw StateError('モデルが未ロードです');
+    }
+    await _chat?.close();
+    final chat = _chat = await _newChat();
+    final resized = await compute(_resizeJpeg, originalBytes);
+    await chat.addQueryChunk(Message.withImages(
+      text: prompt,
+      imageBytes: [resized],
+      isUser: true,
+    ));
+    final ModelResponse resp = await chat.generateChatResponse();
+    return resp is TextResponse ? resp.token : resp.toString();
+  }
+
   /// 直前のanalyze()と同じ会話にテキストのみの追い質問を送り、生テキストを返す。
   /// 画像がチャット履歴に残っているため、モデルは写真の内容を踏まえて答える
   /// (センシティブ画像のタイトル雰囲気変換に使用)。履歴は次のanalyze()で

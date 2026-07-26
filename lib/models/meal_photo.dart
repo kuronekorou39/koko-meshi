@@ -1,4 +1,4 @@
-class MealPhoto {
+﻿class MealPhoto {
   final String id;
   final String mealLogId;
   final String localPath;
@@ -16,6 +16,7 @@ class MealPhoto {
   final int? userCorrectedPrice;
   final int? userCorrectedCalories;
   final String? aiHint; // 再解析時にユーザーが与える料理特定のキーワード(ローカル専用)
+  final String? aiAdvice; // 栄養士視点のコメント(生成に時間がかかるので保存する)
   final String uploadStatus; // pending / uploaded
   final bool skipAi; // AI解析をスキップ（顔写真など）
   final String? editParamsJson; // 切り抜き編集パラメータ（JSON）
@@ -42,6 +43,7 @@ class MealPhoto {
     this.userCorrectedPrice,
     this.userCorrectedCalories,
     this.aiHint,
+    this.aiAdvice,
     this.uploadStatus = 'pending',
     this.skipAi = false,
     this.editParamsJson,
@@ -79,6 +81,7 @@ class MealPhoto {
       'user_corrected_price': userCorrectedPrice,
       'user_corrected_calories': userCorrectedCalories,
       'ai_hint': aiHint,
+      'ai_advice': aiAdvice,
       'upload_status': uploadStatus,
       'skip_ai': skipAi ? 1 : 0,
       'edit_params': editParamsJson,
@@ -108,6 +111,7 @@ class MealPhoto {
       userCorrectedPrice: map['user_corrected_price'] as int?,
       userCorrectedCalories: map['user_corrected_calories'] as int?,
       aiHint: map['ai_hint'] as String?,
+      aiAdvice: map['ai_advice'] as String?,
       uploadStatus: map['upload_status'] as String? ?? 'pending',
       skipAi: (map['skip_ai'] as int?) == 1,
       editParamsJson: map['edit_params'] as String?,
@@ -137,6 +141,8 @@ class MealPhoto {
     bool clearUserCorrections = false,
     String? aiHint,
     bool clearAiHint = false,
+    String? aiAdvice,
+    bool clearAiAdvice = false,
     String? uploadStatus,
     bool? skipAi,
     String? editParamsJson,
@@ -164,6 +170,7 @@ class MealPhoto {
           ? null
           : (userCorrectedCalories ?? this.userCorrectedCalories),
       aiHint: clearAiHint ? null : (aiHint ?? this.aiHint),
+      aiAdvice: clearAiAdvice ? null : (aiAdvice ?? this.aiAdvice),
       uploadStatus: uploadStatus ?? this.uploadStatus,
       skipAi: skipAi ?? this.skipAi,
       editParamsJson: clearEditParams ? null : (editParamsJson ?? this.editParamsJson),
