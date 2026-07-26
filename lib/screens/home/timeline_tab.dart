@@ -355,16 +355,8 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
     const height = 14.0;
     if (events.isEmpty) return const SizedBox(height: height);
 
-    final key = DateTime(day.year, day.month, day.day);
-    final value = switch (_calendarMetric) {
-      CalendarMetric.none => null,
-      CalendarMetric.calories => summary.caloriesByDay[key],
-      CalendarMetric.price => summary.priceByDay[key],
-    };
-
-    // 値が無い日と、0の日(センシティブ判定などで0が入る)は数字を出さず、
-    // 「記録はある」ことだけ示す
-    if (value == null || value == 0) {
+    // 既定は「記録があるか」だけを点で示す
+    if (_calendarMetric == CalendarMetric.none) {
       return SizedBox(
         height: height,
         child: Center(
@@ -379,6 +371,14 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
         ),
       );
     }
+
+    // 数字を出すモードでは点を混ぜない(点と数字が並ぶと読みづらいため)。
+    // 0は0のまま出し、値が取れない日(前後の月の日など)は何も出さない
+    final key = DateTime(day.year, day.month, day.day);
+    final value = _calendarMetric == CalendarMetric.calories
+        ? summary.caloriesByDay[key]
+        : summary.priceByDay[key];
+    if (value == null) return const SizedBox(height: height);
 
     final text = _calendarMetric == CalendarMetric.price
         ? '¥${NumberFormat('#,###').format(value)}'
