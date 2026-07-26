@@ -153,47 +153,54 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         title: const Text('食事を記録'),
       ),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // 写真表示エリア
-              Expanded(
-                child: _selectedPhotos.isEmpty
-                    ? _buildPhotoPlaceholder()
-                    : _buildPhotoGrid(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // 写真から下は流し込み。写真の高さは枚数で決まるので、
+            // 固定の枠に押し込めず内容なりに積む
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                children: [
+                  _selectedPhotos.isEmpty
+                      ? _buildPhotoPlaceholder()
+                      : _buildPhotoGrid(),
+                  const SizedBox(height: 12),
+
+                  // 写真追加ボタン（入り方で出し分け）
+                  OutlinedButton.icon(
+                    onPressed:
+                        widget.fromLibrary ? _pickFromLibrary : _takePhoto,
+                    icon: Icon(widget.fromLibrary
+                        ? Icons.photo_library_outlined
+                        : Icons.add_a_photo_outlined),
+                    label: Text(widget.fromLibrary ? 'ライブラリから追加' : '追加撮影'),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // 食事種別選択
+                  Text('食事の種類', style: KokoTokens.of(context).sectionLabel),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: MealType.values
+                        .map((type) =>
+                            _mealTypeChoice(type, type == _selectedType))
+                        .toList(),
+                  ),
+                  const SizedBox(height: 14),
+
+                  // 日時・位置情報
+                  _buildMetadataBar(dateFormat),
+                ],
               ),
-              const SizedBox(height: 12),
+            ),
 
-              // 写真追加ボタン（入り方で出し分け）
-              OutlinedButton.icon(
-                onPressed: widget.fromLibrary ? _pickFromLibrary : _takePhoto,
-                icon: Icon(widget.fromLibrary
-                    ? Icons.photo_library_outlined
-                    : Icons.add_a_photo_outlined),
-                label: Text(widget.fromLibrary ? 'ライブラリから追加' : '追加撮影'),
-              ),
-              const SizedBox(height: 16),
-
-              // 食事種別選択
-              Text('食事の種類', style: KokoTokens.of(context).sectionLabel),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: MealType.values
-                    .map((type) => _mealTypeChoice(type, type == _selectedType))
-                    .toList(),
-              ),
-              const SizedBox(height: 12),
-
-              // 日時・位置情報
-              _buildMetadataBar(dateFormat),
-              const SizedBox(height: 12),
-
-              // 保存ボタン + AI解析トグル
-              Row(
+            // 保存ボタン + AI解析トグル(常に手の届く位置に置く)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: Row(
                 children: [
                   // AI解析ON/OFFトグル
                   Material(
@@ -236,7 +243,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                   // 保存ボタン
                   Expanded(
                     child: FilledButton.icon(
-                      onPressed: _selectedPhotos.isEmpty || _saving ? null : _save,
+                      onPressed:
+                          _selectedPhotos.isEmpty || _saving ? null : _save,
                       icon: _saving
                           ? const SizedBox(
                               width: 20,
@@ -252,8 +260,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                   ),
                 ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -390,6 +398,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     return GestureDetector(
       onTap: _showPickerChoice,
       child: Container(
+        height: 220,
         decoration: BoxDecoration(
           color: tokens.photoPlaceholder,
           borderRadius: BorderRadius.circular(12),
@@ -411,149 +420,149 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   }
 
   Widget _buildPhotoGrid() {
+    // 1枚だけなら列を分けずに大きく見せる。2枚以上は2列。
+    // 3列だとタイルが小さすぎて、料理も上に乗るボタンも見えなかった
+    final columns = _selectedPhotos.length == 1 ? 1 : 2;
     return GridView.builder(
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        crossAxisSpacing: 8,
-        mainAxisSpacing: 8,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: columns,
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 10,
       ),
       itemCount: _selectedPhotos.length,
-      itemBuilder: (context, index) {
-        final item = _selectedPhotos[index];
-        final scheme = Theme.of(context).colorScheme;
-        return Stack(
-          fit: StackFit.expand,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: _buildPhotoThumbnail(item),
+      itemBuilder: (context, index) => _photoTile(index),
+    );
+  }
+
+  Widget _photoTile(int index) {
+    final item = _selectedPhotos[index];
+    final scheme = Theme.of(context).colorScheme;
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: _buildPhotoThumbnail(item),
+        ),
+        // AI解析スキップ時は写真ごと暗くして、一目で分かるようにする
+        if (item.skipAi)
+          Positioned.fill(
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.black38,
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
-            // EXIF日時（ライブラリ写真で日時がある場合）
-            if (item.exifDateTime != null)
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                child: Container(
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.bottomCenter,
-                      end: Alignment.topCenter,
-                      colors: [Colors.black54, Colors.transparent],
-                    ),
-                    borderRadius:
-                        BorderRadius.vertical(bottom: Radius.circular(12)),
-                  ),
-                  padding: const EdgeInsets.fromLTRB(6, 16, 6, 4),
-                  child: Text(
+          ),
+        // 下部: AI切り替えと撮影日時。別々に置くと重なるので1本の帯にまとめる
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.bottomCenter,
+                end: Alignment.topCenter,
+                colors: [Colors.black87, Colors.transparent],
+              ),
+              borderRadius:
+                  BorderRadius.vertical(bottom: Radius.circular(12)),
+            ),
+            padding: const EdgeInsets.fromLTRB(6, 20, 8, 6),
+            child: Row(
+              children: [
+                _aiSkipToggle(item),
+                const Spacer(),
+                if (item.exifDateTime != null)
+                  Text(
                     DateFormat('M/d HH:mm').format(item.exifDateTime!),
-                    style: const TextStyle(color: Colors.white, fontSize: 10),
-                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white, fontSize: 11),
                   ),
-                ),
-              ),
-            // 編集済みバッジ
-            if (item.hasEdits)
-              Positioned(
-                bottom: item.exifDateTime != null ? 20 : 4,
-                right: 4,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: scheme.tertiary,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                  child: Icon(Icons.tune, size: 12, color: scheme.onTertiary),
-                ),
-              ),
-            // AI解析スキップ表示
-            if (item.skipAi)
-              Positioned.fill(
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: Colors.black26,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Center(
-                    child: Icon(Icons.visibility_off_outlined,
-                        color: Colors.white70, size: 28),
-                  ),
-                ),
-              ),
-            // 削除ボタン
-            Positioned(
-              top: 4,
-              right: 4,
-              child: GestureDetector(
-                onTap: () {
-                  setState(() => _selectedPhotos.removeAt(index));
-                },
-                child: Container(
-                  decoration: const BoxDecoration(
-                    color: Colors.black54,
-                    shape: BoxShape.circle,
-                  ),
-                  padding: const EdgeInsets.all(4),
-                  child: const Icon(Icons.close, size: 16, color: Colors.white),
-                ),
-              ),
+              ],
             ),
-            // 編集ボタン
-            Positioned(
-              top: 4,
-              left: 4,
-              child: GestureDetector(
-                onTap: () => _editPhoto(index),
-                child: Container(
-                  decoration: const BoxDecoration(
-                    color: Colors.black54,
-                    shape: BoxShape.circle,
-                  ),
-                  padding: const EdgeInsets.all(4),
-                  child: const Icon(Icons.tune, size: 16, color: Colors.white),
+          ),
+        ),
+        // 編集(編集済みならボタン自体を色で示す。別バッジは出さない)
+        Positioned(
+          top: 2,
+          left: 2,
+          child: _tileButton(
+            icon: Icons.tune,
+            onTap: () => _editPhoto(index),
+            background: item.hasEdits ? scheme.tertiary : Colors.black54,
+            foreground: item.hasEdits ? scheme.onTertiary : Colors.white,
+          ),
+        ),
+        Positioned(
+          top: 2,
+          right: 2,
+          child: _tileButton(
+            icon: Icons.close,
+            onTap: () => setState(() => _selectedPhotos.removeAt(index)),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// タイル上の丸ボタン。指で押せる大きさ(36)を確保する
+  Widget _tileButton({
+    required IconData icon,
+    required VoidCallback onTap,
+    Color background = Colors.black54,
+    Color foreground = Colors.white,
+  }) {
+    return Material(
+      color: background,
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: SizedBox(
+          width: 36,
+          height: 36,
+          child: Icon(icon, size: 19, color: foreground),
+        ),
+      ),
+    );
+  }
+
+  Widget _aiSkipToggle(_SelectedPhoto item) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: item.skipAi ? scheme.tertiary : Colors.black54,
+      borderRadius: BorderRadius.circular(6),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(6),
+        onTap: () => setState(() => item.skipAi = !item.skipAi),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                item.skipAi
+                    ? Icons.visibility_off_outlined
+                    : Icons.auto_awesome,
+                size: 13,
+                color: item.skipAi ? scheme.onTertiary : Colors.white,
+              ),
+              const SizedBox(width: 3),
+              Text(
+                item.skipAi ? 'AI OFF' : 'AI',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: item.skipAi ? scheme.onTertiary : Colors.white,
                 ),
               ),
-            ),
-            // AI解析スキップ切り替え
-            Positioned(
-              bottom: item.exifDateTime != null ? 20 : 4,
-              left: 4,
-              child: GestureDetector(
-                onTap: () {
-                  setState(() => item.skipAi = !item.skipAi);
-                },
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: item.skipAi ? scheme.tertiary : Colors.black54,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        item.skipAi
-                            ? Icons.visibility_off_outlined
-                            : Icons.auto_awesome,
-                        size: 12,
-                        color: item.skipAi ? scheme.onTertiary : Colors.white,
-                      ),
-                      const SizedBox(width: 2),
-                      Text(
-                        item.skipAi ? 'AI OFF' : 'AI',
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: item.skipAi ? scheme.onTertiary : Colors.white,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
-        );
-      },
+            ],
+          ),
+        ),
+      ),
     );
   }
 
