@@ -72,6 +72,22 @@ android {
         }
     }
 
+    // arm64 以外の .so を APK から完全に除く。
+    //
+    // 上の abiFilters は自前ビルドのネイティブライブラリにしか効かず、
+    // プラグインのAARに入っている .so は素通りする。数KBでも残っていると
+    // 32bit端末が「対応している」と判断してインストールでき、
+    // libflutter.so が無いまま起動してクラッシュする。
+    // 入らないほうが、インストール時にはっきり弾かれるぶん親切。
+    //
+    // ビルド側でも --target-platform android-arm64 を指定している
+    // (指定しないと Flutter 本体の .so が3ABI分入って40MB増える)
+    packaging {
+        jniLibs {
+            excludes += listOf("**/armeabi-v7a/**", "**/armeabi/**", "**/x86/**", "**/x86_64/**")
+        }
+    }
+
     buildTypes {
         debug {
             // 開発ビルドは別アプリとして入れる。実利用しているアプリを
