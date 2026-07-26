@@ -93,14 +93,47 @@ Maps SDK と違って `http` はこれを送らない。制限をかけると検
 
 ## 割り当て上限（これが実質的な防波堤）
 
-APIとサービス → Places API (New) → **割り当てと上限** で
-`Requests per day` を **200** 程度に設定する。
+`https://console.cloud.google.com/apis/api/places.googleapis.com/quotas`
 
-Nearby / Text Search Pro の無料枠は 5,000回/月。31日で割ると約160回/日。
-自分のテストもここから引かれるので、様子を見て調整する。
+**API単位ではなくリクエスト種別ごと**に並ぶ。アプリが呼ぶのは2種類だけ。
 
-**予算アラート（お支払い → 予算とアラート）は通知するだけで課金を止めない。**
-止めるのは割り当て上限のほう。両方設定する。
+| 項目 | 初期値 | 設定値 |
+|---|---|---|
+| `SearchNearbyRequest per day` | 75,000 | **150** |
+| `SearchTextRequest per day` | 75,000 | **150** |
+| `SearchNearbyRequest per minute` | 600 | **20** |
+| `SearchTextRequest per minute` | 600 | **20** |
+
+150/日の根拠: 無料枠は各SKU 5,000回/月。31日で割ると約161/日なので、
+150なら月4,650回で枠内に収まる。
+
+### 使っていない種別は 0 にする（こちらのほうが重要）
+
+キーを Places API (New) に制限しても、**その中の使っていないエンドポイントは
+全部叩ける**。特に Autocomplete は課金対象で初期値が175,000回/日ある。
+
+| 項目 | 初期値 | 設定値 |
+|---|---|---|
+| `AutocompletePlacesRequest per day` | 175,000 | **0** |
+| `GetPlaceRequest per day` | 125,000 | **0** |
+| `GetPhotoMediaRequest per day` | 175,000 | **0** |
+| `SearchMediaRequest per minute` | 600 | **0** |
+| `SearchReviewPostsRequest per minute` | 600 | **0** |
+
+`SearchMedia` / `SearchReviewPosts` は日次が「無制限」なので分単位で塞ぐ。
+
+Places の写真を表示するようにしたら `GetPhotoMedia` を戻すこと
+（現在はフィールドマスクから写真を外しているので呼ばれない）。
+
+### 「割り当ての調整」は有効にしない
+
+ページ上部に「使用状況に基づいて割り当てが自動で段階的に増加します」とある。
+**有効にすると絞った上限が勝手に上がる。** 目的と正反対なので触らない。
+
+### 予算アラート
+
+お支払い → 予算とアラート → $1、閾値 50/90/100%。
+**これは通知するだけで課金を止めない。** 止めるのは割り当て上限のほう。両方やる。
 
 ## .env
 
