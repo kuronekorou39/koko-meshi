@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -16,7 +16,6 @@ import '../../models/meal_type.dart';
 import '../../providers/meal_providers.dart';
 import '../../services/ai_analysis_service.dart';
 import '../../services/app_settings_service.dart';
-import '../../services/diet_advice_service.dart';
 import '../../services/gemma_download_manager.dart';
 import '../../services/gemma_ondevice_service.dart';
 import '../../services/photo_cache_service.dart';
@@ -42,9 +41,6 @@ class MealDetailScreen extends ConsumerStatefulWidget {
 class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
   Timer? _refreshTimer;
   int _selectedPhotoIndex = 0;
-
-  /// アドバイス生成中の写真ID(ボタンを二重に押させないため)
-  String? _advicePhotoId;
 
   /// 端末内AIモデル(E2B)がインストール済みか。null=未確認。
   /// GemmaDownloadManagerが画面をまたいで保持しているので、この画面を
@@ -130,7 +126,7 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
           final dateFormat = DateFormat('yyyy年M月d日 (E) HH:mm', 'ja');
 
           return SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+            padding: EdgeInsets.fromLTRB(16, 8, 16, 32 + context.systemBottomInset),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -755,82 +751,12 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
                     ),
                   ),
                 ),
-                _buildAdviceSection(photo),
               ],
             ),
           ),
         ],
       ),
     );
-  }
-
-  /// この写真への栄養士コメント。生成に時間がかかるので保存して使い回す。
-  Widget _buildAdviceSection(MealPhoto photo) {
-    final tokens = KokoTokens.of(context);
-    final advice = photo.aiAdvice;
-    final busy = _advicePhotoId == photo.id;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (advice != null) ...[
-          const SizedBox(height: 14),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surfaceContainerHigh,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Text(
-              advice,
-              style: const TextStyle(fontSize: 13, height: 1.7),
-            ),
-          ),
-        ],
-        const SizedBox(height: 8),
-        SizedBox(
-          width: double.infinity,
-          child: TextButton.icon(
-            onPressed: busy ? null : () => _generateAdvice(photo),
-            icon: busy
-                ? const SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.auto_awesome_outlined, size: 16),
-            label: Text(busy
-                ? '生成中… 30秒ほどかかります'
-                : advice == null
-                    ? 'この一皿へのアドバイス'
-                    : 'アドバイスを作り直す'),
-            style: TextButton.styleFrom(
-              visualDensity: VisualDensity.compact,
-              textStyle: const TextStyle(fontSize: 12.5),
-              foregroundColor: tokens.textMuted,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Future<void> _generateAdvice(MealPhoto photo) async {
-    setState(() => _advicePhotoId = photo.id);
-    try {
-      await DietAdviceService.generateForPhoto(photo);
-      if (mounted) ref.invalidate(mealPhotosProvider(widget.mealLogId));
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text(e is StateError ? e.message : 'アドバイスの生成に失敗: $e')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _advicePhotoId = null);
-    }
   }
 
   /// 価格/カロリーの1セル。未入力は「—」にして、編集で埋められることを示す。

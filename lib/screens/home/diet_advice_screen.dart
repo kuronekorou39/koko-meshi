@@ -1,17 +1,21 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../database/local_database.dart';
 import '../../models/diet_advice.dart';
 import '../../services/diet_advice_service.dart';
+import '../../services/meal_stats.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/stat_charts.dart';
 
-/// 週/月の食事アドバイス。端末内AIで生成するので時間がかかる。
-/// 生成した結果は保存して、次に開いたときはすぐ出す。
+/// 週/月の振り返り。集計とグラフを出し、そのうえで端末内AIのアドバイスを作る。
+///
+/// 対象は「終わった期間」だけ。途中の週や月を評価しても意味が無く、
+/// 生成し直すたびに内容が変わって混乱するため。
 class DietAdviceScreen extends StatefulWidget {
   const DietAdviceScreen({super.key, required this.initialDay});
 
-  /// この日を含む期間から始める
+  /// この日を含む期間から始める(未完了ならひとつ前へ下げる)
   final DateTime initialDay;
 
   @override
@@ -23,19 +27,34 @@ class _DietAdviceScreenState extends State<DietAdviceScreen> {
   late DateTime _start;
 
   DietAdvice? _advice;
+  PeriodSummary? _summary;
+  PeriodSummary? _previous;
   bool _loading = true;
   bool _generating = false;
   String? _error;
 
-  /// この期間の記録件数(0なら生成させない)
-  int _logCount = 0;
-
   @override
   void initState() {
     super.initState();
-    _start = DietAdvice.startOf(_period, widget.initialDay);
+    _start = _latestCompleted(_period, widget.initialDay);
     _load();
   }
+
+  /// [day] を含む期間。まだ終わっていなければひとつ前の期間を返す。
+  static DateTime _latestCompleted(AdvicePeriod period, DateTime day) {
+    final start = DietAdvice.startOf(period, day);
+    return _isComplete(period, start) ? start : _shifted(period, start, -1);
+  }
+
+  static bool _isComplete(AdvicePeriod period, DateTime start) =>
+      !DateTime.now().isBefore(DietAdvice.endOf(period, start));
+
+  static DateTime _shifted(AdvicePeriod period, DateTime start, int delta) =>
+      period == AdvicePeriod.week
+          ? start.add(Duration(days: 7 * delta))
+          : DateTime(start.year, start.month + delta);
+
+  bool get _complete => _isComplete(_period, _start);
 
   Future<void> _load() async {
     setState(() {
@@ -44,31 +63,32 @@ class _DietAdviceScreenState extends State<DietAdviceScreen> {
     });
     final advice = await LocalDatabase.getDietAdvice(_period, _start);
     final logs = await LocalDatabase.getMealLogs();
+    final photos = MealStats.groupPhotos(await LocalDatabase.getAllMealPhotos());
+
     final end = DietAdvice.endOf(_period, _start);
-    final count = logs
-        .where((l) => !l.eatenAt.isBefore(_start) && l.eatenAt.isBefore(end))
-        .length;
+    final prevStart = _shifted(_period, _start, -1);
     if (!mounted) return;
     setState(() {
       _advice = advice;
-      _logCount = count;
+      _summary = MealStats.forRange(_start, end, logs, photos);
+      _previous = MealStats.forRange(
+          prevStart, DietAdvice.endOf(_period, prevStart), logs, photos);
       _loading = false;
     });
   }
 
   void _shift(int delta) {
-    setState(() {
-      _start = _period == AdvicePeriod.week
-          ? _start.add(Duration(days: 7 * delta))
-          : DateTime(_start.year, _start.month + delta);
-    });
+    final next = _shifted(_period, _start, delta);
+    // 未来と、まだ終わっていない期間へは進ませない
+    if (delta > 0 && !_isComplete(_period, next)) return;
+    setState(() => _start = next);
     _load();
   }
 
   void _switchPeriod(AdvicePeriod period) {
     setState(() {
       _period = period;
-      _start = DietAdvice.startOf(period, _start);
+      _start = _latestCompleted(period, _start);
     });
     _load();
   }
@@ -105,12 +125,13 @@ class _DietAdviceScreenState extends State<DietAdviceScreen> {
   @override
   Widget build(BuildContext context) {
     final tokens = KokoTokens.of(context);
-    final advice = _advice;
+    final summary = _summary;
+    final canForward = _isComplete(_period, _shifted(_period, _start, 1));
 
     return Scaffold(
-      appBar: AppBar(title: const Text('食事のアドバイス')),
+      appBar: AppBar(title: const Text('食事の振り返り')),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        padding: EdgeInsets.fromLTRB(16, 8, 16, 32 + context.systemBottomInset),
         children: [
           SizedBox(
             width: double.infinity,
@@ -124,7 +145,7 @@ class _DietAdviceScreenState extends State<DietAdviceScreen> {
                   _generating ? null : (s) => _switchPeriod(s.first),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           Row(
             children: [
               IconButton(
@@ -142,104 +163,312 @@ class _DietAdviceScreenState extends State<DietAdviceScreen> {
                 ),
               ),
               IconButton(
-                onPressed: _generating ? null : () => _shift(1),
+                onPressed: _generating || !canForward ? null : () => _shift(1),
                 icon: const Icon(Icons.chevron_right),
               ),
             ],
           ),
-          const SizedBox(height: 8),
           if (_loading)
             const Padding(
-              padding: EdgeInsets.symmetric(vertical: 40),
+              padding: EdgeInsets.symmetric(vertical: 60),
               child: Center(child: CircularProgressIndicator()),
             )
+          else if (summary == null)
+            const SizedBox.shrink()
+          else if (summary.isEmpty)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text('この期間の記録はありません。',
+                    style: TextStyle(fontSize: 13, color: tokens.textMuted)),
+              ),
+            )
           else ...[
-            if (advice != null) _adviceCard(advice, tokens),
-            if (advice == null)
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Text(
-                    _logCount == 0
-                        ? 'この期間の記録がありません。'
-                        : 'この期間の記録は$_logCount件です。'
-                            '下のボタンでアドバイスを作れます。',
-                    style: TextStyle(
-                        fontSize: 13, height: 1.6, color: tokens.textMuted),
-                  ),
-                ),
-              ),
+            _totalsCard(summary, tokens),
             const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed:
-                    _generating || _logCount == 0 ? null : _generate,
-                icon: _generating
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.auto_awesome_outlined, size: 18),
-                label: Text(_generating
-                    ? '生成中… 1分ほどかかります'
-                    : advice == null
-                        ? 'アドバイスを作る'
-                        : 'もう一度作る'),
-              ),
-            ),
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Text(
-                  _error!,
-                  style: TextStyle(
-                      color: Theme.of(context).colorScheme.error, fontSize: 13),
-                ),
-              ),
-            const SizedBox(height: 12),
-            Text(
-              '端末内のAIが生成しています。医学的な助言ではありません。',
-              style: TextStyle(fontSize: 11.5, color: tokens.textFaint),
-            ),
+            _sectionLabel('日ごとのカロリー', tokens),
+            _caloriesCard(summary, tokens),
+            const SizedBox(height: 16),
+            _sectionLabel('ジャンルの偏り', tokens),
+            _genreCard(summary, tokens),
+            const SizedBox(height: 16),
+            _sectionLabel('AIのコメント', tokens),
+            _adviceSection(tokens),
           ],
         ],
       ),
     );
   }
 
-  Widget _adviceCard(DietAdvice advice, KokoTokens tokens) {
-    final stale = _logCount != advice.logCount;
+  Widget _sectionLabel(String text, KokoTokens tokens) => Padding(
+        padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
+        child: Text(text, style: tokens.sectionLabel),
+      );
+
+  // ─── 合計と前期間との差 ───
+
+  Widget _totalsCard(PeriodSummary s, KokoTokens tokens) {
+    final prev = _previous;
+    final delta = prev == null ? null : PeriodDelta(current: s, previous: prev);
+    final fmt = NumberFormat('#,###');
+
     return Card(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              advice.body,
-              style: const TextStyle(fontSize: 14, height: 1.7),
+            IntrinsicHeight(
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _metric(
+                      'カロリー',
+                      '${fmt.format(s.totalCalories)} kcal',
+                      delta?.calories,
+                      delta?.caloriesRate,
+                      tokens,
+                      unit: 'kcal',
+                    ),
+                  ),
+                  VerticalDivider(
+                      width: 20, thickness: 0.8, color: tokens.hairline),
+                  Expanded(
+                    child: _metric(
+                      '金額',
+                      '¥${fmt.format(s.totalPrice)}',
+                      delta?.price,
+                      delta?.priceRate,
+                      tokens,
+                      unit: '円',
+                    ),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 14),
-            Divider(color: tokens.hairline, height: 1),
             const SizedBox(height: 10),
             Text(
-              '${DateFormat('M月d日 HH:mm', 'ja').format(advice.createdAt)}に生成'
-              '（記録${advice.logCount}件）',
-              style: TextStyle(fontSize: 11, color: tokens.textFaint),
+              '記録 ${s.recordedDays}日・${s.logCount}回'
+              '${s.dailyAverageCalories == null ? '' : '　1日平均 ${fmt.format(s.dailyAverageCalories)}kcal'}',
+              style: TextStyle(fontSize: 11.5, color: tokens.textMuted),
             ),
-            if (stale)
-              Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(
-                  'このあと記録が$_logCount件に変わっています。作り直すと反映されます。',
-                  style: TextStyle(fontSize: 11.5, color: tokens.warning),
-                ),
-              ),
           ],
         ),
       ),
+    );
+  }
+
+  /// 合計と、前の期間からの増減。
+  Widget _metric(
+    String label,
+    String value,
+    int? delta,
+    double? rate,
+    KokoTokens tokens, {
+    required String unit,
+  }) {
+    final fmt = NumberFormat('#,###');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.8,
+            color: tokens.textFaint,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(value, style: tokens.numeral.copyWith(fontSize: 18)),
+        const SizedBox(height: 4),
+        if (delta == null || delta == 0)
+          Text(
+            delta == 0 ? '前${_period.label}と同じ' : '前${_period.label}の記録なし',
+            style: TextStyle(fontSize: 10.5, color: tokens.textFaint),
+          )
+        else
+          Row(
+            children: [
+              Icon(
+                delta > 0 ? Icons.arrow_upward : Icons.arrow_downward,
+                size: 11,
+                // 増減はどちらが良いとも言えないので、色で善し悪しを示さない
+                color: tokens.textMuted,
+              ),
+              const SizedBox(width: 2),
+              Text(
+                '${fmt.format(delta.abs())}$unit'
+                '${rate == null ? '' : ' (${rate.abs().round()}%)'}',
+                style: TextStyle(fontSize: 10.5, color: tokens.textMuted),
+              ),
+            ],
+          ),
+      ],
+    );
+  }
+
+  // ─── 日ごとのカロリー ───
+
+  Widget _caloriesCard(PeriodSummary s, KokoTokens tokens) {
+    final days = s.days;
+    final avg = s.dailyAverageCalories;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 14, 12, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            DailyBarChart(
+              days: days,
+              values: s.caloriesByDay,
+              averageLine: avg,
+            ),
+            const SizedBox(height: 6),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(DateFormat('M/d', 'ja').format(days.first),
+                    style: TextStyle(fontSize: 10, color: tokens.textFaint)),
+                if (avg != null)
+                  Text('破線 = 1日平均 ${avg}kcal',
+                      style:
+                          TextStyle(fontSize: 10, color: tokens.textFaint)),
+                Text(DateFormat('M/d', 'ja').format(days.last),
+                    style: TextStyle(fontSize: 10, color: tokens.textFaint)),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─── ジャンル ───
+
+  Widget _genreCard(PeriodSummary s, KokoTokens tokens) {
+    final axes = GenreGroup.axes;
+    final values = axes.map((g) => s.genreCounts[g] ?? 0).toList();
+    final total = s.genreTotal;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+        child: total == 0
+            ? Text('ジャンルを判定できた記録がありません。',
+                style: TextStyle(fontSize: 13, color: tokens.textMuted))
+            : Column(
+                children: [
+                  GenreRadarChart(
+                    labels: axes.map((g) => g.label).toList(),
+                    values: values,
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 4,
+                    alignment: WrapAlignment.center,
+                    children: [
+                      for (var i = 0; i < axes.length; i++)
+                        if (values[i] > 0)
+                          Text(
+                            '${axes[i].label} ${values[i]}',
+                            style: TextStyle(
+                                fontSize: 11, color: tokens.textMuted),
+                          ),
+                    ],
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+
+  // ─── AIコメント ───
+
+  Widget _adviceSection(KokoTokens tokens) {
+    final advice = _advice;
+    final summary = _summary;
+    final stale = advice != null &&
+        summary != null &&
+        advice.logCount != summary.logCount;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (advice != null)
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(advice.body,
+                      style: const TextStyle(fontSize: 14, height: 1.7)),
+                  const SizedBox(height: 14),
+                  Divider(color: tokens.hairline, height: 1),
+                  const SizedBox(height: 10),
+                  Text(
+                    '${DateFormat('M月d日 HH:mm', 'ja').format(advice.createdAt)}に生成'
+                    '（記録${advice.logCount}件）',
+                    style: TextStyle(fontSize: 11, color: tokens.textFaint),
+                  ),
+                  if (stale)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        'そのあと記録が${summary.logCount}件に変わっています。'
+                        '作り直すと反映されます。',
+                        style:
+                            TextStyle(fontSize: 11.5, color: tokens.warning),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        const SizedBox(height: 10),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: _generating || !_complete ? null : _generate,
+            icon: _generating
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.auto_awesome_outlined, size: 18),
+            label: Text(_generating
+                ? '生成中… 1分ほどかかります'
+                : advice == null
+                    ? 'AIにコメントしてもらう'
+                    : 'もう一度作る'),
+          ),
+        ),
+        if (!_complete)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              'この${_period.label}はまだ終わっていません。'
+              '終わってから振り返ってください。',
+              style: TextStyle(fontSize: 11.5, color: tokens.textFaint),
+            ),
+          ),
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Text(_error!,
+                style: TextStyle(
+                    color: Theme.of(context).colorScheme.error, fontSize: 13)),
+          ),
+        const SizedBox(height: 10),
+        Text(
+          '端末内のAIが生成しています。医学的な助言ではありません。',
+          style: TextStyle(fontSize: 11.5, color: tokens.textFaint),
+        ),
+      ],
     );
   }
 }

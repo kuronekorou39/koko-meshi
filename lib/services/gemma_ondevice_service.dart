@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
@@ -258,27 +258,6 @@ image_typeは次の3つから1つ選んでください:
     await _chat?.close();
     final chat = _chat = await _newChat();
     await chat.addQueryChunk(Message.text(text: prompt, isUser: true));
-    final ModelResponse resp = await chat.generateChatResponse();
-    return resp is TextResponse ? resp.token : resp.toString();
-  }
-
-  /// 画像と一緒に任意のプロンプトを投げて、生テキストを返す
-  /// (解析用のJSONプロンプトではなく、写真1枚へのコメント生成などに使う)。
-  Future<String> generateWithImage(
-    Uint8List originalBytes,
-    String prompt,
-  ) async {
-    if (_model == null) {
-      throw StateError('モデルが未ロードです');
-    }
-    await _chat?.close();
-    final chat = _chat = await _newChat();
-    final resized = await compute(_resizeJpeg, originalBytes);
-    await chat.addQueryChunk(Message.withImages(
-      text: prompt,
-      imageBytes: [resized],
-      isUser: true,
-    ));
     final ModelResponse resp = await chat.generateChatResponse();
     return resp is TextResponse ? resp.token : resp.toString();
   }

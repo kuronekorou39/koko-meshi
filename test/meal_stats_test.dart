@@ -1,4 +1,4 @@
-import 'package:flutter_test/flutter_test.dart';
+﻿import 'package:flutter_test/flutter_test.dart';
 import 'package:koko_meshi/models/meal_log.dart';
 import 'package:koko_meshi/models/meal_photo.dart';
 import 'package:koko_meshi/models/meal_type.dart';
@@ -25,6 +25,7 @@ MealPhoto _photo(
   int? aiCalories,
   int? userPrice,
   int? userCalories,
+  String? genre,
 }) =>
     MealPhoto(
       id: id,
@@ -32,6 +33,7 @@ MealPhoto _photo(
       localPath: '/tmp/$id.jpg',
       aiEstimatedPrice: aiPrice,
       aiEstimatedCalories: aiCalories,
+      aiCuisineGenre: genre,
       userCorrectedPrice: userPrice,
       userCorrectedCalories: userCalories,
       shotAt: DateTime(2026, 7, 1),
@@ -136,6 +138,99 @@ void main() {
       expect(s.isEmpty, isTrue);
       expect(s.totalCalories, 0);
       expect(s.dailyAverageCalories, isNull);
+    });
+  });
+
+  group('GenreGroup', () {
+    test('AIの細かいジャンルをまとめ先へ振り分ける', () {
+      expect(GenreGroup.of('寿司'), GenreGroup.japanese);
+      expect(GenreGroup.of('丼・定食'), GenreGroup.japanese);
+      expect(GenreGroup.of('イタリアン'), GenreGroup.western);
+      expect(GenreGroup.of('韓国料理'), GenreGroup.asian);
+      expect(GenreGroup.of('ラーメン'), GenreGroup.noodle);
+      expect(GenreGroup.of('パン・サンドイッチ'), GenreGroup.light);
+      expect(GenreGroup.of('カフェ・スイーツ'), GenreGroup.sweets);
+    });
+
+    test('料理以外(「写真」)と未知の値はその他', () {
+      expect(GenreGroup.of('写真'), GenreGroup.other);
+      expect(GenreGroup.of(null), GenreGroup.other);
+      expect(GenreGroup.of('存在しないジャンル'), GenreGroup.other);
+    });
+
+    test('チャートの軸に「その他」は含めない', () {
+      expect(GenreGroup.axes.contains(GenreGroup.other), isFalse);
+      expect(GenreGroup.axes.length, GenreGroup.values.length - 1);
+    });
+  });
+
+  group('forRange', () {
+    test('期間の境界は開始を含み終わりを含まない', () {
+      final logs = [
+        _log('a', DateTime(2026, 7, 20, 0, 0)), // 開始ちょうど
+        _log('b', DateTime(2026, 7, 26, 23, 59)), // 期間内の最後
+        _log('c', DateTime(2026, 7, 27, 0, 0)), // 終わりちょうど(含まない)
+      ];
+      final s = MealStats.forRange(
+          DateTime(2026, 7, 20), DateTime(2026, 7, 27), logs, const {});
+      expect(s.logCount, 2);
+    });
+
+    test('日数と横軸の日付を出せる', () {
+      final s = MealStats.forRange(
+          DateTime(2026, 7, 20), DateTime(2026, 7, 27), const [], const {});
+      expect(s.dayCount, 7);
+      expect(s.days.first, DateTime(2026, 7, 20));
+      expect(s.days.last, DateTime(2026, 7, 26));
+    });
+
+    test('ジャンルを数える。料理以外は母数から外す', () {
+      final logs = [_log('l1', DateTime(2026, 7, 20))];
+      final photos = MealStats.groupPhotos([
+        _photo('p1', 'l1', genre: '寿司'),
+        _photo('p2', 'l1', genre: '和食'),
+        _photo('p3', 'l1', genre: 'ラーメン'),
+        _photo('p4', 'l1', genre: '写真'),
+      ]);
+      final s = MealStats.forRange(
+          DateTime(2026, 7, 20), DateTime(2026, 7, 27), logs, photos);
+      expect(s.genreCounts[GenreGroup.japanese], 2);
+      expect(s.genreCounts[GenreGroup.noodle], 1);
+      expect(s.genreCounts[GenreGroup.other], 1);
+      expect(s.genreTotal, 3); // 「写真」は含まない
+    });
+  });
+
+  group('PeriodDelta', () {
+    PeriodSummary summary(int kcal, int price, int count) => PeriodSummary(
+          start: DateTime(2026, 7, 20),
+          end: DateTime(2026, 7, 27),
+          totalCalories: kcal,
+          totalPrice: price,
+          logCount: count,
+          recordedDays: count,
+          eatingOutCount: 0,
+          caloriesByDay: const {},
+          priceByDay: const {},
+          genreCounts: const {},
+        );
+
+    test('増減と変化率を出す', () {
+      final d = PeriodDelta(
+          current: summary(1200, 3000, 6), previous: summary(1000, 2000, 4));
+      expect(d.calories, 200);
+      expect(d.price, 1000);
+      expect(d.logCount, 2);
+      expect(d.caloriesRate, closeTo(20, 0.01));
+      expect(d.priceRate, closeTo(50, 0.01));
+    });
+
+    test('前が0なら変化率は出せない(0除算を避ける)', () {
+      final d = PeriodDelta(
+          current: summary(1200, 3000, 6), previous: summary(0, 0, 0));
+      expect(d.caloriesRate, isNull);
+      expect(d.priceRate, isNull);
+      expect(d.calories, 1200);
     });
   });
 }

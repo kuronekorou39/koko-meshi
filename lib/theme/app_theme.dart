@@ -382,6 +382,20 @@ class AppTheme {
   }
 }
 
+/// レイアウトの補助。
+extension KokoInsets on BuildContext {
+  /// スクロール領域の下端に足すべき、システムバー(ナビゲーションバー)ぶんの余白。
+  ///
+  /// Android 15(API 35)以降は edge-to-edge が強制され、描画領域がナビゲーション
+  /// バーの下まで伸びる(opt-outできない)。Scaffold の body はキーボード以外の
+  /// インセットを面倒見ないので、画面いっぱいまでスクロールする領域では
+  /// これを下端の余白へ足すこと。足し忘れると最後の要素がバーに隠れる。
+  ///
+  /// `viewPadding` ではなく `padding` を使うのは、キーボードが出ている間は
+  /// 0 になってほしいから(その領域はキーボードが占めるので Scaffold 側が処理する)。
+  double get systemBottomInset => MediaQuery.paddingOf(this).bottom;
+}
+
 /// テーマに紐づく独自トークン(colorScheme に無い意味色とテキストスタイル)。
 /// `KokoTokens.of(context)` で取得する。
 class KokoTokens extends ThemeExtension<KokoTokens> {

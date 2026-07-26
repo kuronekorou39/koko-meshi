@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../providers/app_settings_providers.dart';
@@ -18,7 +18,7 @@ class FontSettingsScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('フォント')),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+        padding: EdgeInsets.fromLTRB(16, 4, 16, 24 + context.systemBottomInset),
         children: [
           _sectionLabel(context, 'プレビュー'),
           const _FontPreviewCard(),

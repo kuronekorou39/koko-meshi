@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -311,7 +311,7 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
 
     return Column(
       children: [
-        _buildMonthlySummary(summary),
+        _buildPeriodSummary(summary),
         TableCalendar<MealLog>(
           locale: 'ja_JP',
           firstDay: DateTime(2020),
@@ -444,7 +444,7 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
 
   /// 日付セルの下に出す表示。高さは常に固定。
   Widget _buildDayMarker(
-      DateTime day, List<MealLog> events, MonthlySummary summary) {
+      DateTime day, List<MealLog> events, PeriodSummary summary) {
     final tokens = KokoTokens.of(context);
     const height = 14.0;
     if (events.isEmpty) return const SizedBox(height: height);
@@ -492,7 +492,7 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
 
   /// 表示中の月の合計。カロリーと金額は写真側の推定を積んだもので、
   /// 記録側に手入力の合計があればそちらが優先される。
-  Widget _buildMonthlySummary(MonthlySummary s) {
+  Widget _buildPeriodSummary(PeriodSummary s) {
     final tokens = KokoTokens.of(context);
     final fmt = NumberFormat('#,###');
 
@@ -504,7 +504,7 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('${s.month.month}月の合計', style: tokens.sectionLabel),
+              Text('${s.start.month}月の合計', style: tokens.sectionLabel),
               const SizedBox(height: 10),
               if (_photosByLog == null)
                 Text('集計中…',
@@ -572,7 +572,7 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
   /// 合計の下に出す補足行。値が無い項目は出さない
   /// (食事種別は未設定のまま使われることが多く、「外食0回」を常に出しても
   /// 意味が無いため)。
-  String _summaryFooter(MonthlySummary s, NumberFormat fmt) {
+  String _summaryFooter(PeriodSummary s, NumberFormat fmt) {
     final parts = <String>['記録 ${s.recordedDays}日・${s.logCount}回'];
     if (s.eatingOutCount > 0) parts.add('外食 ${s.eatingOutCount}回');
     if (s.dailyAverageCalories != null) {

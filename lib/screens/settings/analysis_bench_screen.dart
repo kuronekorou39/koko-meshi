@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 
 import '../../models/meal_photo.dart';
 import '../../services/analysis_bench.dart';
@@ -67,7 +67,7 @@ class _AnalysisBenchScreenState extends State<AnalysisBenchScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('解析ベンチ')),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        padding: EdgeInsets.fromLTRB(16, 8, 16, 24 + context.systemBottomInset),
         children: [
           Card(
             child: Padding(

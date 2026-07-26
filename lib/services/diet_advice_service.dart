@@ -1,6 +1,4 @@
-import 'dart:io';
-
-import 'package:intl/intl.dart';
+﻿import 'package:intl/intl.dart';
 
 import '../database/local_database.dart';
 import '../models/diet_advice.dart';
@@ -9,7 +7,6 @@ import '../models/meal_photo.dart';
 import 'ai_analysis_service.dart';
 import 'gemma_ondevice_service.dart';
 import 'meal_stats.dart';
-import 'photo_cache_service.dart';
 
 /// 食事のアドバイス生成(端末内AI)。
 ///
@@ -103,20 +100,6 @@ $_dataClose
 全体で300文字以内。前置きや繰り返しは不要です。''';
   }
 
-  /// 写真1枚へのコメントのプロンプト。
-  static String buildPhotoPrompt(MealPhoto photo) {
-    final name = photo.displayName;
-    final known = name == null ? '' : 'この料理は「${sanitizeText(name)}」です。';
-    return '''あなたは食事に詳しい栄養士です。この写真の食事に一言コメントします。
-$known
-写真を見て、日本語で次を書いてください。
-1. 良い点を1つ
-2. 気をつけたい点を1つ
-3. 次に食べるならこう補うとよい、という提案を1つ
-
-全体で120文字以内。箇条書きで簡潔に。前置きは不要です。''';
-  }
-
   /// 期間のアドバイスを生成して保存する。
   static Future<DietAdvice> generateForPeriod({
     required AdvicePeriod period,
@@ -149,29 +132,6 @@ $known
     );
     await LocalDatabase.saveDietAdvice(advice);
     return advice;
-  }
-
-  /// 写真1枚へのコメントを生成して保存する。
-  static Future<String> generateForPhoto(MealPhoto photo) async {
-    final path = await PhotoCacheService.getOriginalPath(
-      localPath: photo.localPath,
-      originalUrl: photo.originalUrl,
-    );
-    if (path == null) {
-      throw StateError('写真ファイルが見つかりません');
-    }
-    final bytes = await File(path).readAsBytes();
-    final raw = await _withModel(
-      (svc) => svc.generateWithImage(bytes, buildPhotoPrompt(photo)),
-    );
-    final body = _cleanup(raw);
-
-    // 解析中に他の列が変わっている可能性があるので、最新を読んで重ねる
-    final current = await LocalDatabase.getMealPhoto(photo.id);
-    if (current != null) {
-      await LocalDatabase.updateMealPhoto(current.copyWith(aiAdvice: body));
-    }
-    return body;
   }
 
   /// モデルのロードと解放をまとめる。バッチ解析のアイドル解放タイマーに
