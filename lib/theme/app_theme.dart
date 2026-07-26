@@ -61,7 +61,9 @@ class AppTheme {
   static const _karashiNightTint = Color(0xFF6B5310);
   static const _errorNight = Color(0xFFE29181);
 
-  static ThemeData get light => _build(
+  /// [fontFamily] が null なら端末既定のフォントを使う(同梱フォントなし)
+  static ThemeData light(String? fontFamily) => _build(
+        fontFamily: fontFamily,
         brightness: Brightness.light,
         scheme: const ColorScheme.light(
           primary: _lacquer,
@@ -107,7 +109,8 @@ class AppTheme {
         ),
       );
 
-  static ThemeData get dark => _build(
+  static ThemeData dark(String? fontFamily) => _build(
+        fontFamily: fontFamily,
         brightness: Brightness.dark,
         scheme: const ColorScheme.dark(
           primary: _lacquerNight,
@@ -154,6 +157,7 @@ class AppTheme {
       );
 
   static ThemeData _build({
+    required String? fontFamily,
     required Brightness brightness,
     required ColorScheme scheme,
     required Color scaffold,
@@ -161,6 +165,11 @@ class AppTheme {
   }) {
     final ink = scheme.onSurface;
     final muted = tokens.textMuted;
+
+    // コンポーネント個別のTextStyleは textTheme を経由せず、そのまま
+    // DefaultTextStyle として使われる。同梱フォントを効かせるには明示指定が要る
+    // (fontFamily が null なら copyWith は何もしない = 端末既定のまま)
+    TextStyle f(TextStyle s) => s.copyWith(fontFamily: fontFamily);
 
     final textTheme = Typography.material2021(platform: TargetPlatform.android)
         .black
@@ -190,13 +199,17 @@ class AppTheme {
               fontWeight: FontWeight.w600,
               letterSpacing: 1.1,
               color: muted),
-        );
+        )
+        // copyWith で差し替えたスタイルにも効かせるため最後にまとめて適用する
+        // (TextStyle.apply は null を「変更なし」として扱う)
+        .apply(fontFamily: fontFamily);
 
     return ThemeData(
       useMaterial3: true,
       brightness: brightness,
       colorScheme: scheme,
       scaffoldBackgroundColor: scaffold,
+      fontFamily: fontFamily,
       textTheme: textTheme,
       splashFactory: InkSparkle.splashFactory,
       pageTransitionsTheme: const PageTransitionsTheme(builders: {
@@ -209,12 +222,12 @@ class AppTheme {
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: false,
-        titleTextStyle: TextStyle(
+        titleTextStyle: f(TextStyle(
           fontSize: 20,
           fontWeight: FontWeight.w700,
           letterSpacing: -0.2,
           color: ink,
-        ),
+        )),
         iconTheme: IconThemeData(color: ink),
         actionsIconTheme: IconThemeData(color: muted),
       ),
@@ -242,11 +255,11 @@ class AppTheme {
           ),
         ),
         labelTextStyle: WidgetStateProperty.resolveWith(
-          (states) => TextStyle(
+          (states) => f(TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w600,
             color: states.contains(WidgetState.selected) ? ink : muted,
-          ),
+          )),
         ),
       ),
       filledButtonTheme: FilledButtonThemeData(
@@ -254,7 +267,7 @@ class AppTheme {
           minimumSize: const Size(64, 48),
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+          textStyle: f(const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
@@ -264,13 +277,13 @@ class AppTheme {
           side: BorderSide(color: scheme.outline, width: 1),
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+          textStyle: f(const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
         ),
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
           foregroundColor: scheme.primary,
-          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+          textStyle: f(const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
@@ -296,15 +309,15 @@ class AppTheme {
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(color: scheme.error, width: 1.4),
         ),
-        hintStyle: TextStyle(color: tokens.textFaint, fontSize: 14),
-        labelStyle: TextStyle(color: muted, fontSize: 14),
+        hintStyle: f(TextStyle(color: tokens.textFaint, fontSize: 14)),
+        labelStyle: f(TextStyle(color: muted, fontSize: 14)),
       ),
       chipTheme: ChipThemeData(
         backgroundColor: scheme.surfaceContainerHigh,
         selectedColor: scheme.primaryContainer,
         side: BorderSide(color: tokens.hairline, width: 0.8),
-        labelStyle: TextStyle(
-            fontSize: 12.5, fontWeight: FontWeight.w600, color: ink),
+        labelStyle: f(TextStyle(
+            fontSize: 12.5, fontWeight: FontWeight.w600, color: ink)),
         shape: const StadiumBorder(),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       ),
@@ -312,10 +325,10 @@ class AppTheme {
         backgroundColor: scheme.surface,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        titleTextStyle: TextStyle(
-            fontSize: 17, fontWeight: FontWeight.w700, color: ink),
+        titleTextStyle: f(TextStyle(
+            fontSize: 17, fontWeight: FontWeight.w700, color: ink)),
         contentTextStyle:
-            TextStyle(fontSize: 14, height: 1.5, color: ink),
+            f(TextStyle(fontSize: 14, height: 1.5, color: ink)),
       ),
       bottomSheetTheme: BottomSheetThemeData(
         backgroundColor: scaffold,
@@ -329,7 +342,7 @@ class AppTheme {
       snackBarTheme: SnackBarThemeData(
         backgroundColor: scheme.inverseSurface,
         contentTextStyle:
-            TextStyle(fontSize: 14, color: scheme.onInverseSurface),
+            f(TextStyle(fontSize: 14, color: scheme.onInverseSurface)),
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
@@ -340,15 +353,15 @@ class AppTheme {
       ),
       listTileTheme: ListTileThemeData(
         iconColor: muted,
-        titleTextStyle: TextStyle(fontSize: 15, color: ink),
-        subtitleTextStyle: TextStyle(fontSize: 12.5, color: muted),
+        titleTextStyle: f(TextStyle(fontSize: 15, color: ink)),
+        subtitleTextStyle: f(TextStyle(fontSize: 12.5, color: muted)),
       ),
       segmentedButtonTheme: SegmentedButtonThemeData(
         style: SegmentedButton.styleFrom(
           side: BorderSide(color: tokens.hairline, width: 1),
           selectedBackgroundColor: scheme.primaryContainer,
           selectedForegroundColor: scheme.onPrimaryContainer,
-          textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          textStyle: f(const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
         ),
       ),
       floatingActionButtonTheme: FloatingActionButtonThemeData(

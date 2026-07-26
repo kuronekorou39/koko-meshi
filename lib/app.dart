@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
+import 'providers/app_settings_providers.dart';
 import 'screens/home/home_screen.dart';
 import 'screens/capture/capture_screen.dart';
 import 'screens/detail/meal_detail_screen.dart';
@@ -47,15 +49,16 @@ final _router = GoRouter(
   ],
 );
 
-class KokoMeshiApp extends StatelessWidget {
+class KokoMeshiApp extends ConsumerWidget {
   const KokoMeshiApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final fontFamily = ref.watch(appFontProvider).family;
     return MaterialApp.router(
       title: 'ココメシ',
-      theme: AppTheme.light,
-      darkTheme: AppTheme.dark,
+      theme: AppTheme.light(fontFamily),
+      darkTheme: AppTheme.dark(fontFamily),
       routerConfig: _router,
       debugShowCheckedModeBanner: false,
     );

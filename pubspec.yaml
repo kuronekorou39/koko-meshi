@@ -96,6 +96,21 @@ flutter:
     - .env
     - assets/
     - assets/poc_test/
+    # フォント本体は fonts: 側で取り込まれる。ライセンス本文だけアセットにして
+    # showLicensePage に出す(lib/main.dart の _registerFontLicenses)
+    - assets/fonts/BIZUDGothic/OFL.txt
+
+  # 本文フォント。日本語はサブセット化されないので1ウェイト約4.5MBかかる。
+  # 数字の字幅が均一で価格・カロリーの桁が揃う等幅のUDゴシックを採用
+  # (プロポーショナルの BIZ UDPGothic は字幅が不揃いで不可)。
+  # 取得は `python tool/fetch_fonts.py`
+  fonts:
+    - family: BIZUDGothic
+      fonts:
+        - asset: assets/fonts/BIZUDGothic/BIZUDGothic-400.ttf
+          weight: 400
+        - asset: assets/fonts/BIZUDGothic/BIZUDGothic-700.ttf
+          weight: 700
 
 # アプリアイコン生成: `dart run flutter_launcher_icons` で mipmap 一式を作り直す。
 # 素材は assets/icon/(assets/ は再帰的に取り込まれないのでAPKには入らない)。

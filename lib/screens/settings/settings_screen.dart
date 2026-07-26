@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
@@ -7,6 +8,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../database/local_database.dart';
 import '../../models/saved_place.dart';
+import '../../providers/app_settings_providers.dart';
 import '../../providers/meal_providers.dart';
 import '../../services/app_settings_service.dart';
 import '../../services/backup_service.dart';
@@ -14,6 +16,8 @@ import '../../services/cloud_photo_rescue.dart';
 import '../../services/gemma_download_manager.dart';
 import '../../services/gemma_ondevice_service.dart';
 import '../../theme/app_theme.dart';
+import 'analysis_bench_screen.dart';
+import 'font_settings_screen.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -348,6 +352,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           _sectionLabel('AI自動解析'),
           _buildAiSection(),
 
+          _sectionLabel('表示'),
+          _sectionCard([
+            ListTile(
+              leading: const Icon(Icons.text_fields_outlined),
+              title: const Text('フォント'),
+              subtitle: Text(ref.watch(appFontProvider).label),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const FontSettingsScreen()),
+              ),
+            ),
+          ]),
+
           _sectionLabel('バックアップ'),
           _sectionCard([
             ListTile(
@@ -374,6 +391,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 onTap: _rescueCloudPhotos,
               ),
           ]),
+
+          // 開発ビルドのみ。プロンプト調整の効果を測るための計測画面
+          if (kDebugMode) ...[
+            _sectionLabel('開発者'),
+            _sectionCard([
+              ListTile(
+                leading: const Icon(Icons.speed_outlined),
+                title: const Text('解析ベンチ'),
+                subtitle: const Text('修正済みの記録を正解としてAIの精度を測る'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                      builder: (_) => const AnalysisBenchScreen()),
+                ),
+              ),
+            ]),
+          ],
 
           _sectionLabel('保存した場所'),
           _sectionCard(
@@ -462,6 +496,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       if (_aiEnabled) _buildModelStatusTile(),
     ]);
   }
+
 
   /// モデルのDL状態に応じた案内タイル。進捗はGemmaDownloadManagerが保持する
   /// ので、DL中に画面を離れて戻っても復元される。
