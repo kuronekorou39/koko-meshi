@@ -59,5 +59,42 @@ void main() {
         '（おそらくカレー）',
       );
     });
+
+    // 以下は実際の記録に残っていた出力。括弧の内側に併記があるため、
+    // 「または」で先に切ると括弧が開いたまま残っていた
+    group('括弧の内側の併記', () {
+      test('全角括弧の中の「または」ごと落とす', () {
+        expect(
+          AiAnalysisService.sanitizeMenuName('鶏肉とネギの和風パスタ（または麺料理）'),
+          '鶏肉とネギの和風パスタ',
+        );
+      });
+
+      test('半角括弧・前置き空白ありでも落とす', () {
+        expect(
+          AiAnalysisService.sanitizeMenuName('豚肉蒸し (またはそれに類する肉料理)'),
+          '豚肉蒸し',
+        );
+      });
+
+      test('括弧の外と中の両方に併記があっても先頭の1つに断定する', () {
+        expect(
+          AiAnalysisService.sanitizeMenuName(
+              '和牛のカルパッチョまたはローストビーフのサラダ（または和牛の冷製料理）'),
+          '和牛のカルパッチョ',
+        );
+      });
+
+      test('推測と併記が入れ子でも落とす', () {
+        expect(
+          AiAnalysisService.sanitizeMenuName('琥珀色の飲み物（おそらくカクテルまたはレモンサワーなど）'),
+          '琥珀色の飲み物',
+        );
+      });
+    });
+
+    test('閉じられていない括弧以降を落とす', () {
+      expect(AiAnalysisService.sanitizeMenuName('味噌ラーメン（大盛'), '味噌ラーメン');
+    });
   });
 }

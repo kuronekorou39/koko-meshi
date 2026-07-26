@@ -106,14 +106,20 @@ class _PhotoInfoEditSheetState extends State<_PhotoInfoEditSheet> {
                 style: TextStyle(fontSize: 12, color: tokens.textMuted),
               ),
               const SizedBox(height: 20),
+              // AIのタイトルは長くなりがちなので折り返して見せる。
+              // 1行だと横スクロールになって全体を読めない
               TextField(
                 controller: _name,
                 autofocus: true,
-                textInputAction: TextInputAction.next,
+                minLines: 2,
+                maxLines: 4,
+                keyboardType: TextInputType.multiline,
                 textCapitalization: TextCapitalization.sentences,
                 decoration: const InputDecoration(
                   labelText: 'メニュー名',
                   hintText: '例: 味噌ラーメン',
+                  // 複数行のときラベルを上端に合わせる(既定は上下中央)
+                  alignLabelWithHint: true,
                 ),
               ),
               const SizedBox(height: 14),

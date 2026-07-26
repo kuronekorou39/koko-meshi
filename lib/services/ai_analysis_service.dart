@@ -44,34 +44,47 @@ class AiAnalysisService {
   /// AIが返したメニュー名を「1つの料理名への断定」に整形する純関数。
   /// プロンプト側でも断定を指示しているが、小型モデルは併記・推測表現を
   /// 混ぜることがあるため、保険としてDB保存前にここで刈り取る。
-  /// (a)「または」「もしくは」以降を除去 (b)推測表現を含む括弧を丸ごと除去
-  /// (c)前後の空白と末尾の読点を除去 (d)空になったら元の文字列を返す。
+  ///
+  /// 括弧の除去を先に行うのが重要。「パスタ（または麺料理）」のように括弧の
+  /// **内側**に併記がある場合、先に「または」で切ると「パスタ（」と括弧が
+  /// 開いたまま残ってしまう。
+  ///
+  /// (a)併記・推測を含む括弧を丸ごと除去 (b)残った「または」以降を除去
+  /// (c)閉じられていない括弧を落とす (d)前後の空白と末尾の読点を除去
+  /// (e)空になったら元の文字列を返す。
   static String sanitizeMenuName(String raw) {
     var s = raw;
 
-    // (a) 併記の除去: 「または」「もしくは」以降を切り落とす
-    for (final sep in const ['または', 'もしくは']) {
-      final idx = s.indexOf(sep);
-      if (idx >= 0) s = s.substring(0, idx);
-    }
-
-    // (b) 推測表現を含む括弧(全角/半角)を丸ごと除去。断定的な補足
-    //     (「(大盛り)」等)は残したいので、括弧内が推測語を含む場合のみ削る
-    const guessMarkers = [
+    // (a) 推測・併記を含む括弧(全角/半角)を丸ごと除去。断定的な補足
+    //     (「(大盛り)」等)は残したいので、括弧内が該当語を含む場合のみ削る
+    const hedgeMarkers = [
       'おそらく', '恐らく', 'たぶん', '多分', 'かも', '思われ', '推定', '思う',
+      'または', 'もしくは', '類する', 'のような',
     ];
     s = s.replaceAllMapped(
       RegExp(r'[（(]([^（()）]*)[)）]'),
       (m) {
         final inner = m.group(1) ?? '';
-        return guessMarkers.any(inner.contains) ? '' : m.group(0)!;
+        return hedgeMarkers.any(inner.contains) ? '' : m.group(0)!;
       },
     );
 
-    // (c) 前後の空白を除去し、末尾に残った読点(、。)を落とす
+    // (b) 括弧の外に残った併記を切り落とす
+    for (final sep in const ['または', 'もしくは']) {
+      final idx = s.indexOf(sep);
+      if (idx >= 0) s = s.substring(0, idx);
+    }
+
+    // (c) 対応する閉じ括弧が無い開き括弧以降を落とす(保険)
+    final open = s.lastIndexOf(RegExp(r'[（(]'));
+    if (open >= 0 && !RegExp(r'[)）]').hasMatch(s.substring(open))) {
+      s = s.substring(0, open);
+    }
+
+    // (d) 前後の空白を除去し、末尾に残った読点(、。)を落とす
     s = s.trim().replaceAll(RegExp(r'[、。]+$'), '').trim();
 
-    // (d) 整形の結果すべて消えてしまったら、元の文字列(前後空白のみ除去)を使う
+    // (e) 整形の結果すべて消えてしまったら、元の文字列(前後空白のみ除去)を使う
     return s.isEmpty ? raw.trim() : s;
   }
 
@@ -219,7 +232,7 @@ class AiAnalysisService {
         return;
       }
       final bytes = await File(path).readAsBytes();
-      final context = await _buildOnDeviceContext(photo, savedPlaces);
+      final context = await buildOnDeviceContext(photo, savedPlaces);
       final res = await svc.analyze(bytes, context: context);
 
       // センシティブ画像: 判定はモデル、タイトルもモデルに写真を踏まえて
@@ -311,10 +324,13 @@ class AiAnalysisService {
     resultsVersion.value++;
   }
 
+  /// バッチ解析中か。解析ベンチが同じモデルを取り合わないための確認用。
+  static bool get isBusy => _batchRunning;
+
   /// オンデバイス解析用の撮影状況コンテキストを組み立てる。
   /// 生のGPS座標は端末内モデルには解釈できない(かつ誤ったコンテキストは
   /// 逆効果になる)ため入れず、確度の高い情報だけを渡す。
-  static Future<String> _buildOnDeviceContext(
+  static Future<String> buildOnDeviceContext(
     MealPhoto photo,
     List<SavedPlace> savedPlaces,
   ) async {
@@ -339,10 +355,19 @@ class AiAnalysisService {
 
     final buf = StringBuffer();
     // ユーザーが再解析時に入力したキーワードは最優先の手がかり。撮影状況より
-    // 上に置き、料理特定の指針として明示する
-    final hint = photo.aiHint?.trim() ?? '';
-    if (hint.isNotEmpty) {
-      buf.writeln('ユーザーからのヒント: $hint（この料理を特定する最優先の手がかりとして扱うこと）');
+    // 上に置き、料理特定の指針として明示する。
+    // 複数行で入力されうるので箇条書きに開く(1行に連結すると末尾の指示句が
+    // 2行目以降と切り離されて意味が通らなくなる)
+    final hintLines = (photo.aiHint ?? '')
+        .split('\n')
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty)
+        .toList();
+    if (hintLines.isNotEmpty) {
+      buf.writeln('ユーザーからのヒント（この料理を特定する最優先の手がかりとして扱うこと）:');
+      for (final line in hintLines) {
+        buf.writeln('- $line');
+      }
     }
     buf.write('撮影状況:\n${lines.join('\n')}');
     return buf.toString();

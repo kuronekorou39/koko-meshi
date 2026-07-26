@@ -27,6 +27,7 @@ import '../editor/photo_edit_core.dart';
 import '../editor/photo_editor_screen.dart';
 import 'photo_info_edit_sheet.dart';
 import 'photo_viewer_screen.dart';
+import 'reanalyze_dialog.dart';
 
 class MealDetailScreen extends ConsumerStatefulWidget {
   final String mealLogId;
@@ -819,71 +820,18 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
     }
   }
 
-  /// 解析済み写真をキーワード付きで再解析するダイアログ。
+  /// 解析済み写真をキーワード付きで再解析する。
   /// キーワードは料理特定のヒントとしてプロンプトに注入され、再解析すると
   /// 手動修正値はクリアされる(AI結果で上書きし直すため)。
   Future<void> _showReanalyzeDialog(MealPhoto photo) async {
-    final tokens = KokoTokens.of(context);
-    final hintCtrl = TextEditingController(text: photo.aiHint ?? '');
-    final hasCorrections = photo.userCorrectedName != null ||
-        photo.userCorrectedPrice != null ||
-        photo.userCorrectedCalories != null;
-
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('AIで再解析'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'この写真をもう一度AIで解析します。うまく認識されないときは、'
-              '料理のキーワードを入力すると特定の手がかりになります。',
-              style: TextStyle(fontSize: 13.5),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: hintCtrl,
-              decoration: const InputDecoration(
-                labelText: 'キーワード（任意）',
-                hintText: '例: ラーメン、カレー',
-              ),
-            ),
-            if (hasCorrections)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Text(
-                  '手動修正した内容は消えます',
-                  style: TextStyle(fontSize: 12, color: tokens.textFaint),
-                ),
-              ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('キャンセル'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('再解析'),
-          ),
-        ],
-      ),
+    final request = await showReanalyzeDialog(context, photo);
+    if (request == null) return;
+    await _retryForPhoto(
+      photo,
+      aiHint: request.hint,
+      clearHint: request.hint == null,
+      clearUserCorrections: true,
     );
-
-    if (result == true) {
-      final hint = hintCtrl.text.trim();
-      await _retryForPhoto(
-        photo,
-        aiHint: hint.isEmpty ? null : hint,
-        clearHint: hint.isEmpty,
-        clearUserCorrections: true,
-      );
-    }
-
-    hintCtrl.dispose();
   }
 
   /// ローカルにある編集元のファイルパス（常に真のオリジナルを優先）
