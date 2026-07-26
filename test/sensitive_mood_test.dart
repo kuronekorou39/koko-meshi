@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:koko_meshi/models/sensitive_mood.dart';
 
@@ -35,11 +37,17 @@ void main() {
       }
     });
 
-    test('同じ写真IDなら毎回同じ雰囲気になる', () {
-      const id = '0012ecf5-c519-40f6-a1d0-faa6c682311e';
-      final first = SensitiveMood.forPhotoId(id);
-      for (var i = 0; i < 20; i++) {
-        expect(SensitiveMood.forPhotoId(id), first);
+    test('引き直すと比率どおりにばらける(再解析で口調が変わる)', () {
+      // 固定シードで再現性を持たせつつ、偏りすぎていないことだけ確かめる
+      final rng = Random(1234);
+      final counts = <SensitiveMood, int>{};
+      for (var i = 0; i < 10000; i++) {
+        final mood = SensitiveMood.random(rng);
+        counts[mood] = (counts[mood] ?? 0) + 1;
+      }
+      for (final mood in SensitiveMood.values) {
+        final ratio = (counts[mood] ?? 0) / 10000 * 100;
+        expect(ratio, closeTo(mood.weight, 2), reason: mood.label);
       }
     });
 

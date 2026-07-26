@@ -1,3 +1,5 @@
+import 'dart:math';
+
 /// センシティブ写真に付けるタイトルの「雰囲気」。
 ///
 /// タイトルの文言そのものはモデルが写真を踏まえて生成する(モデルの結果を尊重)。
@@ -68,8 +70,10 @@ enum SensitiveMood {
     return values.last;
   }
 
-  /// 写真ごとに決定的に1つ選ぶ。同じ写真なら毎回同じ雰囲気になる
-  /// (再解析するたびに口調が変わると落ち着かないため)。
-  static SensitiveMood forPhotoId(String photoId) =>
-      forRoll(photoId.hashCode.abs() % totalWeight);
+  /// 比率に従って1つ引く。解析のたびに引き直すので、同じ写真を再解析すると
+  /// 別の口調になることがある(それを狙っている)。
+  static SensitiveMood random([Random? rng]) =>
+      forRoll((rng ?? _rng).nextInt(totalWeight));
+
+  static final Random _rng = Random();
 }

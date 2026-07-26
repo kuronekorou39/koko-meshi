@@ -10,6 +10,7 @@ import '../../models/meal_photo.dart';
 import '../../providers/meal_providers.dart';
 import '../../theme/app_theme.dart';
 import '../../services/ai_analysis_service.dart';
+import '../../services/meal_stats.dart';
 import '../../services/photo_service.dart';
 import '../../widgets/meal_card.dart';
 import '../../widgets/meal_grid_tile.dart';
@@ -30,6 +31,15 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
   // カレンダー用
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay = DateTime.now();
+
+  /// 集計用の写真(記録ID→写真)。カロリーと金額は写真側にしか無いので、
+  /// カレンダー表示に切り替えたときにまとめて読む。
+  Map<String, List<MealPhoto>>? _photosByLog;
+
+  Future<void> _loadPhotosForStats() async {
+    final photos = await LocalDatabase.getAllMealPhotos();
+    if (mounted) setState(() => _photosByLog = MealStats.groupPhotos(photos));
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -104,6 +114,9 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
     setState(() {
       _viewMode = ViewMode.values[(_viewMode.index + 1) % ViewMode.values.length];
     });
+    // カレンダーの集計は写真が要る。切り替えるたびに読み直して、
+    // 直前の解析結果も反映されるようにする
+    if (_viewMode == ViewMode.calendar) _loadPhotosForStats();
   }
 
   // ─── リスト表示（日付でグルーピング） ───
@@ -192,8 +205,15 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
         ? (grouped[DateTime(_selectedDay!.year, _selectedDay!.month, _selectedDay!.day)] ?? [])
         : <MealLog>[];
 
+    final summary = MealStats.forMonth(
+      _focusedDay,
+      mealLogs,
+      _photosByLog ?? const {},
+    );
+
     return Column(
       children: [
+        _buildMonthlySummary(summary),
         TableCalendar<MealLog>(
           locale: 'ja_JP',
           firstDay: DateTime(2020),
@@ -211,8 +231,27 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
             });
           },
           onPageChanged: (focused) {
-            _focusedDay = focused;
+            // 上の月合計を切り替えるので setState が要る
+            setState(() => _focusedDay = focused);
           },
+          // 既定の点マーカーの代わりに、その日のカロリーを出す
+          calendarBuilders: CalendarBuilders<MealLog>(
+            markerBuilder: (context, day, events) {
+              final kcal =
+                  summary.caloriesByDay[DateTime(day.year, day.month, day.day)];
+              if (kcal == null || kcal == 0) return null;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 1),
+                child: Text(
+                  NumberFormat('#,###').format(kcal),
+                  style: KokoTokens.of(context).numeral.copyWith(
+                        fontSize: 9,
+                        color: KokoTokens.of(context).textFaint,
+                      ),
+                ),
+              );
+            },
+          ),
           // table_calendarの既定文字色はテーマ非連動(ライトで白文字等)なので
           // 明示的にトークンから指定する
           calendarStyle: CalendarStyle(
@@ -301,6 +340,93 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
                   },
                 ),
         ),
+      ],
+    );
+  }
+
+  /// 表示中の月の合計。カロリーと金額は写真側の推定を積んだもので、
+  /// 記録側に手入力の合計があればそちらが優先される。
+  Widget _buildMonthlySummary(MonthlySummary s) {
+    final tokens = KokoTokens.of(context);
+    final fmt = NumberFormat('#,###');
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('${s.month.month}月の合計', style: tokens.sectionLabel),
+              const SizedBox(height: 10),
+              if (_photosByLog == null)
+                Text('集計中…',
+                    style: TextStyle(fontSize: 13, color: tokens.textFaint))
+              else if (s.isEmpty)
+                Text('この月の記録はありません',
+                    style: TextStyle(fontSize: 13, color: tokens.textFaint))
+              else ...[
+                IntrinsicHeight(
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: _summaryCell(
+                            'カロリー', '${fmt.format(s.totalCalories)} kcal'),
+                      ),
+                      VerticalDivider(
+                          width: 28, thickness: 0.8, color: tokens.hairline),
+                      Expanded(
+                        child: _summaryCell(
+                            '金額', '¥${fmt.format(s.totalPrice)}'),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  _summaryFooter(s, fmt),
+                  style: TextStyle(fontSize: 11.5, color: tokens.textMuted),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 合計の下に出す補足行。値が無い項目は出さない
+  /// (食事種別は未設定のまま使われることが多く、「外食0回」を常に出しても
+  /// 意味が無いため)。
+  String _summaryFooter(MonthlySummary s, NumberFormat fmt) {
+    final parts = <String>['記録 ${s.recordedDays}日・${s.logCount}回'];
+    if (s.eatingOutCount > 0) parts.add('外食 ${s.eatingOutCount}回');
+    if (s.dailyAverageCalories != null) {
+      parts.add('1日平均 ${fmt.format(s.dailyAverageCalories)}kcal');
+    }
+    if (s.totalPrice > 0 && s.logCount > 0) {
+      parts.add('1食平均 ¥${fmt.format((s.totalPrice / s.logCount).round())}');
+    }
+    return parts.join('　');
+  }
+
+  Widget _summaryCell(String label, String value) {
+    final tokens = KokoTokens.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.8,
+            color: tokens.textFaint,
+          ),
+        ),
+        const SizedBox(height: 3),
+        Text(value, style: tokens.numeral.copyWith(fontSize: 18)),
       ],
     );
   }

@@ -209,7 +209,7 @@ class AiAnalysisService {
       // 同じ扱いにする(拒否応答自体を判定シグナルとして使う)
       if (res.imageType == 'sensitive' ||
           (res.parsed == null && _looksLikeSafetyRefusal(res.rawText))) {
-        final mood = SensitiveMood.forPhotoId(photo.id);
+        final mood = SensitiveMood.random();
         final title = await _generateSensitiveTitle(svc, mood);
         await _writeAiResult(
           photo.id,
@@ -291,6 +291,15 @@ class AiAnalysisService {
     resultsVersion.value++;
   }
 
+  /// 再解析キーワードの文字数上限。
+  ///
+  /// キーワードはエスケープせずプロンプトの先頭へ入れている。端末内で完結し
+  /// 外部送信もツール実行も無いため乗っ取られても実害は無いが、長文を入れると
+  /// コンテキスト窓(画像だけで1120トークン使う)から後続の指示が押し出されて
+  /// 解析が失敗する。入力欄でも制限するが、バックアップ復元など画面を通らない
+  /// 経路があるのでここでも切り詰める。
+  static const int maxHintLength = 100;
+
   /// バッチ解析中か。解析ベンチが同じモデルを取り合わないための確認用。
   static bool get isBusy => _batchRunning;
 
@@ -342,7 +351,10 @@ class AiAnalysisService {
     // 上に置き、料理特定の指針として明示する。
     // 複数行で入力されうるので箇条書きに開く(1行に連結すると末尾の指示句が
     // 2行目以降と切り離されて意味が通らなくなる)
-    final hintLines = (photo.aiHint ?? '')
+    final rawHint = photo.aiHint ?? '';
+    final hintLines = (rawHint.length > maxHintLength
+            ? rawHint.substring(0, maxHintLength)
+            : rawHint)
         .split('\n')
         .map((l) => l.trim())
         .where((l) => l.isNotEmpty)
@@ -380,6 +392,8 @@ class AiAnalysisService {
           'この写真に、食事ログアプリ用のふざけたタイトルを付け直します。'
           '写真に写っているものを踏まえつつ、${mood.instruction}で、'
           '短いタイトルを1つだけ考えてください。'
+          '「秘密」「神秘」「誘惑」「戯れ」のような、ぼかして格好つけた言葉は'
+          '使わないでください。写っているものをそのまま指してください。'
           'JSONや説明文は不要です。タイトルの文字列だけを25文字以内で返してください。');
       final title = _cleanupGeneratedTitle(raw);
       if (title != null && !_looksLikeTitleRefusal(title)) {

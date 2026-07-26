@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../models/meal_photo.dart';
+import '../../services/ai_analysis_service.dart';
 import '../../theme/app_theme.dart';
 
 /// 再解析の指示。[hint] が null ならキーワードなしで再解析する。
@@ -84,6 +85,9 @@ class _ReanalyzeDialogState extends State<_ReanalyzeDialog> {
             minLines: 2,
             maxLines: 4,
             keyboardType: TextInputType.multiline,
+            // 長文を入れるとコンテキスト窓から本来の指示が押し出されて
+            // 解析が失敗する
+            maxLength: AiAnalysisService.maxHintLength,
             decoration: const InputDecoration(
               labelText: 'キーワード（任意）',
               hintText: '例: ラーメン、豚骨',

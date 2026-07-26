@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
@@ -134,11 +135,17 @@ image_typeは次の3つから1つ選んでください:
 - 撮影状況（食事種別・場所・時間帯）が与えられている場合は、判断の参考にしてください
 - image_typeが"food"でない場合は【1】を省き、JSONだけを返してください。写っているものを短く描写してmenu_nameに入れ、estimated_priceとestimated_caloriesは0、cuisine_genreは「写真」としてください（例: menu_name「夕焼けの海」）''';
 
+  /// サンプリング設定。topKを1(貪欲法)から広げないと、何度やり直しても
+  /// まったく同じ文言しか出ない。構造化出力(JSON)が壊れない範囲で振れ幅を持たせる。
+  static const double _temperature = 0.9;
+  static const int _topK = 40;
+
+  final _random = Random();
+
   bool _initialized = false;
   InferenceModel? _model;
   InferenceChat? _chat;
   GemmaModelKind? _loadedKind;
-  bool _firstQuery = true;
 
   GemmaModelKind? get loadedKind => _loadedKind;
 
@@ -183,12 +190,25 @@ image_typeは次の3つから1つ選んでください:
       supportImage: true,
       maxNumImages: 1,
     );
-    _chat = await _model!.createChat(supportImage: true);
+    _chat = await _newChat();
     _loadedKind = kind;
-    _firstQuery = true;
     sw.stop();
     return sw.elapsedMilliseconds;
   }
+
+  /// 毎回シードを変えたチャットを作る。
+  ///
+  /// flutter_gemma の既定は `topK: 1`(貪欲法) かつ `randomSeed: 1`(固定)で、
+  /// 同じ写真を何度解析しても完全に同じ文言しか返ってこない。
+  /// 候補を広げたうえで実行ごとにシードを振り直し、再解析すれば表現が変わる
+  /// ようにする。数値(価格・カロリー)も揺れるが、そもそも唯一の正解がある
+  /// 値ではなく、大きく外れていなければよいという整理。
+  Future<InferenceChat> _newChat() => _model!.createChat(
+        supportImage: true,
+        temperature: _temperature,
+        topK: _topK,
+        randomSeed: _random.nextInt(1 << 31),
+      );
 
   /// 画像1枚を解析。生テキスト・パース結果・推論msを返す。
   /// [context] に撮影状況(食事種別・場所・時間帯など)を渡すとプロンプトに
@@ -197,14 +217,14 @@ image_typeは次の3つから1つ選んでください:
     Uint8List originalBytes, {
     String? context,
   }) async {
-    if (_chat == null) {
+    if (_model == null) {
       throw StateError('モデルが未ロードです');
     }
-    final chat = _chat!;
-    if (!_firstQuery) {
-      await chat.clearHistory();
-    }
-    _firstQuery = false;
+    // 履歴のクリアではなくチャットごと作り直す。clearHistory はセッションを
+    // 同じパラメータで作り直すためシードが変わらず、再解析しても出力が
+    // 一字一句同じになってしまう
+    await _chat?.close();
+    final chat = _chat = await _newChat();
 
     final resized = await compute(_resizeJpeg, originalBytes);
 
