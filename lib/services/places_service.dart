@@ -77,7 +77,7 @@ class PlacesService {
 
   /// 写真URLを生成
   static String _buildPhotoUrl(String photoName) {
-    final apiKey = Env.googleMapsApiKey;
+    final apiKey = Env.googlePlacesApiKey;
     return 'https://places.googleapis.com/v1/$photoName/media?maxWidthPx=200&key=$apiKey';
   }
 
@@ -88,7 +88,7 @@ class PlacesService {
     required Map<String, dynamic> body,
     required PlaceInfo Function(Map<String, dynamic>) parse,
   }) async {
-    final apiKey = Env.googleMapsApiKey;
+    final apiKey = Env.googlePlacesApiKey;
     if (apiKey.isEmpty) {
       return const PlacesResult.failure(PlacesError.notConfigured);
     }
