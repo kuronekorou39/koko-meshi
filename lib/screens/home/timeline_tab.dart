@@ -65,10 +65,14 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
   void initState() {
     super.initState();
     _checkUpdate();
+    // カレンダーを開いたまま解析が終わったときに、日付セルの合計が
+    // 古いままにならないようにする(カード側は各アイテムが購読している)
+    AiAnalysisService.resultsVersion.addListener(_loadPhotosForStats);
   }
 
   @override
   void dispose() {
+    AiAnalysisService.resultsVersion.removeListener(_loadPhotosForStats);
     _listController.dispose();
     _gridController.dispose();
     super.dispose();
@@ -88,7 +92,9 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
     });
   }
 
+  /// 全写真を読むので、集計を使うカレンダー表示のときだけ走らせる
   Future<void> _loadPhotosForStats() async {
+    if (_viewMode != ViewMode.calendar) return;
     final photos = await LocalDatabase.getAllMealPhotos();
     if (mounted) setState(() => _photosByLog = MealStats.groupPhotos(photos));
   }

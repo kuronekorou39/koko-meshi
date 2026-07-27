@@ -237,11 +237,23 @@ class AiAnalysisService {
         );
         return;
       }
-      final menuName = res.menuName;
+      // JSONは読めたのに料理名だけ欠けている場合を completed にしない。
+      // 一覧はメニュー名で解析結果を表すので、名前が無いまま「解析済み」に
+      // すると、待ち表示も結果も出ない空のカードになって手が出せなくなる
+      final rawName = res.menuName?.trim();
+      if (rawName == null || rawName.isEmpty) {
+        debugPrint('[AI] on-device result has no menu_name for ${photo.id}');
+        await _writeAiResult(
+          photo.id,
+          aiStatus: 'failed',
+          aiError: '料理名を判定できませんでした',
+        );
+        return;
+      }
       await _writeAiResult(
         photo.id,
         aiStatus: 'completed',
-        aiMenuName: menuName == null ? null : sanitizeMenuName(menuName),
+        aiMenuName: sanitizeMenuName(rawName),
         aiEstimatedPrice: res.price,
         aiEstimatedCalories: res.calories,
         aiCuisineGenre: res.genre,

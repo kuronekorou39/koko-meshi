@@ -388,6 +388,18 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
             _e2bInstalled.value == false) {
           return _buildModelMissingNotice();
         }
+        // pending は順番待ちでしかない。一覧のカードと同じ区別をして、
+        // 「一覧では終わって見えるのに詳細だけ解析中」を作らない
+        if (photo.aiStatus == 'pending') {
+          return _buildStatusCard(
+            leading: Icon(
+              Icons.schedule,
+              size: 18,
+              color: KokoTokens.of(context).textFaint,
+            ),
+            message: 'AI解析の順番待ちです',
+          );
+        }
         return _buildStatusCard(
           leading: const SizedBox(
             width: 16,

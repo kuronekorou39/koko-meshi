@@ -7,6 +7,7 @@ import '../models/meal_type.dart';
 import '../theme/app_theme.dart';
 import '../theme/meal_type_style.dart';
 import 'cached_photo_image.dart';
+import 'meal_ai_status.dart';
 import 'photo_scrim.dart';
 
 /// グリッド表示用タイル: 写真をタイル全面に敷き、下部スクリムの上に
@@ -67,24 +68,40 @@ class MealGridTile extends StatelessWidget {
         .where((p) => p.displayName != null)
         .map((p) => p.displayName!)
         .join('、');
+    final hasStatus = hasMealAiStatus(photos);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
         if (menuNames.isNotEmpty) ...[
-          Text(
-            menuNames,
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              height: 1.25,
-              color: PhotoScrim.textColor,
-              shadows: PhotoScrim.textShadows,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+          Row(
+            children: [
+              Flexible(
+                child: Text(
+                  menuNames,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    height: 1.25,
+                    color: PhotoScrim.textColor,
+                    shadows: PhotoScrim.textShadows,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (hasStatus) ...[
+                const SizedBox(width: 6),
+                MealAiStatusLine(
+                    photos: photos, showLabel: false, compact: true),
+              ],
+            ],
           ),
+          const SizedBox(height: 2),
+        ] else if (hasStatus) ...[
+          // 一覧では解析の状態しか手がかりが無いので、名前が無い間も出す
+          MealAiStatusLine(photos: photos, compact: true),
           const SizedBox(height: 2),
         ],
         // 種別(未設定なら省く) + 日時

@@ -7,6 +7,7 @@ import '../models/meal_type.dart';
 import '../theme/app_theme.dart';
 import '../theme/meal_type_style.dart';
 import 'cached_photo_image.dart';
+import 'meal_ai_status.dart';
 import 'photo_scrim.dart';
 
 /// タイムラインの食事カード。
@@ -77,51 +78,37 @@ class MealCard extends StatelessWidget {
         .where((p) => p.displayName != null)
         .map((p) => p.displayName!)
         .join('、');
-    final isAnalyzing =
-        menuNames.isEmpty && photos.any((p) => p.aiStatus == 'pending');
     final metaText = _buildMetaText();
+    final hasStatus = hasMealAiStatus(photos);
 
     final children = <Widget>[];
     if (menuNames.isNotEmpty) {
-      children.add(
-        Text(
-          menuNames,
-          style: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w700,
-            height: 1.3,
-            color: PhotoScrim.textColor,
-            shadows: PhotoScrim.textShadows,
-          ),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+      final name = Text(
+        menuNames,
+        style: const TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.w700,
+          height: 1.3,
+          color: PhotoScrim.textColor,
+          shadows: PhotoScrim.textShadows,
         ),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
       );
-    } else if (isAnalyzing) {
+      // 名前が出ていても、残りの写真がまだ解析中なら記号だけ後ろに添える
       children.add(
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(
-              width: 10,
-              height: 10,
-              child: CircularProgressIndicator(
-                strokeWidth: 1.5,
-                color: PhotoScrim.mutedTextColor,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              'AIが解析中',
-              style: TextStyle(
-                fontSize: 12.5,
-                color: PhotoScrim.mutedTextColor,
-                shadows: PhotoScrim.textShadows,
-              ),
-            ),
-          ],
-        ),
+        hasStatus
+            ? Row(
+                children: [
+                  Flexible(child: name),
+                  const SizedBox(width: 8),
+                  MealAiStatusLine(photos: photos, showLabel: false),
+                ],
+              )
+            : name,
       );
+    } else if (hasStatus) {
+      children.add(MealAiStatusLine(photos: photos));
     }
     if (children.isNotEmpty) children.add(const SizedBox(height: 6));
 

@@ -26,6 +26,10 @@ class PhotoScrim extends StatelessWidget {
   /// 同・二次テキスト(価格や時刻などのメタ情報)
   static const Color mutedTextColor = Color(0xD9FFFFFF);
 
+  /// 同・異常を示すテキスト(解析失敗など)。スクリムは常に暗いので、
+  /// テーマの error ではなくダークテーマ側の朱(_errorNight)に合わせる
+  static const Color errorTextColor = Color(0xFFE29181);
+
   /// スクリムを外れた位置にテキストが伸びたときの保険。
   /// 通常はスクリムだけで足りるので、ごく控えめにかける。
   static const List<Shadow> textShadows = [
