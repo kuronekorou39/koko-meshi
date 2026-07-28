@@ -99,13 +99,23 @@ Maps SDK と違って `http` はこれを送らない。制限をかけると検
 
 | 項目 | 初期値 | 設定値 |
 |---|---|---|
-| `SearchNearbyRequest per day` | 75,000 | **150** |
+| `SearchNearbyRequest per day` | 75,000 | **30** |
 | `SearchTextRequest per day` | 75,000 | **150** |
 | `SearchNearbyRequest per minute` | 600 | **20** |
 | `SearchTextRequest per minute` | 600 | **20** |
 
-150/日の根拠: 無料枠は各SKU 5,000回/月。31日で割ると約161/日なので、
-150なら月4,650回で枠内に収まる。
+**Nearby Search は Enterprise ティア**（無料1,000回/月）。周辺検索で評価・
+価格帯を出すために `rating` / `userRatingCount` / `priceLevel` を要求して
+いるため。31日で割ると約32/日なので、30なら月930回で枠内に収まる。
+
+Text Search は Pro ティアのまま（無料5,000回/月）なので150/日。
+31日で4,650回。
+
+なお周辺検索は `--dart-define=PLACE_SEARCH=true` を付けたビルドでしか
+動かない（[AppFeatures.placeSearch]）。配布しているAPKからは呼ばれないので、
+この上限は開発者1人分の使用量に対する蓋でしかない。**配布時に有効化するなら、
+費用を誰が負担するのかを先に決めること。** 1万人が月10回使えば10万回/月で、
+無料枠の100倍になる。
 
 ### 使っていない種別は 0 にする（こちらのほうが重要）
 
@@ -181,7 +191,7 @@ curl -s "https://maps.googleapis.com/maps/api/geocode/json?address=tokyo&key=$MA
 
 | 呼び出し | 場所 | 課金 |
 |---|---|---|
-| `places:searchNearby` | マップの「この辺りを検索」ボタン | Nearby Search Pro |
+| `places:searchNearby` | マップの「このエリアで検索」（開発ビルドのみ） | Nearby Search **Enterprise** |
 | `places:searchText` | 場所編集の検索欄（500msデバウンス） | Text Search Pro |
 | 地図の表示 | `google_maps_flutter` | モバイルネイティブは無料枠 |
 | 住所の逆引き | `placemarkFromCoordinates` | 課金対象外（OSのジオコーダ） |

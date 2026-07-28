@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../config/features.dart';
 import '../../database/local_database.dart';
 import '../../models/meal_log.dart';
 import '../../models/meal_photo.dart';
@@ -19,8 +20,10 @@ import '../../services/places_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/cached_photo_image.dart';
 import 'place_editor_screen.dart';
+import 'place_search_sheet.dart';
 
-const double _searchRadiusMeters = 500;
+/// 検索前に範囲を示すプレビュー円の既定値。検索条件を変えると追従する
+const double _defaultSearchRadiusMeters = 500;
 
 class MapTab extends ConsumerStatefulWidget {
   const MapTab({super.key});
@@ -47,6 +50,16 @@ class _MapTabState extends ConsumerState<MapTab> {
   // 検索ボタン表示フラグ
   bool _showSearchButton = false;
   bool _isSearching = false;
+
+  /// 検索条件。シートで変えるとプレビュー円の大きさにも反映される
+  PlaceSearchOptions _searchOptions = const PlaceSearchOptions(
+    radiusMeters: _defaultSearchRadiusMeters,
+  );
+
+  /// 直近の検索結果(一覧表示用)。null なら一覧を出さない。
+  /// 地図のピンは蓄積型なので、こちらとは寿命が違う
+  List<PlaceInfo>? _searchResults;
+  LatLng? _searchCenter;
 
   // ボトムシート
   _SheetContent? _sheetContent;
@@ -418,6 +431,14 @@ class _MapTabState extends ConsumerState<MapTab> {
     );
   }
 
+  /// 条件シートを開いてから検索する。条件を決めずに閉じたら何もしない
+  Future<void> _openSearchOptions() async {
+    final options = await showPlaceSearchOptions(context, _searchOptions);
+    if (options == null || !mounted) return;
+    setState(() => _searchOptions = options);
+    await _searchNearbyRestaurants();
+  }
+
   Future<void> _searchNearbyRestaurants() async {
     setState(() => _isSearching = true);
 
@@ -425,7 +446,7 @@ class _MapTabState extends ConsumerState<MapTab> {
     final result = await PlacesService.searchNearbyRestaurants(
       latitude: searchCenter.latitude,
       longitude: searchCenter.longitude,
-      radiusMeters: _searchRadiusMeters,
+      options: _searchOptions,
     );
 
     if (!mounted) return;
@@ -440,9 +461,14 @@ class _MapTabState extends ConsumerState<MapTab> {
     }
     if (result.places.isEmpty) {
       setState(() => _isSearching = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('この辺りにお店は見つかりませんでした')));
+      // 条件で絞った結果の0件は「店が無い」ではないので、言い分けて出す
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(_searchOptions.hasNarrowing
+              ? '条件に合うお店は見つかりませんでした'
+              : 'この辺りにお店は見つかりませんでした'),
+        ),
+      );
       return;
     }
 
@@ -468,6 +494,9 @@ class _MapTabState extends ConsumerState<MapTab> {
     setState(() {
       _showSearchButton = false;
       _isSearching = false;
+      // 並び順を指定できてもピンだけでは順序が見えないので一覧を出す
+      _searchResults = result.places;
+      _searchCenter = searchCenter;
     });
   }
 
@@ -670,7 +699,17 @@ class _MapTabState extends ConsumerState<MapTab> {
     setState(() {
       _placeMarkersMap.clear();
       _placeInfoMap.clear();
+      _searchResults = null;
     });
+  }
+
+  /// 一覧から店を選んだとき: 地図をそこへ寄せて詳細シートに切り替える
+  Future<void> _focusPlace(PlaceInfo place) async {
+    setState(() => _searchResults = null);
+    await _mapController?.animateCamera(
+      CameraUpdate.newLatLngZoom(LatLng(place.latitude, place.longitude), 17),
+    );
+    if (mounted) _showPlaceSheet(place);
   }
 
   @override
@@ -684,13 +723,15 @@ class _MapTabState extends ConsumerState<MapTab> {
     final previewCircle = Circle(
       circleId: const CircleId('preview'),
       center: _currentCenter,
-      radius: _searchRadiusMeters,
+      radius: _searchOptions.radiusMeters,
       fillColor: scheme.primary.withValues(alpha: 0.06),
       strokeColor: scheme.primary.withValues(alpha: 0.4),
       strokeWidth: 2,
     );
 
-    final allCircles = {if (_showSearchButton) previewCircle};
+    final allCircles = {
+      if (_showSearchButton && AppFeatures.placeSearch) previewCircle,
+    };
 
     return Scaffold(
       appBar: AppBar(
@@ -779,7 +820,40 @@ class _MapTabState extends ConsumerState<MapTab> {
                     top: 16,
                     left: 0,
                     right: 0,
-                    child: Center(child: _buildSearchButton()),
+                    child: Center(
+                      child: AppFeatures.placeSearch
+                          ? _buildSearchButton()
+                          : _buildSearchComingSoon(),
+                    ),
+                  ),
+
+                // 検索結果の一覧
+                if (_searchResults != null && _searchCenter != null)
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: Material(
+                      color: Theme.of(context).colorScheme.surface,
+                      elevation: 8,
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxHeight: MediaQuery.of(context).size.height * 0.5,
+                        ),
+                        child: SafeArea(
+                          top: false,
+                          child: PlaceSearchResultList(
+                            places: _searchResults!,
+                            centerLat: _searchCenter!.latitude,
+                            centerLng: _searchCenter!.longitude,
+                            options: _searchOptions,
+                            onTapPlace: _focusPlace,
+                            onClose: () =>
+                                setState(() => _searchResults = null),
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
 
                 // マイプレイス・現在地ボタン
@@ -830,7 +904,7 @@ class _MapTabState extends ConsumerState<MapTab> {
       ),
       child: InkWell(
         customBorder: const StadiumBorder(),
-        onTap: _isSearching ? null : _searchNearbyRestaurants,
+        onTap: _isSearching ? null : _openSearchOptions,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           child: Row(
@@ -848,6 +922,52 @@ class _MapTabState extends ConsumerState<MapTab> {
               Text(
                 _isSearching ? '検索中…' : 'このエリアで検索',
                 style: theme.textTheme.labelLarge,
+              ),
+              // 条件を絞っているときは、それが効いていることを見せる
+              if (!_isSearching && _searchOptions.hasNarrowing) ...[
+                const SizedBox(width: 6),
+                Icon(Icons.filter_alt,
+                    size: 15, color: theme.colorScheme.primary),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 配布ビルドでの表示。Places は従量課金なので、費用を誰が持つかが
+  /// 決まるまで出せない([AppFeatures.placeSearch])。押せないボタンを黙って
+  /// 置くと壊れて見えるので、準備中だと分かる形にする
+  Widget _buildSearchComingSoon() {
+    final theme = Theme.of(context);
+    final tokens = KokoTokens.of(context);
+    return Material(
+      color: theme.brightness == Brightness.light
+          ? theme.colorScheme.surface
+          : theme.colorScheme.surfaceContainerHigh,
+      shape: StadiumBorder(
+        side: BorderSide(color: tokens.hairline, width: 0.8),
+      ),
+      child: InkWell(
+        customBorder: const StadiumBorder(),
+        onTap: () => ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('お店の検索は準備中です。記録の保存と地図の表示はそのままお使いいただけます'),
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.storefront_outlined, size: 18, color: tokens.textFaint),
+              const SizedBox(width: 8),
+              Text(
+                'お店の検索（準備中）',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: tokens.textMuted,
+                ),
               ),
             ],
           ),
