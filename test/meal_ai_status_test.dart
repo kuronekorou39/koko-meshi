@@ -1,8 +1,21 @@
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:koko_meshi/models/meal_photo.dart';
 import 'package:koko_meshi/services/app_settings_service.dart';
+import 'package:koko_meshi/services/device_capability.dart';
 import 'package:koko_meshi/widgets/meal_ai_status.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+/// 端末側の対応可否を差し替える。MethodChannel を偽装して
+/// [DeviceCapability.init] を通すので、判定の経路ごと確かめられる。
+Future<void> setDeviceAiSupported(bool supported) async {
+  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .setMockMethodCallHandler(
+    const MethodChannel('com.kokomeshi.koko_meshi/device'),
+    (call) async => call.method == 'isOnDeviceAiSupported' ? supported : null,
+  );
+  await DeviceCapability.init();
+}
 
 MealPhoto photo(String status, {bool skipAi = false}) => MealPhoto(
       id: 'p-$status-$skipAi',
@@ -20,6 +33,8 @@ void main() {
   setUp(() async {
     SharedPreferences.setMockInitialValues({});
     await AppSettings.init();
+    // 各テストは「AIが動く端末」から始める
+    await setDeviceAiSupported(true);
   });
 
   group('resolveMealAiState (AI解析オン・モデルあり)', () {
@@ -91,6 +106,30 @@ void main() {
         modelInstalled: true,
       );
       expect(state, MealAiState.aiOff);
+    });
+
+    test('端末内AI非対応なら、モデル未DLより先に deviceUnsupported', () async {
+      await setDeviceAiSupported(false);
+      expect(
+        resolveMealAiState([photo('pending')], modelInstalled: false),
+        MealAiState.deviceUnsupported,
+      );
+    });
+
+    test('端末内AI非対応なら processing でも回さない', () async {
+      await setDeviceAiSupported(false);
+      expect(
+        resolveMealAiState([photo('processing')], modelInstalled: true),
+        MealAiState.deviceUnsupported,
+      );
+    });
+
+    test('端末内AI非対応でも、解析済みなら何も出さない', () async {
+      await setDeviceAiSupported(false);
+      expect(
+        resolveMealAiState([photo('completed')], modelInstalled: false),
+        MealAiState.none,
+      );
     });
   });
 

@@ -14,6 +14,7 @@ import '../../providers/meal_providers.dart';
 import '../../services/app_settings_service.dart';
 import '../../services/backup_service.dart';
 import '../../services/cloud_photo_rescue.dart';
+import '../../services/device_capability.dart';
 import '../../services/gemma_download_manager.dart';
 import '../../services/gemma_ondevice_service.dart';
 import '../../services/update_service.dart';
@@ -533,7 +534,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   /// AI自動解析セクション。トグル1つ + (オンでモデル未DLなら)ダウンロード案内。
+  /// 端末内AIが動かない端末では、トグルごと無効にして事情を書く。
   Widget _buildAiSection() {
+    if (!DeviceCapability.onDeviceAi) return _buildAiUnsupportedSection();
     return _sectionCard([
       SwitchListTile(
         secondary: const Icon(Icons.auto_awesome_outlined),
@@ -544,6 +547,32 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         onChanged: _setAiEnabled,
       ),
       if (_aiEnabled) _buildModelStatusTile(),
+    ]);
+  }
+
+  /// 端末内AI非対応(32bit端末)のときのAIセクション。
+  ///
+  /// ここでダウンロードを止めるのが一番大事。3GB落としてから使えないと
+  /// 分かるのが最悪なので、ボタンそのものを出さない。
+  Widget _buildAiUnsupportedSection() {
+    final tokens = KokoTokens.of(context);
+    return _sectionCard([
+      ListTile(
+        leading: Icon(Icons.phonelink_off, color: tokens.textFaint),
+        title: const Text('AIで自動解析する'),
+        subtitle: const Text('この端末では使えません'),
+        enabled: false,
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+        child: Text(
+          '端末内AIは64bit(arm64)端末にのみ対応しています。'
+          'この端末は32bitのため、AIモデルをダウンロードしても解析できません。\n'
+          '撮影・記録・マップ・バックアップはすべてお使いいただけます。'
+          '料理名や価格は手入力で記録できます。',
+          style: TextStyle(fontSize: 12, color: tokens.textMuted),
+        ),
+      ),
     ]);
   }
 

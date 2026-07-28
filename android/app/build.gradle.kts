@@ -66,25 +66,28 @@ android {
         manifestPlaceholders["GOOGLE_MAPS_API_KEY"] = envMap["GOOGLE_MAPS_API_KEY"] ?: ""
         manifestPlaceholders["appLabel"] = "ココメシ"
 
-        // flutter_gemma (LiteRT-LM/vision) は arm64-v8a のみ対応
+        // 32bit(armeabi-v7a)も含める。flutter_gemma (LiteRT-LM/vision) は
+        // arm64-v8a 版しか無いので32bit端末でAI解析はできないが、このアプリの
+        // 本体は食事の記録で、AIはその補助でしかない。撮影・記録・マップは
+        // 問題なく動くので、AI機能だけをアプリ側で落として使えるようにする
+        // (対応判定は MainActivity.isOnDeviceAiSupported)。
         ndk {
-            abiFilters.add("arm64-v8a")
+            abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a"))
         }
     }
 
-    // arm64 以外の .so を APK から完全に除く。
+    // x86 系の .so を APK から除く。
     //
     // 上の abiFilters は自前ビルドのネイティブライブラリにしか効かず、
-    // プラグインのAARに入っている .so は素通りする。数KBでも残っていると
-    // 32bit端末が「対応している」と判断してインストールでき、
-    // libflutter.so が無いまま起動してクラッシュする。
-    // 入らないほうが、インストール時にはっきり弾かれるぶん親切。
+    // プラグインのAARに入っている .so は素通りするので、ここでも落とす。
+    // x86_64 はエミュレータ用で実機には要らないのに、Flutter本体の .so が
+    // 1ABIあたり20MB強あるため配布物には入れない。
     //
-    // ビルド側でも --target-platform android-arm64 を指定している
-    // (指定しないと Flutter 本体の .so が3ABI分入って40MB増える)
+    // ビルド側でも --target-platform android-arm64,android-arm を指定する
+    // (指定しないと Flutter 本体の .so が x86_64 の分まで入る)
     packaging {
         jniLibs {
-            excludes += listOf("**/armeabi-v7a/**", "**/armeabi/**", "**/x86/**", "**/x86_64/**")
+            excludes += listOf("**/armeabi/**", "**/x86/**", "**/x86_64/**")
         }
     }
 

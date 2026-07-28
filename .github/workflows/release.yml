@@ -69,9 +69,10 @@ jobs:
 
       - run: flutter pub get
 
-      # arm64 のみ。指定しないと Flutter 本体の .so が3ABI分入って
-      # 40MB増える (LiteRT-LM が arm64 しか対応していないので他は無意味)
-      - run: flutter build apk --release --target-platform android-arm64
+      # arm64 + 32bit(arm)。x86_64 はエミュレータ用なので入れない
+      # (指定しないと Flutter 本体の .so がその分まで入って20MB強増える)。
+      # 32bit端末では端末内AIだけが使えない状態でアプリが動く
+      - run: flutter build apk --release --target-platform android-arm64,android-arm
 
       - name: 成果物をアプリ名+バージョンにリネーム
         run: |

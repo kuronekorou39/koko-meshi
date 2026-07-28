@@ -16,6 +16,7 @@ import '../../models/meal_type.dart';
 import '../../providers/meal_providers.dart';
 import '../../services/ai_analysis_service.dart';
 import '../../services/app_settings_service.dart';
+import '../../services/device_capability.dart';
 import '../../services/gemma_download_manager.dart';
 import '../../services/gemma_ondevice_service.dart';
 import '../../services/photo_cache_service.dart';
@@ -377,6 +378,11 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
         photo.aiStatus != 'completed') {
       return _buildAiOffNotice();
     }
+    // 端末内AIが動かない端末では、モデルDLも再解析も意味が無いので入口ごと
+    // 出さない。解析済みの結果(別端末で解析したものを復元した等)は見せる
+    if (!DeviceCapability.onDeviceAi && photo.aiStatus != 'completed') {
+      return _buildDeviceUnsupportedNotice();
+    }
     switch (photo.aiStatus) {
       case 'completed':
         return _buildCompletedResult(photo);
@@ -459,6 +465,22 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
         label: const Text('解析する'),
         style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
       ),
+    );
+  }
+
+  /// 端末内AIが動かない端末(32bit)での表示。
+  /// モデルを落としても動かないので、ダウンロードには誘導しない。
+  /// 手で入力すれば記録としては完結するため、編集への導線だけ出す。
+  Widget _buildDeviceUnsupportedNotice() {
+    return _buildStatusCard(
+      leading: Icon(
+        Icons.phonelink_off,
+        size: 18,
+        color: KokoTokens.of(context).textFaint,
+      ),
+      message: 'この端末ではAI解析を使えません',
+      detail: '端末内AIは64bit(arm64)端末にのみ対応しています。'
+          '料理名や価格は手入力で記録できます。',
     );
   }
 

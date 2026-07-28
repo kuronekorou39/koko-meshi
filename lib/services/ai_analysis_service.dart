@@ -10,6 +10,7 @@ import '../models/saved_place.dart';
 import '../models/sensitive_mood.dart';
 import 'analysis_foreground_service.dart';
 import 'app_settings_service.dart';
+import 'device_capability.dart';
 import 'gemma_ondevice_service.dart';
 import 'meal_stats.dart';
 import 'photo_cache_service.dart';
@@ -109,6 +110,14 @@ class AiAnalysisService {
 
   /// 端末内E2Bでバッチ解析する。モデルを1回ロード→全件解析→解放(RAM節約)。
   static Future<void> _processOnDevice(List<MealPhoto> photos) async {
+    // 32bit端末にはLiteRT-LMのライブラリが入らない。触れば
+    // UnsatisfiedLinkError になるだけなので、その手前で降りる
+    // (写真はpendingのまま残り、表示側が非対応として扱う)
+    if (!DeviceCapability.onDeviceAi) {
+      debugPrint('[AI] この端末は端末内AI非対応。解析しない');
+      return;
+    }
+
     final svc = GemmaOnDeviceService.instance;
 
     bool installed;

@@ -7,6 +7,7 @@ import 'package:intl/date_symbol_data_local.dart';
 
 import 'app.dart';
 import 'services/app_settings_service.dart';
+import 'services/device_capability.dart';
 
 /// 同梱フォントは SIL Open Font License 1.1。再配布にあたりライセンス本文を
 /// アプリのライセンス画面(showLicensePage)に出す。
@@ -28,6 +29,8 @@ void main() async {
   await initializeDateFormatting('ja');
 
   await AppSettings.init();
+  // 端末内AIが動くかは表示にもDL導線にも効くので、画面を出す前に確定させる
+  await DeviceCapability.init();
   _registerFontLicenses();
 
   runApp(

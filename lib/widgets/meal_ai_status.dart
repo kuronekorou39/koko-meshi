@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/meal_photo.dart';
 import '../services/app_settings_service.dart';
+import '../services/device_capability.dart';
 import '../services/gemma_download_manager.dart';
 import '../services/gemma_ondevice_service.dart';
 import 'photo_scrim.dart';
@@ -27,6 +28,9 @@ enum MealAiState {
 
   /// AI解析がオフなので始まらない
   aiOff,
+
+  /// この端末では端末内AIが動かない(32bit端末)
+  deviceUnsupported,
 
   /// 端末内AIモデルが未DLなので始まらない
   modelMissing,
@@ -54,6 +58,8 @@ MealAiState resolveMealAiState(
     // 落とされた写真は processing のまま残るため、ここを見ないと
     // 「モデルが無いのに回り続ける」が再発する
     if (AppSettings.aiMode == AiAnalysisMode.off) return MealAiState.aiOff;
+    // モデルを落としても動かないので、未DLより先に伝える
+    if (!DeviceCapability.onDeviceAi) return MealAiState.deviceUnsupported;
     if (modelInstalled == false) return MealAiState.modelMissing;
     return waiting.any((p) => p.aiStatus == 'processing')
         ? MealAiState.analyzing
@@ -158,6 +164,7 @@ class MealAiStatusLine extends StatelessWidget {
   IconData _icon(MealAiState state) => switch (state) {
         MealAiState.queued => Icons.schedule,
         MealAiState.aiOff => Icons.smart_toy_outlined,
+        MealAiState.deviceUnsupported => Icons.phonelink_off,
         MealAiState.modelMissing => Icons.download_for_offline_outlined,
         MealAiState.failed => Icons.error_outline,
         // analyzing はスピナー、none はここへ来ない
@@ -168,6 +175,7 @@ class MealAiStatusLine extends StatelessWidget {
         MealAiState.analyzing => 'AIが解析中',
         MealAiState.queued => 'AI解析の順番待ち',
         MealAiState.aiOff => 'AI解析はオフ',
+        MealAiState.deviceUnsupported => 'この端末はAI解析に非対応',
         MealAiState.modelMissing => 'AIモデル未ダウンロード',
         MealAiState.failed => 'AI解析に失敗',
         MealAiState.none => '',
