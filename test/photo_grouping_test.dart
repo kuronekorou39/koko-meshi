@@ -85,22 +85,29 @@ void main() {
   });
 
   group('撮影日時が無い写真', () {
-    test('全部日時なしなら1組', () {
-      expect(groupShots([undated, undated]), [[0, 1]]);
+    // EXIFの無い写真(保存画像・スクショ等)は珍しくない。同じ食事だと
+    // 確かめられないものを束ねると、無関係な写真が1件にされてしまう
+    test('日時なしは1枚ずつ別の組にする', () {
+      expect(groupShots([undated, undated]), [[0], [1]]);
     });
 
-    test('日時ありと混ざったら、日時なしはまとめて別の組', () {
+    test('日時なしが3枚あれば3組', () {
+      expect(groupShots([undated, undated, undated]), [[0], [1], [2]]);
+    });
+
+    test('日時ありと混ざっても、日時なしは巻き込まれない', () {
       final groups = groupShots([undated, shot(), shot(minutes: 10)]);
       expect(groups, [[1, 2], [0]]);
     });
 
-    test('日時なしは末尾の組になる', () {
+    test('日時なしは末尾に1枚ずつ並ぶ', () {
       final groups = groupShots([
         shot(),
         undated,
         shot(minutes: 300),
+        undated,
       ]);
-      expect(groups, [[0], [2], [1]]);
+      expect(groups, [[0], [2], [1], [3]]);
     });
   });
 

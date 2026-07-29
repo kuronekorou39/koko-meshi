@@ -48,12 +48,20 @@ class _SelectedPhoto {
 }
 
 /// 1つの食事として保存する写真の束。
+///
+/// 写真は添え字ではなく実体で持つ。添え字で持つと、写真を1枚消しただけで
+/// どの組がどの写真を指しているかが崩れる。
 class _PhotoGroup {
-  const _PhotoGroup({required this.indices, required this.mealType});
+  _PhotoGroup(this.photos);
 
-  /// _selectedPhotos の添え字(時刻順)
-  final List<int> indices;
-  final MealType mealType;
+  final List<_SelectedPhoto> photos;
+  MealType mealType = MealType.unset;
+
+  /// 組の代表(一番古い1枚)。種別を引き継ぐときの鍵に使う
+  _SelectedPhoto get representative => photos.first;
+
+  /// 撮影日時が分かる写真があるか。無い組は日時を推測できない
+  bool get hasKnownTime => photos.any((p) => p.exifDateTime != null);
 }
 
 class _CaptureScreenState extends ConsumerState<CaptureScreen> {
@@ -95,23 +103,29 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         item.exifLongitude = exif.longitude;
       }
     }
-    if (mounted) _adoptExifMetadata();
+    if (mounted) {
+      _adoptExifMetadata();
+      setState(_regroup);
+    }
   }
 
-  /// 種別は組ごとに持つ。写真の入れ替えで組の並びが変わるので、
-  /// 組の代表写真(一番古い1枚)を鍵にして覚える
-  final Map<_SelectedPhoto, MealType> _groupTypes = {};
-
-  /// 利用者が「上と同じ食事」に倒した組の代表写真。
-  /// GPSの誤差で同じ店の写真が分かれることがあるので、手で束ねられるようにする
-  final Set<_SelectedPhoto> _mergedIntoPrevious = {};
-
-  /// 選んだ写真を食事ごとに分けたもの。
+  /// 食事ごとの組。**画面の状態として持つ**。
   ///
-  /// 判定は [groupShots](閾値はマップと共通)。そのうえで、利用者が結合を
-  /// 指定した組は前の組へ畳む。
-  List<_PhotoGroup> get _groups {
-    final raw = groupShots(_selectedPhotos
+  /// 毎回導出する作りだと、利用者が組を束ねた瞬間に並びが変わり、種別が
+  /// 別の組へ移ってしまう。まとめる/分ける操作をそのまま反映できるように、
+  /// ここを唯一の持ち主にする。
+  List<_PhotoGroup> _groups = [];
+
+  /// 写真の増減に合わせて組を作り直す。
+  ///
+  /// 利用者が手で束ねた結果は写真が変わると意味を失うので、自動判定に
+  /// 戻す。種別だけは代表写真が同じ組へ引き継ぐ(選び直す手間を省く)。
+  void _regroup() {
+    final previousTypes = {
+      for (final g in _groups) g.representative: g.mealType,
+    };
+
+    final indexGroups = groupShots(_selectedPhotos
         .map((p) => GroupableShot(
               shotAt: p.exifDateTime,
               latitude: p.exifLatitude,
@@ -119,34 +133,47 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
             ))
         .toList());
 
-    final folded = <List<int>>[];
-    for (final group in raw) {
-      final rep = _selectedPhotos[group.first];
-      if (folded.isNotEmpty && _mergedIntoPrevious.contains(rep)) {
-        folded.last.addAll(group);
-      } else {
-        folded.add([...group]);
-      }
-    }
-
-    return [
-      for (final indices in folded)
-        _PhotoGroup(
-          indices: indices,
-          mealType:
-              _groupTypes[_selectedPhotos[indices.first]] ?? MealType.unset,
-        ),
+    _groups = [
+      for (final indices in indexGroups)
+        _PhotoGroup([for (final i in indices) _selectedPhotos[i]]),
     ];
+    for (final g in _groups) {
+      final carried = previousTypes[g.representative];
+      if (carried != null) g.mealType = carried;
+    }
   }
 
-  /// 組の日時。EXIFを持つ一番古い写真の時刻。無ければ画面の日時
-  DateTime _groupDateTime(_PhotoGroup group) {
-    final times = group.indices
-        .map((i) => _selectedPhotos[i].exifDateTime)
+  /// 前の組と1つにまとめる
+  void _mergeWithPrevious(int position) {
+    if (position <= 0 || position >= _groups.length) return;
+    setState(() {
+      final moved = _groups.removeAt(position);
+      _groups[position - 1].photos.addAll(moved.photos);
+    });
+  }
+
+  /// 1枚ずつの組に分ける
+  void _splitGroup(int position) {
+    if (position < 0 || position >= _groups.length) return;
+    setState(() {
+      final target = _groups[position];
+      if (target.photos.length < 2) return;
+      final singles = [
+        for (final photo in target.photos) _PhotoGroup([photo])..mealType = target.mealType,
+      ];
+      _groups.replaceRange(position, position + 1, singles);
+    });
+  }
+
+  /// 組の日時。EXIFを持つ一番古い写真の時刻。
+  /// 分からない組は null(推測した時刻を本物のように見せない)
+  DateTime? _groupDateTime(_PhotoGroup group) {
+    final times = group.photos
+        .map((p) => p.exifDateTime)
         .whereType<DateTime>()
         .toList()
       ..sort();
-    return times.firstOrNull ?? _capturedAt;
+    return times.firstOrNull;
   }
 
   /// 組の位置。GPSを持つ一番古い写真のもの。
@@ -157,8 +184,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     _PhotoGroup group, {
     required bool allowScreenFallback,
   }) {
-    final withGps = group.indices
-        .map((i) => _selectedPhotos[i])
+    final withGps = group.photos
         .where((p) => p.exifLatitude != null && p.exifLongitude != null)
         .toList()
       ..sort((a, b) => (a.exifDateTime ?? DateTime(9999))
@@ -168,6 +194,22 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       return (lat: source.exifLatitude!, lng: source.exifLongitude!);
     }
     return allowScreenFallback ? _effectivePosition : null;
+  }
+
+  /// 逆ジオコーディングの結果を覚えておく。
+  /// build のたびに引き直すと、住所が出るまで表示が定まらない
+  final Map<String, String?> _addressCache = {};
+
+  String _positionKey(double lat, double lng) =>
+      '${lat.toStringAsFixed(5)},${lng.toStringAsFixed(5)}';
+
+  /// 住所を引く。一度引いたものは覚えておき、次からは即座に返す
+  Future<String?> _addressFor(double lat, double lng) async {
+    final key = _positionKey(lat, lng);
+    if (_addressCache.containsKey(key)) return _addressCache[key];
+    final address = await LocationService.getAddress(lat, lng);
+    _addressCache[key] = address;
+    return address;
   }
 
   /// 記録(MealLog)の日時と場所を、選んだ写真から決める。
@@ -645,9 +687,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
 
   /// [indices] を渡すとその写真だけを並べる(組ごとの表示に使う)。
   /// タイルの操作は全体の添え字で動くので、渡すのは添え字のまま。
-  Widget _buildPhotoGrid([List<int>? indices]) {
-    final shown =
-        indices ?? [for (var i = 0; i < _selectedPhotos.length; i++) i];
+  Widget _buildPhotoGrid([List<_SelectedPhoto>? photos]) {
+    final shown = photos ?? _selectedPhotos;
     // 1枚だけなら列を分けずに大きく見せる。2枚以上は2列。
     // 3列だとタイルが小さすぎて、料理も上に乗るボタンも見えなかった
     final columns = shown.length == 1 ? 1 : 2;
@@ -700,7 +741,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
 
   Widget _buildGroupCard(_PhotoGroup group, int position, DateFormat fmt) {
     final tokens = KokoTokens.of(context);
-    final rep = _selectedPhotos[group.indices.first];
     final at = _groupDateTime(group);
     final pos = _groupPosition(group, allowScreenFallback: false);
 
@@ -713,91 +753,119 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
           children: [
             Row(
               children: [
-                Text('${position + 1}件目',
-                    style: tokens.sectionLabel),
+                Text('${position + 1}件目', style: tokens.sectionLabel),
                 const Spacer(),
                 Text(
-                  '${group.indices.length}枚',
+                  '${group.photos.length}枚',
                   style: tokens.numeral
                       .copyWith(fontSize: 11.5, color: tokens.textFaint),
                 ),
               ],
             ),
             const SizedBox(height: 8),
-            _buildPhotoGrid(group.indices),
+            _buildPhotoGrid(group.photos),
             const SizedBox(height: 10),
 
-            // 日時
-            Row(
-              children: [
-                Icon(Icons.schedule, size: 14, color: tokens.textFaint),
-                const SizedBox(width: 6),
-                Text(
-                  fmt.format(at),
-                  style: tokens.numeral
-                      .copyWith(fontSize: 12.5, color: tokens.textMuted),
-                ),
-              ],
+            // 日時。分からないものを「いまの時刻」で埋めて本物のように
+            // 見せない。保存時に記録した時刻が入ることだけ伝える
+            _groupMetaRow(
+              icon: Icons.schedule,
+              text: at != null ? fmt.format(at) : '撮影日時が分かりません（保存時の時刻を使います）',
+              muted: at == null,
+              numeral: at != null,
             ),
-            // 場所(住所はOS内蔵のジオコーダなので課金されない)
-            if (pos != null) ...[
-              const SizedBox(height: 4),
+            const SizedBox(height: 4),
+            // 場所。無いときも黙らずに書く(出ないのか無いのか分からなくなる)
+            if (pos == null)
+              _groupMetaRow(
+                icon: Icons.location_off_outlined,
+                text: '位置情報がありません',
+                muted: true,
+              )
+            else
               FutureBuilder<String?>(
-                future: LocationService.getAddress(pos.lat, pos.lng),
-                builder: (context, snapshot) => Row(
-                  children: [
-                    Icon(Icons.place_outlined,
-                        size: 14, color: tokens.textFaint),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        snapshot.data ?? '位置情報あり',
-                        style:
-                            TextStyle(fontSize: 12.5, color: tokens.textMuted),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
+                // 一度引いた住所は覚えているので、再描画で引き直さない
+                future: _addressFor(pos.lat, pos.lng),
+                builder: (context, snapshot) => _groupMetaRow(
+                  icon: Icons.place_outlined,
+                  text: snapshot.data ??
+                      (snapshot.connectionState == ConnectionState.waiting
+                          ? '住所を調べています…'
+                          : '位置情報あり（住所は不明）'),
+                  muted: snapshot.data == null,
                 ),
               ),
-            ],
             const SizedBox(height: 10),
 
             Align(
               alignment: Alignment.centerLeft,
               child: MealTypeField(
                 value: group.mealType,
-                onChanged: (type) =>
-                    setState(() => _groupTypes[rep] = type),
+                onChanged: (type) => setState(() => group.mealType = type),
               ),
             ),
 
-            // 分かれすぎたときに手で束ねられるようにする
-            if (position > 0)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: () =>
-                      setState(() => _mergedIntoPrevious.add(rep)),
-                  icon: const Icon(Icons.merge, size: 15),
-                  label: const Text('前の食事と同じにする'),
-                  style: TextButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    textStyle: const TextStyle(fontSize: 12),
+            // まとめる / 分ける。どちらも押し戻せるようにしておく
+            Wrap(
+              spacing: 4,
+              children: [
+                if (position > 0)
+                  TextButton.icon(
+                    onPressed: () => _mergeWithPrevious(position),
+                    icon: const Icon(Icons.merge, size: 15),
+                    label: const Text('前とまとめる'),
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      textStyle: const TextStyle(fontSize: 12),
+                    ),
                   ),
-                ),
-              ),
+                if (group.photos.length > 1)
+                  TextButton.icon(
+                    onPressed: () => _splitGroup(position),
+                    icon: const Icon(Icons.call_split, size: 15),
+                    label: const Text('1枚ずつに分ける'),
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      textStyle: const TextStyle(fontSize: 12),
+                    ),
+                  ),
+              ],
+            ),
           ],
         ),
       ),
     );
   }
 
+  /// 組の枠に出す1行(日時・場所)
+  Widget _groupMetaRow({
+    required IconData icon,
+    required String text,
+    bool muted = false,
+    bool numeral = false,
+  }) {
+    final tokens = KokoTokens.of(context);
+    final color = muted ? tokens.textFaint : tokens.textMuted;
+    return Row(
+      children: [
+        Icon(icon, size: 14, color: tokens.textFaint),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            text,
+            style: numeral
+                ? tokens.numeral.copyWith(fontSize: 12.5, color: color)
+                : TextStyle(fontSize: 12.5, color: color),
+            maxLines: 2,
+          ),
+        ),
+      ],
+    );
+  }
+
   /// 写真タイル。写真の上に置くのは「その写真への操作」だけにする。
   /// 撮影日時とAIの入り切りは記録ごとの設定で、下のメタデータ欄に出ている
-  Widget _photoTile(int index) {
-    final item = _selectedPhotos[index];
+  Widget _photoTile(_SelectedPhoto item) {
     final scheme = Theme.of(context).colorScheme;
 
     return Stack(
@@ -813,7 +881,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
           left: 2,
           child: _tileButton(
             icon: Icons.tune,
-            onTap: () => _editPhoto(index),
+            onTap: () => _editPhoto(item),
             background: item.hasEdits ? scheme.tertiary : Colors.black54,
             foreground: item.hasEdits ? scheme.onTertiary : Colors.white,
           ),
@@ -824,7 +892,10 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
           child: _tileButton(
             icon: Icons.close,
             onTap: () {
-              setState(() => _selectedPhotos.removeAt(index));
+              setState(() {
+                _selectedPhotos.remove(item);
+                _regroup();
+              });
               // 日時や場所をその写真から採っていたかもしれないので引き直す
               _adoptExifMetadata();
             },
@@ -905,9 +976,19 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
 
   Future<void> _takePhoto() async {
     final photo = await PhotoService.takePhoto();
-    if (photo != null) {
-      setState(() => _selectedPhotos.add(_SelectedPhoto(photo)));
-    }
+    if (photo == null) return;
+    // いま撮った写真にもEXIFが入る。読まないと日時不明の扱いになる
+    final item = _SelectedPhoto(photo);
+    final exif = await PhotoService.readExifData(photo.path);
+    item.exifDateTime = exif.dateTime;
+    item.exifLatitude = exif.latitude;
+    item.exifLongitude = exif.longitude;
+    if (!mounted) return;
+    setState(() {
+      _selectedPhotos.add(item);
+      _regroup();
+    });
+    _adoptExifMetadata();
   }
 
   Future<void> _pickFromLibrary() async {
@@ -926,12 +1007,14 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     }
 
     if (!mounted) return;
-    setState(() => _selectedPhotos.addAll(items));
+    setState(() {
+      _selectedPhotos.addAll(items);
+      _regroup();
+    });
     _adoptExifMetadata();
   }
 
-  Future<void> _editPhoto(int index) async {
-    final item = _selectedPhotos[index];
+  Future<void> _editPhoto(_SelectedPhoto item) async {
     final outcome = await Navigator.push<PhotoEditOutcome>(
       context,
       MaterialPageRoute(
@@ -987,7 +1070,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
 
       for (final group in groups) {
         final mealLogId = _uuid.v4();
-        final eatenAt = _groupDateTime(group);
+        // 撮影日時が分からない組は、いつ食べたかを決められない。
+        // 画面にもそう出しているとおり、記録した時刻で埋める
+        final eatenAt = _groupDateTime(group) ?? _capturedAt;
         final position =
             _groupPosition(group, allowScreenFallback: groups.length == 1);
         final lat = position?.lat;
@@ -1007,8 +1092,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         ));
 
         // 写真を保存（編集がある場合は先にisolateで焼き込んでから保存）
-        for (final i in group.indices) {
-          final item = _selectedPhotos[i];
+        for (final item in group.photos) {
         // まずオリジナル（未編集）画像を保存
         final originalPath = await PhotoService.saveToLocalFromPath(
           item.originalFile.path,
@@ -1021,8 +1105,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         if (item.hasEdits) {
           final params = item.editParams!;
           final tmpDir = await getTemporaryDirectory();
+          // 同じミリ秒に複数枚を焼くことがあるので、一意なidを混ぜる
           final outputPath =
-              '${tmpDir.path}/edit_${DateTime.now().millisecondsSinceEpoch}_$i.jpg';
+              '${tmpDir.path}/edit_${DateTime.now().millisecondsSinceEpoch}_${_uuid.v4()}.jpg';
           final baked = await compute(
             bakePhotoEdit,
             PhotoEditBakeRequest(
