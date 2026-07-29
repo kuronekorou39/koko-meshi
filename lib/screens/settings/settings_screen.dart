@@ -13,7 +13,6 @@ import '../../providers/app_settings_providers.dart';
 import '../../providers/meal_providers.dart';
 import '../../services/app_settings_service.dart';
 import '../../services/backup_service.dart';
-import '../../services/cloud_photo_rescue.dart';
 import '../../services/device_capability.dart';
 import '../../services/gemma_download_manager.dart';
 import '../../services/gemma_ondevice_service.dart';
@@ -40,16 +39,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   /// AIで自動解析するか(= 端末内Gemmaを使うか)
   bool _aiEnabled = true;
 
-  /// クラウドにしか無く未取り込みの写真数(>0のときだけ取り込み導線を出す)
-  int _cloudPending = 0;
-
   @override
   void initState() {
     super.initState();
     _aiEnabled = AppSettings.aiMode == AiAnalysisMode.onDevice;
     _loadSavedPlaces();
     _loadVersion();
-    _loadCloudPending();
     _checkUpdate();
     GemmaDownloadManager.instance.refreshInstalled(GemmaModelKind.e2b);
   }
@@ -102,13 +97,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Future<void> _loadSavedPlaces() async {
     final places = await LocalDatabase.getSavedPlaces();
     if (mounted) setState(() => _savedPlaces = places);
-  }
-
-  Future<void> _loadCloudPending() async {
-    try {
-      final n = await CloudPhotoRescue.pendingCount();
-      if (mounted) setState(() => _cloudPending = n);
-    } catch (_) {}
   }
 
   Future<void> _deleteSavedPlace(SavedPlace place) async {
@@ -172,6 +160,31 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   // ─── バックアップと移行 ───
 
   Future<void> _exportBackup() async {
+    // 何が書き出されるのか(写真も含む=ファイルが大きい)は、一覧に常時
+    // 書いておくより、実行する直前に伝えたほうが読まれる
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('バックアップを作成'),
+        content: const Text(
+          'すべての記録・写真・設定を1つのzipファイルに書き出します。\n\n'
+          '写真を含むので、記録が多いとファイルは数百MBになります。'
+          '作成後に共有先を選んで保存してください。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('作成する'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
     _showBlockingProgress('バックアップを作成しています…');
     String? zipPath;
     try {
@@ -263,8 +276,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       if (!mounted) return;
       ref.invalidate(mealLogsProvider);
       _loadSavedPlaces();
-      _loadCloudPending();
-      setState(() => _aiEnabled = AppSettings.aiMode == AiAnalysisMode.onDevice);
+        setState(() => _aiEnabled = AppSettings.aiMode == AiAnalysisMode.onDevice);
       await showDialog<void>(
         context: context,
         builder: (context) => AlertDialog(
@@ -288,66 +300,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           SnackBar(content: Text('復元に失敗しました（元のデータは保持されています）: $e')),
         );
       }
-    }
-  }
-
-  Future<void> _rescueCloudPhotos() async {
-    final progress = ValueNotifier<String>('準備しています…');
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => PopScope(
-        canPop: false,
-        child: AlertDialog(
-          content: Row(
-            children: [
-              const CircularProgressIndicator(),
-              const SizedBox(width: 16),
-              Expanded(
-                child: ValueListenableBuilder<String>(
-                  valueListenable: progress,
-                  builder: (context, v, child) => Text(v),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-    try {
-      final result = await CloudPhotoRescue.rescueAll(
-        onProgress: (d, t) =>
-            progress.value = 'クラウドの写真を取り込み中… ($d/$t)',
-      );
-      if (mounted) Navigator.of(context).pop();
-      if (!mounted) return;
-      ref.invalidate(mealLogsProvider);
-      _loadCloudPending();
-      await showDialog<void>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('取り込み完了'),
-          content: Text(
-            '${result.rescued}枚を取り込みました'
-            '${result.failed > 0 ? '（${result.failed}枚は取得できませんでした）' : ''}',
-          ),
-          actions: [
-            FilledButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
-    } catch (e) {
-      if (mounted) Navigator.of(context).pop();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('取り込みに失敗しました: $e')),
-        );
-      }
-    } finally {
-      progress.dispose();
     }
   }
 
@@ -395,31 +347,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           ]),
 
+          // 何をする項目かは名前で分かる。詳しい説明は実行するかを尋ねる
+          // ダイアログ側に置いて、一覧は読まずに見渡せるようにする
           _sectionLabel('バックアップ'),
           _sectionCard([
             ListTile(
               leading: const Icon(Icons.save_alt_outlined),
               title: const Text('バックアップを作成'),
-              subtitle: const Text('すべての記録と写真をファイルに書き出して保存'),
               trailing: const Icon(Icons.chevron_right),
               onTap: _exportBackup,
             ),
             ListTile(
               leading: const Icon(Icons.restore_outlined),
               title: const Text('バックアップから復元'),
-              subtitle: const Text('書き出したファイルを読み込む（現在のデータは置き換わります）'),
               trailing: const Icon(Icons.chevron_right),
               onTap: _importBackup,
             ),
-            // クラウドに未取り込みの写真が残っているときだけ出す(移行用)
-            if (_cloudPending > 0)
-              ListTile(
-                leading: const Icon(Icons.cloud_download_outlined),
-                title: const Text('以前の写真を取り込む'),
-                subtitle: Text('$_cloudPending 枚がまだこの端末にありません。タップして取り込み'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: _rescueCloudPhotos,
-              ),
           ]),
 
           // 開発ビルドのみ。プロンプト調整の効果を測るための計測画面
@@ -541,8 +484,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       SwitchListTile(
         secondary: const Icon(Icons.auto_awesome_outlined),
         title: const Text('AIで自動解析する'),
-        subtitle: const Text('料理名・価格・カロリーを端末内で自動推定'
-            '（オフライン・無料・写真は外部送信なし）'),
+        // 何ができるかは料理名が出れば分かる。ここで言う価値があるのは
+        // 「通信しない・お金がかからない」の一点だけなので、それだけ残す
+        subtitle: const Text('オフラインで動作・無料'),
         value: _aiEnabled,
         onChanged: _setAiEnabled,
       ),
