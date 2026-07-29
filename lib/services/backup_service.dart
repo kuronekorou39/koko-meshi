@@ -12,6 +12,19 @@ import 'package:sqflite/sqflite.dart';
 
 import '../database/local_database.dart';
 
+/// 復元で何が足されたか。
+class RestoreResult {
+  const RestoreResult({required this.addedRecords, required this.copiedFiles});
+
+  /// 追加した食事記録の件数(既にあったものは含まない)
+  final int addedRecords;
+
+  /// 追加した写真・サムネのファイル数
+  final int copiedFiles;
+
+  bool get isEmpty => addedRecords == 0 && copiedFiles == 0;
+}
+
 /// バックアップzipのメタ情報。
 class BackupManifest {
   const BackupManifest({
@@ -154,84 +167,171 @@ class BackupService {
     }
   }
 
-  /// zipから完全復元する。**現在の端末のデータはすべて置き換えられる。**
-  /// 失敗時は退避した元データから復旧する。
-  static Future<void> restore(String zipPath) async {
+  /// 行を入れる順番。restaurants を先に入れてから、それを参照する
+  /// meal_logs、さらに meal_photos の順で積む。
+  static const _mergeTables = [
+    'restaurants',
+    'meal_logs',
+    'meal_photos',
+    'saved_places',
+    'diet_advices',
+  ];
+
+  /// 写真のパスを持つ列。復元時にこの端末のパスへ読み替える
+  static const _pathColumns = [
+    'local_path',
+    'original_local_path',
+    'thumbnail_url',
+  ];
+
+  /// zipから復元する。**この端末にある記録は消さない。**
+  ///
+  /// バックアップにしか無い記録・写真を「足す」だけで、既にあるものは
+  /// 手を付けない(同じidの記録があれば、この端末側を残す)。復元は取り戻す
+  /// ための操作なので、間違えたときに失われるものが無いほうを既定にする。
+  /// 全部を置き換える方式だと、古いバックアップを選んだだけでそれ以降の
+  /// 記録が消え、取り返しがつかない。
+  ///
+  /// 逆に、この端末で消した記録がバックアップに残っていると復活する。
+  /// 消したものが戻るのは消し直せば済むが、消えたものは戻せない。
+  ///
+  /// 設定(フォント・AI解析のオン/オフ)は触らない。いま使っている設定を
+  /// 上書きするのも「消す」ことに当たるため。
+  ///
+  /// 戻り値は追加した件数。
+  static Future<RestoreResult> restore(String zipPath) async {
     final docsDir = await getApplicationDocumentsDirectory();
-    final dbDir = await getDatabasesPath();
     final tmpDir = await getTemporaryDirectory();
 
     final staging = Directory(p.join(tmpDir.path, 'restore_staging'));
     if (staging.existsSync()) staging.deleteSync(recursive: true);
     staging.createSync(recursive: true);
 
-    // 1. 別isolateでstagingへ展開
-    await Isolate.run(() => extractFileToDisk(zipPath, staging.path));
-
-    // 2. manifest検証
-    final manifestFile = File(p.join(staging.path, 'manifest.json'));
-    if (!manifestFile.existsSync()) {
-      staging.deleteSync(recursive: true);
-      throw const BackupException('バックアップファイルの形式が不正です（manifestなし）');
-    }
-    final manifest = BackupManifest.tryParse(manifestFile.readAsStringSync());
-    if (manifest == null ||
-        manifest.formatVersion != currentFormatVersion) {
-      staging.deleteSync(recursive: true);
-      throw BackupException(
-          'このバージョンでは読み込めないバックアップです（形式v${manifest?.formatVersion ?? '?'}）');
-    }
-
-    // 3. DBを閉じる
-    await LocalDatabase.close();
-
-    // 4. 既存データを.bakへ退避しつつ、stagingの内容を配置
-    final photosDst = Directory(p.join(docsDir.path, 'photos'));
-    final thumbsDst = Directory(p.join(docsDir.path, 'thumbnails'));
-    final dbDst = File(p.join(dbDir, manifest.dbFileName));
-    final swaps = <_Swap>[];
     try {
-      // 写真・サムネ・DBを差し替え(元は.bakへ退避)。swapsへは退避完了時点で
-      // 登録されるので、途中で失敗してもロールバックで必ず元へ戻せる
-      _swapDir(
-          Directory(p.join(staging.path, 'photos')), photosDst, swaps);
-      _swapDir(
-          Directory(p.join(staging.path, 'thumbnails')), thumbsDst, swaps);
-      _swapFile(File(p.join(staging.path, 'db', manifest.dbFileName)), dbDst,
-          swaps);
-      // 古いWAL/SHMは消しておく(スナップショットと不整合になるため)
-      for (final suffix in ['-wal', '-shm']) {
-        final f = File('${dbDst.path}$suffix');
-        if (f.existsSync()) f.deleteSync();
+      // 1. 別isolateでstagingへ展開
+      await Isolate.run(() => extractFileToDisk(zipPath, staging.path));
+
+      // 2. manifest検証
+      final manifestFile = File(p.join(staging.path, 'manifest.json'));
+      if (!manifestFile.existsSync()) {
+        throw const BackupException('バックアップファイルの形式が不正です（manifestなし）');
+      }
+      final manifest = BackupManifest.tryParse(manifestFile.readAsStringSync());
+      if (manifest == null || manifest.formatVersion != currentFormatVersion) {
+        throw BackupException(
+            'このバージョンでは読み込めないバックアップです（形式v${manifest?.formatVersion ?? '?'}）');
       }
 
-      // 5. DB再オープン → 写真パスをこの端末のベースへ書き換え
-      await LocalDatabase.database;
-      await _remapAllPaths(manifest.baseDocsPath, docsDir.path);
-
-      // 6. 設定を復元
-      final settingsFile = File(p.join(staging.path, 'settings.json'));
-      if (settingsFile.existsSync()) {
-        await _restoreSettings(settingsFile.readAsStringSync());
+      final dbSrc = File(p.join(staging.path, 'db', manifest.dbFileName));
+      if (!dbSrc.existsSync()) {
+        throw const BackupException('バックアップファイルの形式が不正です（DBなし）');
       }
 
-      // 成功: .bak と staging を掃除
-      for (final s in swaps) {
-        s.cleanupBackup();
-      }
-      staging.deleteSync(recursive: true);
-    } catch (e) {
-      debugPrint('[Backup] restore failed, rolling back: $e');
-      // 失敗: .bak から復旧
-      for (final s in swaps.reversed) {
-        s.rollback();
-      }
+      // 3. 写真とサムネを「無いものだけ」置く。既にあるファイルは触らない
+      //    (同名でも中身は同じ写真なので、上書きする意味が無い)
+      final copiedFiles = _copyMissingFiles(
+            Directory(p.join(staging.path, 'photos')),
+            Directory(p.join(docsDir.path, 'photos')),
+          ) +
+          _copyMissingFiles(
+            Directory(p.join(staging.path, 'thumbnails')),
+            Directory(p.join(docsDir.path, 'thumbnails')),
+          );
+
+      // 4. バックアップのDBを読み取り専用で開き、無い行だけを足す
+      final added = await _mergeRows(
+        backupDbPath: dbSrc.path,
+        oldBase: manifest.baseDocsPath,
+        newBase: docsDir.path,
+      );
+
+      return RestoreResult(addedRecords: added, copiedFiles: copiedFiles);
+    } finally {
       try {
-        staging.deleteSync(recursive: true);
+        if (staging.existsSync()) staging.deleteSync(recursive: true);
       } catch (_) {}
-      await LocalDatabase.database;
-      rethrow;
     }
+  }
+
+  /// バックアップDBの行を現在のDBへ足す。同じidが既にあれば飛ばす。
+  /// 追加した meal_logs の件数を返す(利用者に伝えるのはこれが分かりやすい)。
+  static Future<int> _mergeRows({
+    required String backupDbPath,
+    required String oldBase,
+    required String newBase,
+  }) async {
+    // 読み取り専用で開く。バージョンを指定して開くとスキーマの
+    // マイグレーションが走り、バックアップ側のファイルを書き換えてしまう
+    final backupDb = await openReadOnlyDatabase(backupDbPath);
+    try {
+      return await mergeInto(
+        target: await LocalDatabase.database,
+        source: backupDb,
+        oldBase: oldBase,
+        newBase: newBase,
+      );
+    } finally {
+      await backupDb.close();
+    }
+  }
+
+  /// [source] の行を [target] へ足す。**既にある行は書き換えず、消しもしない。**
+  /// 追加した meal_logs の件数を返す。
+  ///
+  /// 同一性は主キー(id)で見る。idはUUIDなので、別端末で作られた記録と
+  /// ぶつかることは実質起きない。ぶつかったら [target] 側を残す。
+  @visibleForTesting
+  static Future<int> mergeInto({
+    required DatabaseExecutor target,
+    required DatabaseExecutor source,
+    required String oldBase,
+    required String newBase,
+  }) async {
+    var addedLogs = 0;
+    for (final table in _mergeTables) {
+      final List<Map<String, Object?>> rows;
+      try {
+        rows = await source.query(table);
+      } on DatabaseException catch (e) {
+        // 古いバックアップに無いテーブルは飛ばす
+        debugPrint('[Backup] skip table $table: $e');
+        continue;
+      }
+      for (final row in rows) {
+        final values = Map<String, Object?>.from(row);
+        // 写真のパスは端末ごとに違うので、入れる行だけ読み替える
+        for (final col in _pathColumns) {
+          if (values.containsKey(col)) {
+            values[col] = remapPath(values[col] as String?, oldBase, newBase);
+          }
+        }
+        final n = await target.insert(
+          table,
+          values,
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+        // ignore で飛ばされると 0 が返る
+        if (n != 0 && table == 'meal_logs') addedLogs++;
+      }
+    }
+    return addedLogs;
+  }
+
+  /// src配下のファイルを、dstに無いものだけコピーする。コピーした件数を返す。
+  static int _copyMissingFiles(Directory src, Directory dst) {
+    if (!src.existsSync()) return 0;
+    if (!dst.existsSync()) dst.createSync(recursive: true);
+    var copied = 0;
+    for (final entity in src.listSync(recursive: true)) {
+      if (entity is! File) continue;
+      final rel = p.relative(entity.path, from: src.path);
+      final target = File(p.join(dst.path, rel));
+      if (target.existsSync()) continue;
+      target.parent.createSync(recursive: true);
+      entity.copySync(target.path);
+      copied++;
+    }
+    return copied;
   }
 
   // ─── ヘルパー ───
@@ -255,73 +355,6 @@ class BackupService {
     return out;
   }
 
-  static Future<void> _restoreSettings(String jsonStr) async {
-    final prefs = await SharedPreferences.getInstance();
-    final map = jsonDecode(jsonStr) as Map<String, dynamic>;
-    for (final entry in map.entries) {
-      final v = entry.value;
-      if (v is bool) {
-        await prefs.setBool(entry.key, v);
-      } else if (v is int) {
-        await prefs.setInt(entry.key, v);
-      } else if (v is double) {
-        await prefs.setDouble(entry.key, v);
-      } else if (v is String) {
-        await prefs.setString(entry.key, v);
-      } else if (v is List) {
-        await prefs.setStringList(
-            entry.key, v.map((e) => e.toString()).toList());
-      }
-    }
-  }
-
-  static Future<void> _remapAllPaths(String oldBase, String newBase) async {
-    if (oldBase == newBase) return;
-    final photos = await LocalDatabase.getAllMealPhotos();
-    for (final photo in photos) {
-      final newLocal = remapPath(photo.localPath, oldBase, newBase)!;
-      final newOrig = remapPath(photo.originalLocalPath, oldBase, newBase);
-      final newThumb = remapPath(photo.thumbnailUrl, oldBase, newBase);
-      if (newLocal == photo.localPath &&
-          newOrig == photo.originalLocalPath &&
-          newThumb == photo.thumbnailUrl) {
-        continue;
-      }
-      await LocalDatabase.updateMealPhoto(photo.copyWith(
-        localPath: newLocal,
-        originalLocalPath: newOrig,
-        thumbnailUrl: newThumb,
-      ));
-    }
-  }
-
-  /// srcディレクトリを dst の位置へ配置し、既存 dst は .bak へ退避する。
-  /// 退避(rename)が済んだ時点で swaps に登録するので、その後に失敗しても
-  /// ロールバックで .bak を戻せる。
-  static void _swapDir(Directory src, Directory dst, List<_Swap> swaps) {
-    final bak = Directory('${dst.path}.bak');
-    if (bak.existsSync()) bak.deleteSync(recursive: true);
-    if (dst.existsSync()) {
-      dst.renameSync(bak.path);
-      swaps.add(_Swap(dst.path, bak.path, isDir: true));
-    } else {
-      swaps.add(_Swap(dst.path, bak.path, isDir: true));
-    }
-    if (src.existsSync()) {
-      src.renameSync(dst.path);
-    } else {
-      dst.createSync(recursive: true); // 空でも作る
-    }
-  }
-
-  static void _swapFile(File src, File dst, List<_Swap> swaps) {
-    final bak = File('${dst.path}.bak');
-    if (bak.existsSync()) bak.deleteSync();
-    if (dst.existsSync()) dst.renameSync(bak.path);
-    swaps.add(_Swap(dst.path, bak.path, isDir: false));
-    if (src.existsSync()) src.copySync(dst.path);
-  }
-
   /// isolate内で実行: ストリーミングでzipを作る(addFileSyncはファイルを
   /// チャンク読みするのでメモリに全載せしない)。
   static void _zipEntries(List<_ZipEntry> entries, String zipPath) {
@@ -339,42 +372,6 @@ class _ZipEntry {
   const _ZipEntry(this.sourcePath, this.archiveName);
   final String sourcePath;
   final String archiveName;
-}
-
-/// 差し替えのロールバック情報。
-class _Swap {
-  _Swap(this.livePath, this.bakPath, {required this.isDir});
-  final String livePath;
-  final String bakPath;
-  final bool isDir;
-
-  void cleanupBackup() {
-    try {
-      if (isDir) {
-        final d = Directory(bakPath);
-        if (d.existsSync()) d.deleteSync(recursive: true);
-      } else {
-        final f = File(bakPath);
-        if (f.existsSync()) f.deleteSync();
-      }
-    } catch (_) {}
-  }
-
-  void rollback() {
-    try {
-      if (isDir) {
-        final live = Directory(livePath);
-        if (live.existsSync()) live.deleteSync(recursive: true);
-        final bak = Directory(bakPath);
-        if (bak.existsSync()) bak.renameSync(livePath);
-      } else {
-        final live = File(livePath);
-        if (live.existsSync()) live.deleteSync();
-        final bak = File(bakPath);
-        if (bak.existsSync()) bak.renameSync(livePath);
-      }
-    } catch (_) {}
-  }
 }
 
 class BackupException implements Exception {

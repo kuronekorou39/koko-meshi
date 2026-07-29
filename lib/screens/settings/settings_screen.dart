@@ -241,14 +241,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       return;
     }
 
-    final scheme = Theme.of(context).colorScheme;
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('バックアップから復元'),
         content: Text(
-          'この端末の現在の記録・写真・設定は、すべてバックアップの内容に'
-          '置き換えられます。この操作は取り消せません。\n\n'
+          'バックアップにしか無い記録と写真を追加します。'
+          'いまこの端末にある記録は消えません。\n\n'
+          'この端末で削除した記録がバックアップに残っている場合は、'
+          'もう一度出てきます。\n\n'
           'バックアップ日時: ${manifest.exportedAt.replaceFirst('T', ' ').split('.').first}',
         ),
         actions: [
@@ -257,12 +258,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             child: const Text('キャンセル'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: scheme.error,
-              foregroundColor: scheme.onError,
-            ),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('復元する'),
+            child: const Text('追加する'),
           ),
         ],
       ),
@@ -271,19 +268,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
     _showBlockingProgress('復元しています…');
     try {
-      await BackupService.restore(path);
+      final result = await BackupService.restore(path);
       if (mounted) Navigator.of(context).pop();
       if (!mounted) return;
       ref.invalidate(mealLogsProvider);
       _loadSavedPlaces();
-        setState(() => _aiEnabled = AppSettings.aiMode == AiAnalysisMode.onDevice);
       await showDialog<void>(
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('復元が完了しました'),
-          content: const Text(
-            'バックアップを読み込みました。表示を確実に反映するため、'
-            'アプリを一度再起動することをおすすめします。',
+          content: Text(
+            result.isEmpty
+                ? 'このバックアップの記録は、すべてこの端末にありました。'
+                    '追加したものはありません。'
+                : '${result.addedRecords}件の記録を追加しました。\n'
+                    '表示を確実に反映するため、アプリを一度再起動することを'
+                    'おすすめします。',
           ),
           actions: [
             FilledButton(
