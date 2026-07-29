@@ -572,9 +572,18 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
 
   /// 表示中の月の合計。カロリーと金額は写真側の推定を積んだもので、
   /// 記録側に手入力の合計があればそちらが優先される。
+  ///
+  /// 記録が無い月でも集計中でも**高さを変えない**。ここが伸縮すると下の
+  /// カレンダーが上下にずれ、月を送るたびに日付の位置が動いてしまう。
+  /// 高さを数値で固定するのではなく、常に同じ構造(2セル+補足1行+ボタン)を
+  /// 組んで値だけを差し替える。こうすると文字サイズの設定にも追従する。
   Widget _buildPeriodSummary(PeriodSummary s) {
     final tokens = KokoTokens.of(context);
     final fmt = NumberFormat('#,###');
+
+    final loading = _photosByLog == null;
+    final hasData = !loading && !s.isEmpty;
+    const noValue = '—';
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
@@ -586,62 +595,73 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
             children: [
               Text('${s.start.month}月の合計', style: tokens.sectionLabel),
               const SizedBox(height: 10),
-              if (_photosByLog == null)
-                Text('集計中…',
-                    style: TextStyle(fontSize: 13, color: tokens.textFaint))
-              else if (s.isEmpty)
-                Text('この月の記録はありません',
-                    style: TextStyle(fontSize: 13, color: tokens.textFaint))
-              else ...[
-                IntrinsicHeight(
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: _summaryCell(
-                          label: 'カロリー',
-                          value: '${fmt.format(s.totalCalories)} kcal',
-                          metric: CalendarMetric.calories,
-                        ),
-                      ),
-                      VerticalDivider(
-                          width: 12, thickness: 0.8, color: tokens.hairline),
-                      Expanded(
-                        child: _summaryCell(
-                          label: '金額',
-                          value: '¥${fmt.format(s.totalPrice)}',
-                          metric: CalendarMetric.price,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  _summaryFooter(s, fmt),
-                  style: TextStyle(fontSize: 11.5, color: tokens.textMuted),
-                ),
-                const SizedBox(height: 10),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => DietAdviceScreen(
-                          initialDay: _selectedDay ?? _focusedDay,
-                        ),
+              IntrinsicHeight(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _summaryCell(
+                        label: 'カロリー',
+                        value: hasData
+                            ? '${fmt.format(s.totalCalories)} kcal'
+                            : noValue,
+                        metric: CalendarMetric.calories,
+                        enabled: hasData,
                       ),
                     ),
-                    icon: const Icon(Icons.auto_awesome_outlined, size: 16),
-                    label: const Text('食事のアドバイス'),
-                    style: OutlinedButton.styleFrom(
-                      visualDensity: VisualDensity.compact,
-                      minimumSize: const Size(0, 36),
-                      textStyle: const TextStyle(
-                          fontSize: 13, fontWeight: FontWeight.w700),
+                    VerticalDivider(
+                        width: 12, thickness: 0.8, color: tokens.hairline),
+                    Expanded(
+                      child: _summaryCell(
+                        label: '金額',
+                        value:
+                            hasData ? '¥${fmt.format(s.totalPrice)}' : noValue,
+                        metric: CalendarMetric.price,
+                        enabled: hasData,
+                      ),
                     ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                loading
+                    ? '集計中…'
+                    : hasData
+                        ? _summaryFooter(s, fmt)
+                        : 'この月の記録はありません',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  color: hasData ? tokens.textMuted : tokens.textFaint,
+                ),
+                // 2行に折り返すと枠の高さが変わってしまうので1行に収める
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  // 記録が無い月は助言のもとが無いので押せなくする。
+                  // ボタン自体は残す(消すと枠の高さが変わる)
+                  onPressed: hasData
+                      ? () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => DietAdviceScreen(
+                                initialDay: _selectedDay ?? _focusedDay,
+                              ),
+                            ),
+                          )
+                      : null,
+                  icon: const Icon(Icons.auto_awesome_outlined, size: 16),
+                  label: const Text('食事のアドバイス'),
+                  style: OutlinedButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    minimumSize: const Size(0, 36),
+                    textStyle: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w700),
                   ),
                 ),
-              ],
+              ),
             ],
           ),
         ),
@@ -665,23 +685,26 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
   }
 
   /// 合計の1項目。タップするとカレンダーの日付セルがその値の表示に切り替わる
-  /// (もう一度押すと解除)。
+  /// (もう一度押すと解除)。[enabled] が false なら値が無いので押せない。
   Widget _summaryCell({
     required String label,
     required String value,
     required CalendarMetric metric,
+    bool enabled = true,
   }) {
     final tokens = KokoTokens.of(context);
     final scheme = Theme.of(context).colorScheme;
-    final selected = _calendarMetric == metric;
+    final selected = enabled && _calendarMetric == metric;
 
     return Material(
       color: selected ? scheme.primaryContainer : Colors.transparent,
       borderRadius: BorderRadius.circular(10),
       child: InkWell(
         borderRadius: BorderRadius.circular(10),
-        onTap: () => setState(() =>
-            _calendarMetric = selected ? CalendarMetric.none : metric),
+        onTap: enabled
+            ? () => setState(() =>
+                _calendarMetric = selected ? CalendarMetric.none : metric)
+            : null,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
           child: Column(
@@ -702,7 +725,11 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
                 value,
                 style: tokens.numeral.copyWith(
                   fontSize: 18,
-                  color: selected ? scheme.onPrimaryContainer : null,
+                  color: selected
+                      ? scheme.onPrimaryContainer
+                      : enabled
+                          ? null
+                          : tokens.textFaint,
                 ),
               ),
             ],
