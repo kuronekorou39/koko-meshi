@@ -5,8 +5,13 @@
   final String? originalLocalPath; // 編集前のオリジナル画像パス
   final String? originalUrl;
   final String? thumbnailUrl;
-  final String aiStatus; // pending / processing / completed / failed
-  final String? aiError; // 解析失敗の理由(failed時のみ。表示用)
+  /// pending / processing / completed / failed / skipped / unavailable
+  ///
+  /// `unavailable` は写真の実体(オリジナルもサムネイルも)が失われていて
+  /// 解析しようがない状態。`failed` は毎バッチで再試行されるので、直る
+  /// 見込みが無いものを永久に蒸し返さないために分けている
+  final String aiStatus;
+  final String? aiError; // 解析できなかった理由(failed/unavailable時。表示用)
   final String? aiMenuName;
   final int? aiEstimatedPrice;
   final int? aiEstimatedCalories;

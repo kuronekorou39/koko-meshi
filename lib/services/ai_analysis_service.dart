@@ -193,19 +193,33 @@ class AiAnalysisService {
     try {
       // ローカル実体が無い写真(クラウド後削除・復元レコード等)は
       // クラウドのオリジナルをDLして解析する(表示系と同じフォールバック)
-      final path = await PhotoCacheService.getOriginalPath(
+      var path = await PhotoCacheService.getOriginalPath(
         localPath: photo.localPath,
         originalUrl: photo.originalUrl,
       );
+
+      // オリジナルが失われていても、サムネイルは残っていることが多い
+      // (一覧に写真が出ているのはそのため)。解析はどうせ長辺768pxへ縮めて
+      // からモデルへ渡すので、600pxのサムネイルでも実用になる。
+      // 精度は多少落ちるが、結果が何も出ないより明らかに良い
       if (path == null) {
-        final hasUrl = photo.originalUrl?.isNotEmpty ?? false;
-        debugPrint('[AI] photo file unavailable (local+cloud) for ${photo.id}');
+        final thumb = photo.thumbnailUrl;
+        if (thumb != null && thumb.isNotEmpty && await File(thumb).exists()) {
+          debugPrint('[AI] original missing; falling back to thumbnail '
+              'for ${photo.id}');
+          path = thumb;
+        }
+      }
+
+      if (path == null) {
+        // オリジナルもサムネイルも無い。何度やっても結果は同じなので、
+        // failed(毎バッチで再試行される)ではなく終端状態にして蒸し返さない
+        debugPrint('[AI] photo file unavailable (no original, no thumbnail) '
+            'for ${photo.id}');
         await _writeAiResult(
           photo.id,
-          aiStatus: 'failed',
-          aiError: hasUrl
-              ? '写真ファイルがローカルに無く、クラウドからの取得にも失敗しました。通信環境を確認して再解析してください'
-              : '写真ファイルがローカルに無く、クラウドにも保存されていないため解析できません',
+          aiStatus: 'unavailable',
+          aiError: '写真の実体が見つからないため解析できません',
         );
         return;
       }
@@ -301,9 +315,9 @@ class AiAnalysisService {
     if (current == null) return;
     await LocalDatabase.updateMealPhoto(current.copyWith(
       aiStatus: aiStatus,
-      // 失敗時は理由を保存し、それ以外の遷移では古い理由を消す
+      // 解析できなかった状態では理由を保存し、それ以外の遷移では古い理由を消す
       aiError: aiError,
-      clearAiError: aiStatus != 'failed',
+      clearAiError: aiStatus != 'failed' && aiStatus != 'unavailable',
       aiMenuName: aiMenuName,
       aiEstimatedPrice: aiEstimatedPrice,
       aiEstimatedCalories: aiEstimatedCalories,

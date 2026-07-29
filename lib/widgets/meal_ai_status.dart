@@ -73,6 +73,10 @@ MealAiState resolveMealAiState(
 /// AI解析の状態表示が要るか。呼び出し側が余白や区切りを組む前に、
 /// [MealAiStatusLine] が何も描かないケースを判別するために使う。
 /// これが true なら [resolveMealAiState] は [MealAiState.none] を返さない。
+///
+/// `unavailable`(写真の実体が失われている)は意図して対象外。利用者に
+/// できることが何も無いのに一覧に警告を並べても仕方がないので、一覧では
+/// 黙り、詳細画面でだけ事情を説明する。
 bool hasMealAiStatus(List<MealPhoto> photos) => photos.any((p) =>
     p.aiStatus == 'failed' ||
     (!p.skipAi && (p.aiStatus == 'pending' || p.aiStatus == 'processing')));

@@ -434,6 +434,19 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
         }
       case 'skipped':
         return _buildSkippedCard(photo);
+      case 'unavailable':
+        // 写真の実体が無いので再解析しても同じ。ボタンは出さない
+        return _buildStatusCard(
+          leading: Icon(
+            Icons.image_not_supported_outlined,
+            size: 18,
+            color: KokoTokens.of(context).textFaint,
+          ),
+          message: '写真の実体が見つかりません',
+          detail: photo.aiError ??
+              'この記録の写真ファイルが失われているため、AI解析はできません。'
+                  '料理名や価格は手入力で記録できます。',
+        );
       default:
         // skipAiがtrueでstatusがcompletedでない場合
         if (photo.skipAi) {
