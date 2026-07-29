@@ -1,5 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'map_style.dart';
+
 /// AI解析のモード
 /// - off: AI解析を使わない(手動入力のみ)
 /// - onDevice: 端末内Gemma(E2B)で解析(オフライン・無料)
@@ -48,6 +50,27 @@ class AppSettings {
 
   static Future<void> setAiMode(AiAnalysisMode mode) async {
     await _prefs?.setString(_keyAiMode, mode.name);
+  }
+
+  // --- 地図に出すラベル ---
+  static const _keyMapLabels = 'map_label_layers';
+
+  /// 既定は空(まっさらな地図)。自分の記録のピンを主役にするため
+  static Set<MapLabelLayer> get mapLabelLayers {
+    final names = _prefs?.getStringList(_keyMapLabels);
+    if (names == null) return const {};
+    return names
+        .map((n) =>
+            MapLabelLayer.values.where((l) => l.name == n).firstOrNull)
+        .whereType<MapLabelLayer>()
+        .toSet();
+  }
+
+  static Future<void> setMapLabelLayers(Set<MapLabelLayer> layers) async {
+    await _prefs?.setStringList(
+      _keyMapLabels,
+      layers.map((l) => l.name).toList(),
+    );
   }
 
   // --- 本文フォント ---

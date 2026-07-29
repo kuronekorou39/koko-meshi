@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -16,7 +15,9 @@ import '../../models/meal_type.dart';
 import '../../models/saved_place.dart';
 import '../../providers/map_focus_providers.dart';
 import '../../providers/meal_providers.dart';
+import '../../services/app_settings_service.dart';
 import '../../services/location_service.dart';
+import '../../services/map_style.dart';
 import '../../services/places_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/cached_photo_image.dart';
@@ -38,7 +39,8 @@ class _MapTabState extends ConsumerState<MapTab> {
   LatLng _initialPosition = const LatLng(35.6812, 139.7671);
   LatLng _currentCenter = const LatLng(35.6812, 139.7671);
   bool _loadingPosition = true;
-  String? _mapStyleBase;
+  /// 地図に出すラベルの種類。設定に保存され、次に開いたときも保たれる
+  Set<MapLabelLayer> _mapLabels = AppSettings.mapLabelLayers;
   bool _isTilted = true;
 
   // マーカー
@@ -72,7 +74,6 @@ class _MapTabState extends ConsumerState<MapTab> {
   @override
   void initState() {
     super.initState();
-    _loadMapStyle();
     _initCurrentPosition();
   }
 
@@ -82,9 +83,66 @@ class _MapTabState extends ConsumerState<MapTab> {
     super.dispose();
   }
 
-  Future<void> _loadMapStyle() async {
-    final style = await rootBundle.loadString('assets/map_style.json');
-    setState(() => _mapStyleBase = style);
+  /// ラベルの表示を切り替えるシート。
+  ///
+  /// 効果がその場で見えないと選べないので、設定画面ではなくマップに置く。
+  /// どれをオンにしても費用は増えない([MapLabelLayer] のコメント参照)。
+  Future<void> _showLayerSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetCtx) => StatefulBuilder(
+        builder: (context, setSheetState) {
+          final tokens = KokoTokens.of(context);
+          return SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 8, 0),
+                  child: Row(
+                    children: [
+                      Text('地図に出すもの',
+                          style: Theme.of(context).textTheme.titleMedium),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        color: tokens.textMuted,
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(),
+                for (final layer in MapLabelLayer.values)
+                  SwitchListTile(
+                    dense: true,
+                    title: Text(layer.label),
+                    value: _mapLabels.contains(layer),
+                    onChanged: (on) {
+                      final next = {..._mapLabels};
+                      if (on) {
+                        next.add(layer);
+                      } else {
+                        next.remove(layer);
+                      }
+                      // シートと地図の両方を更新する
+                      setSheetState(() {});
+                      _applyMapLabels(next);
+                    },
+                  ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _applyMapLabels(Set<MapLabelLayer> layers) async {
+    setState(() => _mapLabels = layers);
+    await AppSettings.setMapLabelLayers(layers);
   }
 
   Future<void> _initCurrentPosition() async {
@@ -790,7 +848,7 @@ class _MapTabState extends ConsumerState<MapTab> {
                   mapToolbarEnabled: false,
                   compassEnabled: false,
                   buildingsEnabled: true,
-                  style: _mapStyleBase,
+                  style: buildMapStyle(_mapLabels),
                   onMapCreated: (controller) {
                     _mapController = controller;
                     _loadMealMarkers();
@@ -817,16 +875,29 @@ class _MapTabState extends ConsumerState<MapTab> {
                   onTap: (_) => _closeSheet(),
                 ),
 
-                // 視点切り替えボタン
+                // 視点切り替え・ラベル表示の切り替え
                 Positioned(
                   top: 16,
                   left: 16,
-                  child: _mapButton(
-                    icon: _isTilted
-                        ? Icons.map_outlined
-                        : Icons.view_in_ar_outlined,
-                    tooltip: _isTilted ? '真上から表示' : '立体表示',
-                    onTap: _toggleTilt,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _mapButton(
+                        icon: _isTilted
+                            ? Icons.map_outlined
+                            : Icons.view_in_ar_outlined,
+                        tooltip: _isTilted ? '真上から表示' : '立体表示',
+                        onTap: _toggleTilt,
+                      ),
+                      const SizedBox(height: 8),
+                      _mapButton(
+                        icon: _mapLabels.isEmpty
+                            ? Icons.layers_outlined
+                            : Icons.layers,
+                        tooltip: '地図に出すもの',
+                        onTap: _showLayerSheet,
+                      ),
+                    ],
                   ),
                 ),
 
