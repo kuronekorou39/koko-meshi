@@ -4,6 +4,7 @@ import '../database/local_database.dart';
 import '../models/meal_log.dart';
 import '../models/meal_photo.dart';
 import '../models/restaurant.dart';
+import '../models/saved_place.dart';
 
 /// 食事記録一覧
 final mealLogsProvider = AsyncNotifierProvider<MealLogsNotifier, List<MealLog>>(
@@ -45,4 +46,9 @@ final mealLogProvider = FutureProvider.family<MealLog?, String>(
 /// 特定の店舗
 final restaurantProvider = FutureProvider.family<Restaurant?, String>(
   (ref, id) => LocalDatabase.getRestaurant(id),
+);
+
+/// 登録済みのマイプレイス(自宅・職場など)
+final savedPlacesProvider = FutureProvider<List<SavedPlace>>(
+  (ref) => LocalDatabase.getSavedPlaces(),
 );

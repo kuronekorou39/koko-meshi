@@ -9,6 +9,7 @@ import '../../database/local_database.dart';
 import '../../models/meal_log.dart';
 import '../../models/meal_photo.dart';
 import '../../models/meal_type.dart';
+import '../../providers/map_focus_providers.dart';
 import '../../providers/meal_providers.dart';
 import '../../services/ai_analysis_service.dart';
 import 'package:geolocator/geolocator.dart';
@@ -43,6 +44,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 詳細画面などから場所を指定されたらマップへ切り替える。
+    // 寄る操作自体はマップ側が行う
+    ref.listen(mapFocusProvider, (_, next) {
+      if (next != null && _currentIndex != 1) {
+        setState(() => _currentIndex = 1);
+      }
+    });
+
     return Scaffold(
       body: _tabs[_currentIndex],
       bottomNavigationBar: NavigationBar(

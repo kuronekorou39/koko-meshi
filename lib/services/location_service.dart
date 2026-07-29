@@ -23,12 +23,15 @@ class LocationService {
   }
 
   /// 座標から日本語の住所を取得（逆ジオコーディング）
-  static Future<String?> getAddressFromPosition(Position position) async {
+  static Future<String?> getAddressFromPosition(Position position) =>
+      getAddress(position.latitude, position.longitude);
+
+  /// 座標から日本語の住所を取得。
+  ///
+  /// OS内蔵のジオコーダを使うので Maps Platform の課金対象外。
+  static Future<String?> getAddress(double latitude, double longitude) async {
     try {
-      final placemarks = await placemarkFromCoordinates(
-        position.latitude,
-        position.longitude,
-      );
+      final placemarks = await placemarkFromCoordinates(latitude, longitude);
       if (placemarks.isEmpty) return null;
 
       final p = placemarks.first;

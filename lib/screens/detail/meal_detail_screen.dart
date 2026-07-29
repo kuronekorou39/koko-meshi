@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart' show ValueListenable, compute;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -13,12 +14,14 @@ import '../../database/local_database.dart';
 import '../../models/meal_log.dart';
 import '../../models/meal_photo.dart';
 import '../../models/meal_type.dart';
+import '../../providers/map_focus_providers.dart';
 import '../../providers/meal_providers.dart';
 import '../../services/ai_analysis_service.dart';
 import '../../services/app_settings_service.dart';
 import '../../services/device_capability.dart';
 import '../../services/gemma_download_manager.dart';
 import '../../services/gemma_ondevice_service.dart';
+import '../../services/location_service.dart';
 import '../../services/photo_cache_service.dart';
 import '../../services/photo_service.dart';
 import '../../theme/app_theme.dart';
@@ -149,6 +152,7 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
                 ),
                 const SizedBox(height: 16),
                 _buildMetaRow(mealLog, dateFormat),
+                _buildLocationRow(mealLog),
                 const SizedBox(height: 16),
                 photosAsync.when(
                   loading: () => const SizedBox.shrink(),
@@ -165,39 +169,14 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
     );
   }
 
-  /// メタ情報: 食事種別チップ・自宅タグ・日時
+  /// メタ情報: 食事種別チップ・日時。
+  /// 場所は下の行([_buildLocationRow])に任せる(自宅タグを二重に出さない)。
   Widget _buildMetaRow(MealLog mealLog, DateFormat dateFormat) {
     final tokens = KokoTokens.of(context);
-    final scheme = Theme.of(context).colorScheme;
 
     return Row(
       children: [
         _buildMealTypeSelector(mealLog),
-        if (mealLog.locationTag == 'home') ...[
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: scheme.surfaceContainerHigh,
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.home_outlined, size: 16, color: tokens.textMuted),
-                const SizedBox(width: 6),
-                Text(
-                  '自宅',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: tokens.textMuted,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
         const SizedBox(width: 12),
         Expanded(
           child: Text(
@@ -211,6 +190,115 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  /// 場所の行。マイプレイス名(自宅・職場)や店名と、座標から引いた住所を出す。
+  ///
+  /// タップでマップのその場所へ寄る。記録から地図へ辿れないと、せっかく
+  /// 位置を持っているのに見に行けない。長押しで文字列をコピーできる
+  /// (店名や住所を検索したり人に送ったりするため。編集はここでは持たない)。
+  ///
+  /// 住所はOS内蔵のジオコーダで引くので課金されない。座標が無い記録では
+  /// この行自体を出さない。
+  Widget _buildLocationRow(MealLog mealLog) {
+    final tokens = KokoTokens.of(context);
+    final lat = mealLog.latitude;
+    final lng = mealLog.longitude;
+    final placeName = _placeLabel(mealLog);
+
+    // 場所を示すものが何も無ければ行を出さない
+    if (lat == null && lng == null && placeName == null) {
+      return const SizedBox.shrink();
+    }
+
+    return FutureBuilder<String?>(
+      // 座標があるときだけ住所を引く
+      future: (lat != null && lng != null)
+          ? LocationService.getAddress(lat, lng)
+          : Future.value(null),
+      builder: (context, snapshot) {
+        final address = snapshot.data;
+        final parts = [?placeName, ?address];
+        if (parts.isEmpty) return const SizedBox.shrink();
+        final text = parts.join('　');
+        final canOpenMap = lat != null && lng != null;
+
+        return Padding(
+          padding: const EdgeInsets.only(top: 10),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: canOpenMap
+                ? () => _openInMap(lat, lng, placeName ?? address)
+                : null,
+            onLongPress: () => _copyLocationText(text),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
+              child: Row(
+                children: [
+                  Icon(_placeIcon(mealLog), size: 16, color: tokens.textMuted),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      text,
+                      style: TextStyle(fontSize: 13, color: tokens.textMuted),
+                      maxLines: 2,
+                    ),
+                  ),
+                  if (canOpenMap) ...[
+                    const SizedBox(width: 4),
+                    Icon(Icons.map_outlined, size: 16, color: tokens.textFaint),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// マイプレイス名か店名。どちらも無ければ null
+  String? _placeLabel(MealLog mealLog) {
+    if (mealLog.locationTag == 'home') return '自宅';
+
+    final tag = mealLog.locationTag;
+    if (tag != null) {
+      final places = ref.watch(savedPlacesProvider).valueOrNull;
+      final place = places?.where((p) => p.id == tag).firstOrNull;
+      if (place != null) return place.name;
+    }
+
+    final restaurantId = mealLog.restaurantId;
+    if (restaurantId != null) {
+      return ref.watch(restaurantProvider(restaurantId)).valueOrNull?.name;
+    }
+    return null;
+  }
+
+  IconData _placeIcon(MealLog mealLog) {
+    if (mealLog.locationTag == 'home') return Icons.home_outlined;
+    if (mealLog.locationTag != null) return Icons.star_outline;
+    if (mealLog.restaurantId != null) return Icons.storefront_outlined;
+    return Icons.place_outlined;
+  }
+
+  /// マップタブへ切り替えてその場所に寄る
+  void _openInMap(double latitude, double longitude, String? label) {
+    ref.read(mapFocusProvider.notifier).state = MapFocus(
+      latitude: latitude,
+      longitude: longitude,
+      label: label,
+    );
+    // 詳細を閉じてホーム(マップタブ)へ戻る
+    context.go('/');
+  }
+
+  Future<void> _copyLocationText(String text) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('コピーしました'), duration: Duration(seconds: 2)),
     );
   }
 

@@ -14,6 +14,7 @@ import '../../models/meal_log.dart';
 import '../../models/meal_photo.dart';
 import '../../models/meal_type.dart';
 import '../../models/saved_place.dart';
+import '../../providers/map_focus_providers.dart';
 import '../../providers/meal_providers.dart';
 import '../../services/location_service.dart';
 import '../../services/places_service.dart';
@@ -703,6 +704,26 @@ class _MapTabState extends ConsumerState<MapTab> {
     });
   }
 
+  /// 詳細画面から渡された場所へ寄る。読んだら消して、次に開いたときに
+  /// また寄ってしまわないようにする。
+  Future<void> _consumeMapFocus() async {
+    final focus = ref.read(mapFocusProvider);
+    if (focus == null) return;
+    ref.read(mapFocusProvider.notifier).state = null;
+
+    final target = LatLng(focus.latitude, focus.longitude);
+    setState(() => _currentCenter = target);
+    await _mapController?.animateCamera(
+      CameraUpdate.newLatLngZoom(target, 17),
+    );
+    final label = focus.label;
+    if (label != null && label.isNotEmpty && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(label), duration: const Duration(seconds: 2)),
+      );
+    }
+  }
+
   /// 一覧から店を選んだとき: 地図をそこへ寄せて詳細シートに切り替える
   Future<void> _focusPlace(PlaceInfo place) async {
     setState(() => _searchResults = null);
@@ -715,6 +736,10 @@ class _MapTabState extends ConsumerState<MapTab> {
   @override
   Widget build(BuildContext context) {
     ref.listen(mealLogsProvider, (_, _) => _loadMealMarkers());
+    // マップを開いたままで場所を指定された場合(タブが既にマップのとき)
+    ref.listen(mapFocusProvider, (_, next) {
+      if (next != null) _consumeMapFocus();
+    });
 
     final allMarkers = {..._mealMarkers, ..._placeMarkersMap.values};
     final scheme = Theme.of(context).colorScheme;
@@ -769,6 +794,9 @@ class _MapTabState extends ConsumerState<MapTab> {
                   onMapCreated: (controller) {
                     _mapController = controller;
                     _loadMealMarkers();
+                    // 詳細画面から場所を指定されて開かれた場合。地図が
+                    // できるまでカメラを動かせないのでここで消化する
+                    _consumeMapFocus();
                     // 費用対策: 自動検索は廃止。マップを開くたびに課金APIが飛ぶのを防ぐ。
                     // 店舗検索は「このエリアで検索」ボタンの明示タップ時のみ実行する。
                   },
