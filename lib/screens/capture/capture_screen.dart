@@ -14,9 +14,11 @@ import '../../database/local_database.dart';
 import '../../models/meal_log.dart';
 import '../../models/meal_photo.dart';
 import '../../models/meal_type.dart';
+import '../../models/saved_place.dart';
 import '../../providers/meal_providers.dart';
 import '../../services/ai_analysis_service.dart';
 import '../../services/location_service.dart';
+import '../../services/photo_grouping.dart';
 import '../../services/photo_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/meal_type_picker.dart';
@@ -43,6 +45,15 @@ class _SelectedPhoto {
 
   /// 見た目に影響する編集があるか（保存時に焼き込む対象か）
   bool get hasEdits => editParams != null && !editParams!.isIdentity;
+}
+
+/// 1つの食事として保存する写真の束。
+class _PhotoGroup {
+  const _PhotoGroup({required this.indices, required this.mealType});
+
+  /// _selectedPhotos の添え字(時刻順)
+  final List<int> indices;
+  final MealType mealType;
 }
 
 class _CaptureScreenState extends ConsumerState<CaptureScreen> {
@@ -85,6 +96,78 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       }
     }
     if (mounted) _adoptExifMetadata();
+  }
+
+  /// 種別は組ごとに持つ。写真の入れ替えで組の並びが変わるので、
+  /// 組の代表写真(一番古い1枚)を鍵にして覚える
+  final Map<_SelectedPhoto, MealType> _groupTypes = {};
+
+  /// 利用者が「上と同じ食事」に倒した組の代表写真。
+  /// GPSの誤差で同じ店の写真が分かれることがあるので、手で束ねられるようにする
+  final Set<_SelectedPhoto> _mergedIntoPrevious = {};
+
+  /// 選んだ写真を食事ごとに分けたもの。
+  ///
+  /// 判定は [groupShots](閾値はマップと共通)。そのうえで、利用者が結合を
+  /// 指定した組は前の組へ畳む。
+  List<_PhotoGroup> get _groups {
+    final raw = groupShots(_selectedPhotos
+        .map((p) => GroupableShot(
+              shotAt: p.exifDateTime,
+              latitude: p.exifLatitude,
+              longitude: p.exifLongitude,
+            ))
+        .toList());
+
+    final folded = <List<int>>[];
+    for (final group in raw) {
+      final rep = _selectedPhotos[group.first];
+      if (folded.isNotEmpty && _mergedIntoPrevious.contains(rep)) {
+        folded.last.addAll(group);
+      } else {
+        folded.add([...group]);
+      }
+    }
+
+    return [
+      for (final indices in folded)
+        _PhotoGroup(
+          indices: indices,
+          mealType:
+              _groupTypes[_selectedPhotos[indices.first]] ?? MealType.unset,
+        ),
+    ];
+  }
+
+  /// 組の日時。EXIFを持つ一番古い写真の時刻。無ければ画面の日時
+  DateTime _groupDateTime(_PhotoGroup group) {
+    final times = group.indices
+        .map((i) => _selectedPhotos[i].exifDateTime)
+        .whereType<DateTime>()
+        .toList()
+      ..sort();
+    return times.firstOrNull ?? _capturedAt;
+  }
+
+  /// 組の位置。GPSを持つ一番古い写真のもの。
+  ///
+  /// [allowScreenFallback] は「1件にまとめて保存する場合」だけ true にする。
+  /// 複数に分かれているとき、いまいる場所を過去の写真の記録に付けるのは誤り。
+  ({double lat, double lng})? _groupPosition(
+    _PhotoGroup group, {
+    required bool allowScreenFallback,
+  }) {
+    final withGps = group.indices
+        .map((i) => _selectedPhotos[i])
+        .where((p) => p.exifLatitude != null && p.exifLongitude != null)
+        .toList()
+      ..sort((a, b) => (a.exifDateTime ?? DateTime(9999))
+          .compareTo(b.exifDateTime ?? DateTime(9999)));
+    final source = withGps.firstOrNull;
+    if (source != null) {
+      return (lat: source.exifLatitude!, lng: source.exifLongitude!);
+    }
+    return allowScreenFallback ? _effectivePosition : null;
   }
 
   /// 記録(MealLog)の日時と場所を、選んだ写真から決める。
@@ -189,6 +272,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   @override
   Widget build(BuildContext context) {
     final dateFormat = DateFormat('yyyy/M/d (E) HH:mm', 'ja');
+    // 保存ボタンの文言にも使うので先に出しておく
+    final groups = _groups;
 
     return Scaffold(
       appBar: AppBar(
@@ -204,9 +289,13 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                 children: [
-                  _selectedPhotos.isEmpty
-                      ? _buildPhotoPlaceholder()
-                      : _buildPhotoGrid(),
+                  if (_selectedPhotos.isEmpty)
+                    _buildPhotoPlaceholder()
+                  else if (groups.length > 1)
+                    // 別の食事が混ざっている: 組ごとに日時・場所・種別を持つ
+                    _buildGroupSections(groups, dateFormat)
+                  else
+                    _buildPhotoGrid(),
                   const SizedBox(height: 12),
 
                   // 写真追加ボタン（入り方で出し分け）
@@ -218,24 +307,26 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                         : Icons.add_a_photo_outlined),
                     label: Text(widget.fromLibrary ? 'ライブラリから追加' : '追加撮影'),
                   ),
-                  const SizedBox(height: 20),
 
-                  // 食事種別選択(詳細画面と同じボトムシート)
-                  Text('食事の種類', style: KokoTokens.of(context).sectionLabel),
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: MealTypeField(
-                      value: _selectedType,
-                      onChanged: (type) =>
-                          setState(() => _selectedType = type),
+                  // 1つの食事として保存する場合だけ、画面全体の種別と
+                  // 日時・場所を出す(組に分かれているときは各枠の中にある)
+                  if (groups.length <= 1) ...[
+                    const SizedBox(height: 20),
+                    Text('食事の種類', style: KokoTokens.of(context).sectionLabel),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: MealTypeField(
+                        value: _selectedType,
+                        onChanged: (type) =>
+                            setState(() => _selectedType = type),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 14),
-
-                  // 日時・位置情報
-                  _buildMetadataBar(dateFormat),
-                  _buildMixedMetadataNotice(),
+                    const SizedBox(height: 14),
+                    _buildMetadataBar(dateFormat),
+                    // 分けずに1件にする場合だけ、離れている旨を警告する
+                    _buildMixedMetadataNotice(),
+                  ],
                 ],
               ),
             ),
@@ -295,7 +386,12 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : const Icon(Icons.check),
-                      label: Text(_saving ? '保存中...' : '保存'),
+                      // 何件になるのかを押す前に見せる
+                      label: Text(_saving
+                          ? '保存中...'
+                          : groups.length > 1
+                              ? '${groups.length}件を保存'
+                              : '保存'),
                       style: FilledButton.styleFrom(
                         minimumSize: const Size.fromHeight(56),
                       ),
@@ -547,10 +643,14 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     );
   }
 
-  Widget _buildPhotoGrid() {
+  /// [indices] を渡すとその写真だけを並べる(組ごとの表示に使う)。
+  /// タイルの操作は全体の添え字で動くので、渡すのは添え字のまま。
+  Widget _buildPhotoGrid([List<int>? indices]) {
+    final shown =
+        indices ?? [for (var i = 0; i < _selectedPhotos.length; i++) i];
     // 1枚だけなら列を分けずに大きく見せる。2枚以上は2列。
     // 3列だとタイルが小さすぎて、料理も上に乗るボタンも見えなかった
-    final columns = _selectedPhotos.length == 1 ? 1 : 2;
+    final columns = shown.length == 1 ? 1 : 2;
     return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
@@ -559,8 +659,138 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         crossAxisSpacing: 10,
         mainAxisSpacing: 10,
       ),
-      itemCount: _selectedPhotos.length,
-      itemBuilder: (context, index) => _photoTile(index),
+      itemCount: shown.length,
+      itemBuilder: (context, index) => _photoTile(shown[index]),
+    );
+  }
+
+  /// 組ごとのセクション。2つ以上に分かれたときだけ使う。
+  ///
+  /// 別の食事として別々に保存されることが、見て分かるようにする。日時・場所・
+  /// 種別を組ごとに持たせるのが目的なので、それぞれを枠の中に収める。
+  Widget _buildGroupSections(List<_PhotoGroup> groups, DateFormat dateFormat) {
+    final tokens = KokoTokens.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Row(
+            children: [
+              Icon(Icons.call_split, size: 15, color: tokens.textMuted),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  '撮影日時と場所から${groups.length}件の食事に分けました。'
+                  'それぞれ別の記録として保存します',
+                  style: TextStyle(fontSize: 11.5, height: 1.4,
+                      color: tokens.textMuted),
+                ),
+              ),
+            ],
+          ),
+        ),
+        for (var i = 0; i < groups.length; i++) ...[
+          _buildGroupCard(groups[i], i, dateFormat),
+          if (i < groups.length - 1) const SizedBox(height: 12),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildGroupCard(_PhotoGroup group, int position, DateFormat fmt) {
+    final tokens = KokoTokens.of(context);
+    final rep = _selectedPhotos[group.indices.first];
+    final at = _groupDateTime(group);
+    final pos = _groupPosition(group, allowScreenFallback: false);
+
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text('${position + 1}件目',
+                    style: tokens.sectionLabel),
+                const Spacer(),
+                Text(
+                  '${group.indices.length}枚',
+                  style: tokens.numeral
+                      .copyWith(fontSize: 11.5, color: tokens.textFaint),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            _buildPhotoGrid(group.indices),
+            const SizedBox(height: 10),
+
+            // 日時
+            Row(
+              children: [
+                Icon(Icons.schedule, size: 14, color: tokens.textFaint),
+                const SizedBox(width: 6),
+                Text(
+                  fmt.format(at),
+                  style: tokens.numeral
+                      .copyWith(fontSize: 12.5, color: tokens.textMuted),
+                ),
+              ],
+            ),
+            // 場所(住所はOS内蔵のジオコーダなので課金されない)
+            if (pos != null) ...[
+              const SizedBox(height: 4),
+              FutureBuilder<String?>(
+                future: LocationService.getAddress(pos.lat, pos.lng),
+                builder: (context, snapshot) => Row(
+                  children: [
+                    Icon(Icons.place_outlined,
+                        size: 14, color: tokens.textFaint),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        snapshot.data ?? '位置情報あり',
+                        style:
+                            TextStyle(fontSize: 12.5, color: tokens.textMuted),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            const SizedBox(height: 10),
+
+            Align(
+              alignment: Alignment.centerLeft,
+              child: MealTypeField(
+                value: group.mealType,
+                onChanged: (type) =>
+                    setState(() => _groupTypes[rep] = type),
+              ),
+            ),
+
+            // 分かれすぎたときに手で束ねられるようにする
+            if (position > 0)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () =>
+                      setState(() => _mergedIntoPrevious.add(rep)),
+                  icon: const Icon(Icons.merge, size: 15),
+                  label: const Text('前の食事と同じにする'),
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    textStyle: const TextStyle(fontSize: 12),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -719,6 +949,28 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     }
   }
 
+  /// 座標が登録済みの場所の近くなら、その場所のタグを返す。
+  /// 100mはマップ側の判定と揃えている
+  String? _matchSavedPlace(
+    List<SavedPlace> savedPlaces,
+    double? lat,
+    double? lng,
+  ) {
+    if (lat == null || lng == null) return null;
+    for (final place in savedPlaces) {
+      final distance = Geolocator.distanceBetween(
+        lat,
+        lng,
+        place.latitude,
+        place.longitude,
+      );
+      if (distance <= 100) {
+        return place.iconType == 'home' ? 'home' : place.id;
+      }
+    }
+    return null;
+  }
+
   Future<void> _save() async {
     setState(() => _saving = true);
     // 画面を閉じた後に通知を出すため、アプリ直下のMessengerを先に掴んでおく
@@ -726,44 +978,37 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     var bakeFailures = 0; // 焼き込みに失敗しオリジナルで保存した枚数
 
     try {
-      final mealLogId = _uuid.v4();
+      // 撮影日時と場所で分けた「食事」ごとに、別々の記録として保存する。
+      // ライブラリからまとめて取り込むと別の日・別の店が混ざるので、1件に
+      // 押し込むと日時と場所が一番古い写真のものに揃えられてしまう
+      final groups = _groups;
+      // 場所の判定に使うので1回だけ読む
+      final savedPlaces = await LocalDatabase.getSavedPlaces();
 
-      // 位置情報: 写真のEXIF > 端末のGPS(画面に出ている値と同じ順)
-      final lat = _effectivePosition?.lat;
-      final lng = _effectivePosition?.lng;
+      for (final group in groups) {
+        final mealLogId = _uuid.v4();
+        final eatenAt = _groupDateTime(group);
+        final position =
+            _groupPosition(group, allowScreenFallback: groups.length == 1);
+        final lat = position?.lat;
+        final lng = position?.lng;
+        final locationTag = _matchSavedPlace(savedPlaces, lat, lng);
 
-      // 自宅判定: GPSと保存済み場所を比較
-      String? locationTag;
-      if (lat != null && lng != null) {
-        final savedPlaces = await LocalDatabase.getSavedPlaces();
-        for (final place in savedPlaces) {
-          final distance = Geolocator.distanceBetween(
-            lat, lng,
-            place.latitude,
-            place.longitude,
-          );
-          if (distance <= 100) {
-            locationTag = place.iconType == 'home' ? 'home' : place.id;
-            break;
-          }
-        }
-      }
+        await LocalDatabase.insertMealLog(MealLog(
+          id: mealLogId,
+          // 1件にまとめる場合は画面の種別、分かれている場合は組ごとの種別。
+          // 出している入力欄がそれぞれ違う
+          mealType: groups.length == 1 ? _selectedType : group.mealType,
+          eatenAt: eatenAt,
+          latitude: lat,
+          longitude: lng,
+          locationTag: locationTag,
+          createdAt: DateTime.now(),
+        ));
 
-      // 食事記録を作成
-      final mealLog = MealLog(
-        id: mealLogId,
-        mealType: _selectedType,
-        eatenAt: _capturedAt,
-        latitude: lat,
-        longitude: lng,
-        locationTag: locationTag,
-        createdAt: DateTime.now(),
-      );
-      await LocalDatabase.insertMealLog(mealLog);
-
-      // 写真を保存（編集がある場合は先にisolateで焼き込んでから保存）
-      for (var i = 0; i < _selectedPhotos.length; i++) {
-        final item = _selectedPhotos[i];
+        // 写真を保存（編集がある場合は先にisolateで焼き込んでから保存）
+        for (final i in group.indices) {
+          final item = _selectedPhotos[i];
         // まずオリジナル（未編集）画像を保存
         final originalPath = await PhotoService.saveToLocalFromPath(
           item.originalFile.path,
@@ -801,25 +1046,25 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         }
         final thumbnailPath = await PhotoService.generateThumbnail(localPath);
 
-        final photoLat = item.exifLatitude ?? lat;
-        final photoLng = item.exifLongitude ?? lng;
-        final photoShotAt = item.exifDateTime ?? _capturedAt;
+          final photoLat = item.exifLatitude ?? lat;
+          final photoLng = item.exifLongitude ?? lng;
+          final photoShotAt = item.exifDateTime ?? eatenAt;
 
-        final photo = MealPhoto(
-          id: _uuid.v4(),
-          mealLogId: mealLogId,
-          localPath: localPath,
-          originalLocalPath: originalPath,
-          thumbnailUrl: thumbnailPath,
-          skipAi: !_aiEnabled,
-          aiStatus: _aiEnabled ? 'pending' : 'skipped',
-          editParamsJson: editParamsJson,
-          shotAt: photoShotAt,
-          latitude: photoLat,
-          longitude: photoLng,
-          createdAt: DateTime.now(),
-        );
-        await LocalDatabase.insertMealPhoto(photo);
+          await LocalDatabase.insertMealPhoto(MealPhoto(
+            id: _uuid.v4(),
+            mealLogId: mealLogId,
+            localPath: localPath,
+            originalLocalPath: originalPath,
+            thumbnailUrl: thumbnailPath,
+            skipAi: !_aiEnabled,
+            aiStatus: _aiEnabled ? 'pending' : 'skipped',
+            editParamsJson: editParamsJson,
+            shotAt: photoShotAt,
+            latitude: photoLat,
+            longitude: photoLng,
+            createdAt: DateTime.now(),
+          ));
+        }
       }
 
       // 一覧を更新して画面を閉じる
