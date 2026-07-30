@@ -240,12 +240,13 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                 children: [
                   // 1件でも複数でも同じ形にする。件数で画面の作りが変わると
-                  // 見え方が揃わず、どこに何があるのか覚えられない
-                  if (_selectedPhotos.isEmpty)
-                    _buildPhotoPlaceholder()
-                  else
+                  // 見え方が揃わず、どこに何があるのか覚えられない。
+                  // 0件のときは「ライブラリから追加」だけを出す(同じことを
+                  // する大きなボタンを重ねて置かない)
+                  if (_selectedPhotos.isNotEmpty) ...[
                     _buildGroupSections(groups, dateFormat),
-                  const SizedBox(height: 12),
+                    const SizedBox(height: 12),
+                  ],
                   _buildAddPhotoButton(),
                 ],
               ),
@@ -319,32 +320,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                   ),
                 ],
               ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPhotoPlaceholder() {
-    final tokens = KokoTokens.of(context);
-    return GestureDetector(
-      onTap: _showPickerChoice,
-      child: Container(
-        height: 220,
-        decoration: BoxDecoration(
-          color: tokens.photoPlaceholder,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: tokens.hairline, width: 0.8),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.add_a_photo_outlined, size: 56, color: tokens.textFaint),
-            const SizedBox(height: 16),
-            Text(
-              'タップして写真を撮影・選択',
-              style: TextStyle(fontSize: 14, color: tokens.textMuted),
             ),
           ],
         ),
@@ -624,35 +599,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     return ColorFiltered(
       colorFilter: ColorFilter.matrix(buildEditColorMatrix(filter)),
       child: image,
-    );
-  }
-
-  void _showPickerChoice() {
-    showModalBottomSheet(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.camera_alt_outlined),
-              title: const Text('カメラで撮影'),
-              onTap: () {
-                Navigator.pop(context);
-                _takePhoto();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('ライブラリから選択'),
-              onTap: () {
-                Navigator.pop(context);
-                _pickFromLibrary();
-              },
-            ),
-          ],
-        ),
-      ),
     );
   }
 
