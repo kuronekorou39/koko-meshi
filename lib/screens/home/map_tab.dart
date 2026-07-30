@@ -20,6 +20,7 @@ import '../../services/location_service.dart';
 import '../../services/map_style.dart';
 import '../../services/places_service.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/app_logo.dart';
 import '../../widgets/cached_photo_image.dart';
 import 'place_editor_screen.dart';
 import 'place_search_sheet.dart';
@@ -818,7 +819,7 @@ class _MapTabState extends ConsumerState<MapTab> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('グルメマップ'),
+        title: const AppLogo(),
         actions: [
           IconButton(
             icon: Badge(

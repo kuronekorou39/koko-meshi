@@ -14,6 +14,7 @@ import '../../services/ai_analysis_service.dart';
 import '../../services/meal_stats.dart';
 import '../../services/update_service.dart';
 import '../../services/photo_service.dart';
+import '../../widgets/app_logo.dart';
 import '../../widgets/meal_card.dart';
 import '../../widgets/meal_grid_tile.dart';
 import 'diet_advice_screen.dart';
@@ -161,13 +162,7 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          'ココメシ',
-          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w800,
-                letterSpacing: 1.2,
-              ),
-        ),
+        title: const AppLogo(),
         actions: [
           // ライブラリから追加
           IconButton(
