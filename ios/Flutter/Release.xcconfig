@@ -1,1 +1,3 @@
 #include "Generated.xcconfig"
+// .env から Podfile が生成する(APIキー)。未生成でも通るよう #include? にしている
+#include? "Env.xcconfig"

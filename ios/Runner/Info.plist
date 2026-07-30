@@ -24,8 +24,23 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<!-- 地図(Maps SDK)のAPIキー。実体は .env から Env.xcconfig 経由で入る
+	     (生成は Podfile、読み出しは AppDelegate)。Androidが AndroidManifest の
+	     meta-data で同じ値を渡しているのと対になる -->
+	<key>GOOGLE_MAPS_API_KEY</key>
+	<string>$(GOOGLE_MAPS_API_KEY)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- 権限の説明文。iOSは説明文が無いまま権限APIを呼ぶとその場で落ちるので、
+	     使う権限はすべてここに書く -->
+	<key>NSCameraUsageDescription</key>
+	<string>食事の写真を撮影するためにカメラを使用します。</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>食事したお店を検索して地図に記録するために位置情報を使用します。アプリを使っている間だけ取得します。</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>記録した食事の写真をカメラロールに保存するために使用します。</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>撮影済みの食事の写真を選んで記録するために写真ライブラリを使用します。</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

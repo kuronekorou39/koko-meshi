@@ -1,0 +1,64 @@
+# iOS のビルド確認。Mac が手元に無いので、ここが唯一の「コンパイルが通るか」の門。
+#
+# private リポジトリでは macOS ランナーの消費が10倍(1分=10分)なので、
+# test.yml のように毎push では回さない。iOS 側を触ったときと、手動起動のときだけ。
+#
+# 署名はしない(--no-codesign)。証明書なしでコンパイルとPodのリンクまで確かめる。
+# 実機/TestFlight 用の署名付きビルドは、通ることを確認してから別途用意する。
+name: iOS Build
+
+on:
+  push:
+    paths:
+      - 'ios/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - '.github/workflows/ios.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 40 # 詰まったときに macOS 分を食い潰さないための上限
+    steps:
+      - uses: actions/checkout@v4
+
+      # ios/Podfile が .env を読んで Env.xcconfig を作る。実キーが無くても
+      # 地図が出ないだけでビルドは通るので、Secret が無ければダミーで進める
+      - name: .env を復元 (Secret が無ければダミー)
+        env:
+          DOTENV_BASE64: ${{ secrets.DOTENV_BASE64 }}
+        run: |
+          if [ -n "$DOTENV_BASE64" ]; then
+            echo "$DOTENV_BASE64" | base64 -d > .env
+            echo ".env restored from secret"
+          else
+            echo "# CI dummy (DOTENV_BASE64 secret 未設定)" > .env
+            echo "WARNING: dummy .env — このビルドでは地図が表示されません"
+          fi
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.44.6 # release.yml / test.yml とローカルに揃える
+          cache: true
+
+      - run: flutter pub get
+
+      - name: iOS ビルド (署名なし)
+        run: flutter build ios --release --no-codesign
+
+      # 何がリンクされたか(特に端末内AIのdylib)を残す。iOS版のAI対応可否を
+      # 判断する材料になる
+      - name: 生成物の中身
+        if: always()
+        run: |
+          APP=build/ios/iphoneos/Runner.app
+          if [ ! -d "$APP" ]; then
+            echo "Runner.app が生成されていません"
+            exit 0
+          fi
+          echo "=== アプリのサイズ ==="
+          du -sh "$APP"
+          echo "=== 同梱フレームワーク ==="
+          ls "$APP/Frameworks" 2>/dev/null || echo "(なし)"
