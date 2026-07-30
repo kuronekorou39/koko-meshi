@@ -62,3 +62,22 @@ jobs:
           du -sh "$APP"
           echo "=== 同梱フレームワーク ==="
           ls "$APP/Frameworks" 2>/dev/null || echo "(なし)"
+
+      # Sideloadly で手元のiPhoneに入れるための IPA。
+      # .app を Payload/ に入れて zip するだけでよい。署名は Sideloadly が
+      # 自分の証明書でやり直すので、ここで署名しても意味がない。
+      - name: IPA を作る (Sideloadly 用)
+        run: |
+          mkdir -p Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qry kokomeshi.ipa Payload
+          ls -lh kokomeshi.ipa
+
+      # 注意: public リポジトリではこの成果物をGitHubにログインした誰でも
+      # ダウンロードできる。IPA には .env のAPIキーが埋まっているため、
+      # 配布APKと同じ扱い(抽出され得る前提)になる
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kokomeshi-ios-unsigned
+          path: kokomeshi.ipa
+          retention-days: 7

@@ -47,6 +47,10 @@ app.*.map.json
 # 環境変数
 .env
 
+# Claude Code のローカル許可リスト。実行したコマンドがそのまま溜まるので、
+# APIキーを含む curl などを許可すると値ごと残る。ローカル設定なので追跡しない
+.claude/settings.local.json
+
 # Android release keystore
 android/app/*.keystore
 android/key.properties
