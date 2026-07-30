@@ -136,19 +136,37 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     _groups = [
       for (final indices in indexGroups)
         _PhotoGroup([for (final i in indices) _selectedPhotos[i]]),
-    ];
+      // groupShots は古い順に返す。画面は新しい順に並べる(一覧・ファイル選択と
+      // 同じ向き)ので、ここで逆さにして保持と表示の向きを揃える
+    ].reversed.toList();
     for (final g in _groups) {
       final carried = previousTypes[g.representative];
       if (carried != null) g.mealType = carried;
     }
   }
 
-  /// 前の組と1つにまとめる
-  void _mergeWithPrevious(int position) {
+  /// すぐ上の組と1つにまとめる。
+  /// 新しい順に並んでいるので、上は「より新しい組」になる
+  void _mergeWithAbove(int position) {
     if (position <= 0 || position >= _groups.length) return;
     setState(() {
       final moved = _groups.removeAt(position);
-      _groups[position - 1].photos.addAll(moved.photos);
+      final target = _groups[position - 1];
+      target.photos.addAll(moved.photos);
+      // 代表(=一番古い1枚)から記録の日時を決めるので、並べ直しておく
+      _sortPhotosByTime(target.photos);
+    });
+  }
+
+  /// 古い順に並べる。日時が分からないものは後ろへ送る
+  void _sortPhotosByTime(List<_SelectedPhoto> photos) {
+    photos.sort((a, b) {
+      final at = a.exifDateTime;
+      final bt = b.exifDateTime;
+      if (at == null && bt == null) return 0;
+      if (at == null) return 1;
+      if (bt == null) return -1;
+      return at.compareTo(bt);
     });
   }
 
@@ -740,7 +758,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   }
 
   Widget _buildGroupCard(_PhotoGroup group, int position, DateFormat fmt) {
-    final tokens = KokoTokens.of(context);
     final at = _groupDateTime(group);
     final pos = _groupPosition(group, allowScreenFallback: false);
 
@@ -751,18 +768,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Text('${position + 1}件目', style: tokens.sectionLabel),
-                const Spacer(),
-                Text(
-                  '${group.photos.length}枚',
-                  style: tokens.numeral
-                      .copyWith(fontSize: 11.5, color: tokens.textFaint),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
             _buildPhotoGrid(group.photos),
             const SizedBox(height: 10),
 
@@ -811,9 +816,9 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
               children: [
                 if (position > 0)
                   TextButton.icon(
-                    onPressed: () => _mergeWithPrevious(position),
+                    onPressed: () => _mergeWithAbove(position),
                     icon: const Icon(Icons.merge, size: 15),
-                    label: const Text('前とまとめる'),
+                    label: const Text('上とまとめる'),
                     style: TextButton.styleFrom(
                       visualDensity: VisualDensity.compact,
                       textStyle: const TextStyle(fontSize: 12),
