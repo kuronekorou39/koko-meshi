@@ -407,7 +407,7 @@ class _CameraScreenState extends State<CameraScreen>
         // 回転ボタン
         _circleButton(
           icon: Icons.rotate_right,
-          label: _rotationDegrees == 0 ? null : '${_rotationDegrees}°',
+          label: _rotationDegrees == 0 ? null : '$_rotationDegrees°',
           onTap: _rotate,
         ),
         const SizedBox(width: 12),
@@ -572,7 +572,7 @@ class _CameraScreenState extends State<CameraScreen>
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: _savedPlaces.length + 1, // +1 for "なし"
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
               itemBuilder: (context, index) {
                 if (index == 0) {
                   final isSelected = _selectedLocationTag == null;

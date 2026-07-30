@@ -1,0 +1,61 @@
+# 静的解析とテスト。push と PR で毎回走らせる。
+#
+# release.yml はタグを打ったときにAPKを作るだけなので、壊れたコードでも
+# タグを打つまで気づけなかった。ここを門にする。
+#
+# analyze は info でも失敗する(既定)。警告を放置し始めると門の意味が無く
+# なるので、あえて緩めない。
+name: Test
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # テストは .env を読まない(Env は dotenv 未初期化でも空を返す)が、
+      # pubspec の assets に .env があるので、無いとビルドが通らない
+      - name: ダミーの .env を置く
+        run: echo "# CI (テストでは実キーを使わない)" > .env
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.44.6 # release.yml とローカルに揃える
+          cache: true
+
+      - run: flutter pub get
+
+      - name: 静的解析
+        run: flutter analyze
+
+      - name: テスト
+        run: flutter test --coverage
+
+      # 何行が試されているかを毎回ログに出す。数字が下がったら気づけるように
+      - name: カバレッジの概要
+        if: always()
+        run: |
+          if [ ! -f coverage/lcov.info ]; then
+            echo "カバレッジ情報なし"
+            exit 0
+          fi
+          total=$(grep -c '^DA:' coverage/lcov.info || true)
+          hit=$(grep '^DA:' coverage/lcov.info | grep -cv ',0$' || true)
+          echo "実行された行: $hit / $total"
+          if [ "$total" -gt 0 ]; then
+            echo "行カバレッジ: $((hit * 100 / total))%"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: coverage/lcov.info
+          if-no-files-found: ignore
