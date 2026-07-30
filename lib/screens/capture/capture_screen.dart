@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -66,7 +67,6 @@ class _PhotoGroup {
 
 class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   static const _uuid = Uuid();
-  MealType _selectedType = MealType.unset;
   final List<_SelectedPhoto> _selectedPhotos = [];
   bool _saving = false;
   bool _aiEnabled = true; // AI解析ON/OFF
@@ -76,13 +76,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   // この画面は取り込んだ(過去の)写真だけを扱う。端末の現在位置は「いま
   // 画面を開いている場所」でしかなく、過去の食事の場所ではないので取らない。
   // カメラで撮ってその場で記録する経路は CameraScreen 側が担っている。
-  ({double lat, double lng})? _exifPosition; // 写真のEXIFから読んだ位置
-  String? _address;
-  bool _loadingLocation = false;
   late DateTime _capturedAt;
-
-  /// _capturedAt が写真のEXIF由来か(falseなら記録した時刻)
-  bool _capturedAtFromExif = false;
 
   @override
   void initState() {
@@ -105,10 +99,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         item.exifLongitude = exif.longitude;
       }
     }
-    if (mounted) {
-      _adoptExifMetadata();
-      setState(_regroup);
-    }
+    if (mounted) setState(_regroup);
   }
 
   /// 食事ごとの組。**画面の状態として持つ**。
@@ -228,78 +219,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     return address;
   }
 
-  /// 記録(MealLog)の日時と場所を、選んだ写真から決める。
-  ///
-  /// 記録は日時と場所をひとつしか持てない。選択順の1枚目を使うと、
-  /// 並び順で結果が変わってしまうので**一番古い写真**を基準にする
-  /// (食事はその最初の1枚から始まっている)。写真ごとの日時・位置は
-  /// 各写真にそのまま保存するので、ここで捨てているわけではない。
-  void _adoptExifMetadata() {
-    final withDate = _selectedPhotos
-        .where((p) =>
-            p.exifDateTime != null && p.exifDateTime!.isBefore(DateTime.now()))
-        .toList()
-      ..sort((a, b) => a.exifDateTime!.compareTo(b.exifDateTime!));
-    final oldest = withDate.firstOrNull;
-
-    // 位置は日時を採った写真のものを優先し、無ければ位置がある一番古い写真
-    final withGps = _selectedPhotos
-        .where((p) => p.exifLatitude != null && p.exifLongitude != null)
-        .toList()
-      ..sort((a, b) => (a.exifDateTime ?? DateTime(9999))
-          .compareTo(b.exifDateTime ?? DateTime(9999)));
-    final gpsSource = (oldest != null && oldest.exifLatitude != null)
-        ? oldest
-        : withGps.firstOrNull;
-
-    // 写真を消したときも通るので、EXIF由来の値は毎回引き直す
-    setState(() {
-      if (oldest != null) {
-        _capturedAt = oldest.exifDateTime!;
-        _capturedAtFromExif = true;
-      } else if (_capturedAtFromExif) {
-        _capturedAt = DateTime.now();
-        _capturedAtFromExif = false;
-      }
-    });
-
-    // 利用者が明示的に消したものは復活させない
-    if (_locationCleared) return;
-
-    final next = gpsSource == null
-        ? null
-        : (lat: gpsSource.exifLatitude!, lng: gpsSource.exifLongitude!);
-    if (_exifPosition == next) return;
-
-    setState(() => _exifPosition = next);
-    _resolveAddress();
-  }
-
-  /// 記録に使う位置。写真のEXIFだけが出どころ。
-  ({double lat, double lng})? get _photoPosition => _exifPosition;
-
-  /// いま採用している位置の住所を引き直す。
-  Future<void> _resolveAddress() async {
-    final target = _photoPosition;
-    if (target == null) {
-      setState(() {
-        _address = null;
-        _loadingLocation = false;
-      });
-      return;
-    }
-    setState(() => _loadingLocation = true);
-
-    final addr = await LocationService.getAddress(target.lat, target.lng);
-    if (!mounted) return;
-    // 引いている間に写真が増減して位置が変わっていたら、その結果は捨てる
-    if (_photoPosition != target) return;
-    setState(() {
-      _address = addr;
-      _loadingLocation = false;
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     final dateFormat = DateFormat('yyyy/M/d (E) HH:mm', 'ja');
@@ -320,44 +239,14 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                 children: [
+                  // 1件でも複数でも同じ形にする。件数で画面の作りが変わると
+                  // 見え方が揃わず、どこに何があるのか覚えられない
                   if (_selectedPhotos.isEmpty)
                     _buildPhotoPlaceholder()
-                  else if (groups.length > 1)
-                    // 別の食事が混ざっている: 組ごとに日時・場所・種別を持つ
-                    _buildGroupSections(groups, dateFormat)
                   else
-                    _buildPhotoGrid(),
+                    _buildGroupSections(groups, dateFormat),
                   const SizedBox(height: 12),
-
-                  // 写真追加ボタン（入り方で出し分け）
-                  OutlinedButton.icon(
-                    onPressed:
-                        widget.fromLibrary ? _pickFromLibrary : _takePhoto,
-                    icon: Icon(widget.fromLibrary
-                        ? Icons.photo_library_outlined
-                        : Icons.add_a_photo_outlined),
-                    label: Text(widget.fromLibrary ? 'ライブラリから追加' : '追加撮影'),
-                  ),
-
-                  // 1つの食事として保存する場合だけ、画面全体の種別と
-                  // 日時・場所を出す(組に分かれているときは各枠の中にある)
-                  if (groups.length <= 1) ...[
-                    const SizedBox(height: 20),
-                    Text('食事の種類', style: KokoTokens.of(context).sectionLabel),
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: MealTypeField(
-                        value: _selectedType,
-                        onChanged: (type) =>
-                            setState(() => _selectedType = type),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    _buildMetadataBar(dateFormat),
-                    // 分けずに1件にする場合だけ、離れている旨を警告する
-                    _buildMixedMetadataNotice(),
-                  ],
+                  _buildAddPhotoButton(),
                 ],
               ),
             ),
@@ -437,193 +326,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     );
   }
 
-  bool _locationCleared = false;
-
-  void _clearLocation() {
-    setState(() {
-      _exifPosition = null;
-      _address = null;
-      _loadingLocation = false;
-      _locationCleared = true;
-    });
-  }
-
-  Widget _buildMetadataBar(DateFormat dateFormat) {
-    final position = _photoPosition;
-    final hasLocation = position != null;
-    final tokens = KokoTokens.of(context);
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: tokens.hairline, width: 0.8),
-      ),
-      child: Column(
-        children: [
-          // 日時
-          _metaRow(
-            icon: Icons.schedule_outlined,
-            child: Text(
-              dateFormat.format(_capturedAt),
-              style:
-                  tokens.numeral.copyWith(fontSize: 12, color: tokens.textMuted),
-            ),
-            source: _capturedAtFromExif ? '写真の日時' : '記録した時刻',
-          ),
-          const SizedBox(height: 8),
-          // 位置情報
-          _metaRow(
-            icon: Icons.location_on_outlined,
-            dim: !hasLocation,
-            child: _loadingLocation
-                ? const SizedBox(
-                    width: 12,
-                    height: 12,
-                    child: CircularProgressIndicator(strokeWidth: 1.5),
-                  )
-                : hasLocation
-                    ? Text(
-                        _address ??
-                            '${position.lat.toStringAsFixed(4)}, '
-                            '${position.lng.toStringAsFixed(4)}',
-                        style: TextStyle(fontSize: 12, color: tokens.textMuted),
-                        overflow: TextOverflow.ellipsis,
-                      )
-                    : Text(
-                        _locationCleared
-                            ? '位置情報を外しました'
-                            : '写真に位置情報がありません',
-                        style: TextStyle(fontSize: 12, color: tokens.textFaint),
-                      ),
-            source: _loadingLocation || _exifPosition == null ? null : '写真の位置',
-            trailing: hasLocation && !_loadingLocation
-                ? GestureDetector(
-                    onTap: _clearLocation,
-                    child: Padding(
-                      padding: const EdgeInsets.all(4),
-                      child:
-                          Icon(Icons.close, size: 16, color: tokens.textFaint),
-                    ),
-                  )
-                : null,
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// メタデータの1行。値の右に「どこから来た値か」を出す。
-  /// 写真のEXIFなのか、いま端末から取ったものなのかで意味が変わるため
-  Widget _metaRow({
-    required IconData icon,
-    required Widget child,
-    String? source,
-    Widget? trailing,
-    bool dim = false,
-  }) {
-    final tokens = KokoTokens.of(context);
-    return Row(
-      children: [
-        Icon(icon, size: 16, color: dim ? tokens.textFaint : tokens.textMuted),
-        const SizedBox(width: 6),
-        Expanded(child: child),
-        if (source != null) ...[
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(4),
-              border: Border.all(color: tokens.hairline, width: 0.8),
-            ),
-            child: Text(
-              source,
-              style: TextStyle(fontSize: 10.5, color: tokens.textFaint),
-            ),
-          ),
-        ],
-        // 右端の操作が無い行も、下の行と左右の幅をそろえる
-        trailing ?? const SizedBox(width: 24, height: 24),
-      ],
-    );
-  }
-
-  /// 選んだ写真の撮影日時・位置がばらついているときの注意書き。
-  ///
-  /// 記録は1件につき日時と場所をひとつしか持てないので、離れた写真を
-  /// まとめると片方が捨てられたように見える。写真ごとの日時・位置は
-  /// そのまま保存しているが、記録として何が採られたかは伝える。
-  Widget _buildMixedMetadataNotice() {
-    final message = _mixedMetadataMessage();
-    if (message == null) return const SizedBox.shrink();
-    final tokens = KokoTokens.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.info_outline, size: 14, color: tokens.warning),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              message,
-              style: TextStyle(
-                  fontSize: 11.5, height: 1.5, color: tokens.warning),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 同じ食事とみなすには離れすぎている閾値
-  static const _mixedTimeGap = Duration(hours: 2);
-  static const _mixedDistanceMeters = 300.0;
-
-  String? _mixedMetadataMessage() {
-    final times = _selectedPhotos
-        .map((p) => p.exifDateTime)
-        .whereType<DateTime>()
-        .toList();
-    final reasons = <String>[];
-
-    if (times.length > 1) {
-      times.sort();
-      final gap = times.last.difference(times.first);
-      if (gap > _mixedTimeGap) {
-        final label = gap.inHours >= 24
-            ? '${(gap.inHours / 24).floor()}日'
-            : '${gap.inHours}時間';
-        reasons.add('撮影日時が最大$label離れています');
-      }
-    }
-
-    final points = _selectedPhotos
-        .where((p) => p.exifLatitude != null && p.exifLongitude != null)
-        .toList();
-    if (points.length > 1) {
-      var maxDistance = 0.0;
-      for (var i = 1; i < points.length; i++) {
-        final d = Geolocator.distanceBetween(
-          points.first.exifLatitude!,
-          points.first.exifLongitude!,
-          points[i].exifLatitude!,
-          points[i].exifLongitude!,
-        );
-        if (d > maxDistance) maxDistance = d;
-      }
-      if (maxDistance > _mixedDistanceMeters) {
-        reasons.add('撮影場所が最大${(maxDistance / 1000).toStringAsFixed(1)}km離れています');
-      }
-    }
-
-    if (reasons.isEmpty) return null;
-    return '${reasons.join('、')}。'
-        'この記録には一番古い写真の日時と場所を使います。'
-        '別の食事なら分けて記録してください。';
-  }
-
   Widget _buildPhotoPlaceholder() {
     final tokens = KokoTokens.of(context);
     return GestureDetector(
@@ -679,28 +381,58 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: Row(
-            children: [
-              Icon(Icons.call_split, size: 15, color: tokens.textMuted),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  '撮影日時と場所から${groups.length}件の食事に分けました。'
-                  'それぞれ別の記録として保存します',
-                  style: TextStyle(fontSize: 11.5, height: 1.4,
-                      color: tokens.textMuted),
+        // 分かれたときだけ、なぜ分かれたのかを書く
+        if (groups.length > 1)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Row(
+              children: [
+                Icon(Icons.call_split, size: 15, color: tokens.textMuted),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    '撮影日時と場所から${groups.length}件の食事に分けました。'
+                    'それぞれ別の記録として保存します',
+                    style: TextStyle(
+                        fontSize: 11.5, height: 1.4, color: tokens.textMuted),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
         for (var i = 0; i < groups.length; i++) ...[
           _buildGroupCard(groups[i], i, dateFormat),
           if (i < groups.length - 1) const SizedBox(height: 12),
         ],
       ],
+    );
+  }
+
+  /// 写真を足す導線。実線の枠だと写真の枠と同じ強さで並んでしまうので、
+  /// 点線にして一段弱く見せる(Flutterに点線の枠が無いので自分で描く)
+  Widget _buildAddPhotoButton() {
+    final tokens = KokoTokens.of(context);
+    return CustomPaint(
+      painter: _DashedBorderPainter(color: tokens.hairline),
+      child: SizedBox(
+        width: double.infinity,
+        child: TextButton.icon(
+          onPressed: widget.fromLibrary ? _pickFromLibrary : _takePhoto,
+          icon: Icon(
+            widget.fromLibrary
+                ? Icons.photo_library_outlined
+                : Icons.add_a_photo_outlined,
+            size: 18,
+          ),
+          label: Text(widget.fromLibrary ? 'ライブラリから追加' : '追加撮影'),
+          style: TextButton.styleFrom(
+            foregroundColor: tokens.textMuted,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            textStyle:
+                const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
+          ),
+        ),
+      ),
     );
   }
 
@@ -848,8 +580,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                 _selectedPhotos.remove(item);
                 _regroup();
               });
-              // 日時や場所をその写真から採っていたかもしれないので引き直す
-              _adoptExifMetadata();
             },
           ),
         ),
@@ -940,7 +670,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       _selectedPhotos.add(item);
       _regroup();
     });
-    _adoptExifMetadata();
   }
 
   Future<void> _pickFromLibrary() async {
@@ -963,7 +692,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       _selectedPhotos.addAll(items);
       _regroup();
     });
-    _adoptExifMetadata();
   }
 
   Future<void> _editPhoto(_SelectedPhoto item) async {
@@ -1025,19 +753,14 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         // 撮影日時が分からない組は、いつ食べたかを決められない。
         // 画面にもそう出しているとおり、記録した時刻で埋める
         final eatenAt = _groupDateTime(group) ?? _capturedAt;
-        // 1件にまとめる場合は、画面で位置を外していればそれに従う
-        final position = (groups.length == 1 && _locationCleared)
-            ? null
-            : _groupPosition(group);
+        final position = _groupPosition(group);
         final lat = position?.lat;
         final lng = position?.lng;
         final locationTag = _matchSavedPlace(savedPlaces, lat, lng);
 
         await LocalDatabase.insertMealLog(MealLog(
           id: mealLogId,
-          // 1件にまとめる場合は画面の種別、分かれている場合は組ごとの種別。
-          // 出している入力欄がそれぞれ違う
-          mealType: groups.length == 1 ? _selectedType : group.mealType,
+          mealType: group.mealType,
           eatenAt: eatenAt,
           latitude: lat,
           longitude: lng,
@@ -1135,4 +858,43 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
       if (mounted) setState(() => _saving = false);
     }
   }
+}
+
+/// 点線の角丸枠。実線だと写真の枠と同じ強さで並んでしまうので、
+/// 「写真を足す」の導線はこれで一段弱く見せる。
+class _DashedBorderPainter extends CustomPainter {
+  const _DashedBorderPainter({required this.color});
+
+  final Color color;
+
+  static const _radius = 12.0;
+  static const _dash = 5.0;
+  static const _gap = 4.0;
+  static const _strokeWidth = 1.2;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final border = Path()
+      ..addRRect(RRect.fromRectAndRadius(
+        Offset.zero & size,
+        const Radius.circular(_radius),
+      ));
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = _strokeWidth
+      ..color = color;
+
+    // 枠線を辿りながら、線と間隔を交互に置く
+    for (final metric in border.computeMetrics()) {
+      var distance = 0.0;
+      while (distance < metric.length) {
+        final end = math.min(distance + _dash, metric.length);
+        canvas.drawPath(metric.extractPath(distance, end), paint);
+        distance = end + _gap;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DashedBorderPainter old) => old.color != color;
 }
