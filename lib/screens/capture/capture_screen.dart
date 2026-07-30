@@ -71,11 +71,14 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   bool _saving = false;
   bool _aiEnabled = true; // AI解析ON/OFF
 
-  // GPS・日時
-  Position? _position;
-  ({double lat, double lng})? _exifPosition; // EXIFからのGPS（Positionがない場合）
+  // 位置・日時。
+  //
+  // この画面は取り込んだ(過去の)写真だけを扱う。端末の現在位置は「いま
+  // 画面を開いている場所」でしかなく、過去の食事の場所ではないので取らない。
+  // カメラで撮ってその場で記録する経路は CameraScreen 側が担っている。
+  ({double lat, double lng})? _exifPosition; // 写真のEXIFから読んだ位置
   String? _address;
-  bool _loadingLocation = true;
+  bool _loadingLocation = false;
   late DateTime _capturedAt;
 
   /// _capturedAt が写真のEXIF由来か(falseなら記録した時刻)
@@ -85,7 +88,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
   void initState() {
     super.initState();
     _capturedAt = DateTime.now();
-    _fetchLocation();
     if (widget.initialPhotos != null && widget.initialPhotos!.isNotEmpty) {
       for (final photo in widget.initialPhotos!) {
         _selectedPhotos.add(_SelectedPhoto(photo));
@@ -196,12 +198,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
 
   /// 組の位置。GPSを持つ一番古い写真のもの。
   ///
-  /// [allowScreenFallback] は「1件にまとめて保存する場合」だけ true にする。
-  /// 複数に分かれているとき、いまいる場所を過去の写真の記録に付けるのは誤り。
-  ({double lat, double lng})? _groupPosition(
-    _PhotoGroup group, {
-    required bool allowScreenFallback,
-  }) {
+  /// 出どころは写真のEXIFだけ。端末の現在位置は使わない。
+  ({double lat, double lng})? _groupPosition(_PhotoGroup group) {
     final withGps = group.photos
         .where((p) => p.exifLatitude != null && p.exifLongitude != null)
         .toList()
@@ -211,7 +209,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     if (source != null) {
       return (lat: source.exifLatitude!, lng: source.exifLongitude!);
     }
-    return allowScreenFallback ? _effectivePosition : null;
+    return null;
   }
 
   /// 逆ジオコーディングの結果を覚えておく。
@@ -277,26 +275,12 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     _resolveAddress();
   }
 
-  /// 記録に使う位置。**写真のEXIFを優先**する。
-  ///
-  /// 端末のGPSは「いま画面を開いている場所」でしかない。過去の写真を
-  /// 取り込んだときに現在地を使うと、まったく違う場所の記録になる。
-  ({double lat, double lng})? get _effectivePosition =>
-      _exifPosition ??
-      (_position == null
-          ? null
-          : (lat: _position!.latitude, lng: _position!.longitude));
-
-  Future<void> _fetchLocation() async {
-    final pos = await LocationService.getCurrentPosition();
-    if (!mounted) return;
-    setState(() => _position = pos);
-    await _resolveAddress();
-  }
+  /// 記録に使う位置。写真のEXIFだけが出どころ。
+  ({double lat, double lng})? get _photoPosition => _exifPosition;
 
   /// いま採用している位置の住所を引き直す。
   Future<void> _resolveAddress() async {
-    final target = _effectivePosition;
+    final target = _photoPosition;
     if (target == null) {
       setState(() {
         _address = null;
@@ -306,23 +290,10 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     }
     setState(() => _loadingLocation = true);
 
-    final addr = await LocationService.getAddressFromPosition(
-      Position(
-        latitude: target.lat,
-        longitude: target.lng,
-        timestamp: DateTime.now(),
-        accuracy: 0,
-        altitude: 0,
-        altitudeAccuracy: 0,
-        heading: 0,
-        headingAccuracy: 0,
-        speed: 0,
-        speedAccuracy: 0,
-      ),
-    );
+    final addr = await LocationService.getAddress(target.lat, target.lng);
     if (!mounted) return;
     // 引いている間に写真が増減して位置が変わっていたら、その結果は捨てる
-    if (_effectivePosition != target) return;
+    if (_photoPosition != target) return;
     setState(() {
       _address = addr;
       _loadingLocation = false;
@@ -470,7 +441,6 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
 
   void _clearLocation() {
     setState(() {
-      _position = null;
       _exifPosition = null;
       _address = null;
       _loadingLocation = false;
@@ -478,16 +448,8 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
     });
   }
 
-  void _refetchLocation() {
-    setState(() {
-      _loadingLocation = true;
-      _locationCleared = false;
-    });
-    _fetchLocation();
-  }
-
   Widget _buildMetadataBar(DateFormat dateFormat) {
-    final position = _effectivePosition;
+    final position = _photoPosition;
     final hasLocation = position != null;
     final tokens = KokoTokens.of(context);
 
@@ -529,28 +491,13 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
                         style: TextStyle(fontSize: 12, color: tokens.textMuted),
                         overflow: TextOverflow.ellipsis,
                       )
-                    : GestureDetector(
-                        onTap: _locationCleared
-                            ? _refetchLocation
-                            : () {
-                                setState(() => _loadingLocation = true);
-                                _fetchLocation();
-                              },
-                        child: Text(
-                          _locationCleared
-                              ? '位置情報なし (タップで再取得)'
-                              : '取得できません (タップで再取得)',
-                          style:
-                              TextStyle(fontSize: 12, color: tokens.textFaint),
-                        ),
+                    : Text(
+                        _locationCleared
+                            ? '位置情報を外しました'
+                            : '写真に位置情報がありません',
+                        style: TextStyle(fontSize: 12, color: tokens.textFaint),
                       ),
-            source: _loadingLocation
-                ? null
-                : _exifPosition != null
-                    ? '写真の位置'
-                    : _position != null
-                        ? '今いる場所'
-                        : null,
+            source: _loadingLocation || _exifPosition == null ? null : '写真の位置',
             trailing: hasLocation && !_loadingLocation
                 ? GestureDetector(
                     onTap: _clearLocation,
@@ -759,7 +706,7 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
 
   Widget _buildGroupCard(_PhotoGroup group, int position, DateFormat fmt) {
     final at = _groupDateTime(group);
-    final pos = _groupPosition(group, allowScreenFallback: false);
+    final pos = _groupPosition(group);
 
     return Card(
       margin: EdgeInsets.zero,
@@ -1078,8 +1025,10 @@ class _CaptureScreenState extends ConsumerState<CaptureScreen> {
         // 撮影日時が分からない組は、いつ食べたかを決められない。
         // 画面にもそう出しているとおり、記録した時刻で埋める
         final eatenAt = _groupDateTime(group) ?? _capturedAt;
-        final position =
-            _groupPosition(group, allowScreenFallback: groups.length == 1);
+        // 1件にまとめる場合は、画面で位置を外していればそれに従う
+        final position = (groups.length == 1 && _locationCleared)
+            ? null
+            : _groupPosition(group);
         final lat = position?.lat;
         final lng = position?.lng;
         final locationTag = _matchSavedPlace(savedPlaces, lat, lng);
