@@ -17,4 +17,15 @@ class AppFeatures {
   /// 配布物では自動的に「準備中」表示になる。
   static const placeSearch =
       bool.fromEnvironment('PLACE_SEARCH', defaultValue: false);
+
+  /// 解析ベンチ(プロンプトの効果を測る画面)を設定に出すか。
+  ///
+  /// 元は kDebugMode だけで出していたが、開発ビルドは別アプリ(.dev)で
+  /// データベースも別なので記録が空で、実データでは測れなかった。
+  /// リリースビルドでも旗を立てれば開けるようにする。
+  ///
+  ///     flutter build apk --release --dart-define=ANALYSIS_BENCH=true \
+  ///       --target-platform android-arm64,android-arm
+  static const analysisBench =
+      bool.fromEnvironment('ANALYSIS_BENCH', defaultValue: false);
 }

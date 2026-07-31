@@ -2,6 +2,7 @@
 
 import '../../models/meal_photo.dart';
 import '../../services/analysis_bench.dart';
+import '../../services/gemma_ondevice_service.dart';
 import '../../theme/app_theme.dart';
 
 /// 解析ベンチ(開発用)。プロンプトや推論パラメータを変えたときに、
@@ -20,6 +21,12 @@ class _AnalysisBenchScreenState extends State<AnalysisBenchScreen> {
   int _done = 0;
   int _limit = 20;
   String? _error;
+
+  /// どのプロンプトで走らせるか。既定は現在のものと同じ挙動
+  PromptVariant _variant = PromptVariant.current;
+
+  /// サンプリング。既定の揺れが大きいと、プロンプトの差が埋もれて測れない
+  SamplingVariant _sampling = SamplingVariant.current;
 
   @override
   void initState() {
@@ -46,6 +53,8 @@ class _AnalysisBenchScreenState extends State<AnalysisBenchScreen> {
     try {
       final report = await AnalysisBench.run(
         photos,
+        variant: _variant,
+        sampling: _sampling,
         onProgress: (done, _) {
           if (mounted) setState(() => _done = done);
         },
@@ -69,6 +78,49 @@ class _AnalysisBenchScreenState extends State<AnalysisBenchScreen> {
       body: ListView(
         padding: EdgeInsets.fromLTRB(16, 8, 16, 24 + context.systemBottomInset),
         children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('サンプリング', style: tokens.sectionLabel),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      for (final v in SamplingVariant.values)
+                        ChoiceChip(
+                          label: Text(v.label),
+                          selected: _sampling == v,
+                          onSelected: _running
+                              ? null
+                              : (_) => setState(() => _sampling = v),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Text('プロンプト', style: tokens.sectionLabel),
+                  const SizedBox(height: 8),
+                  // 同じ写真を版ごとに走らせて、結果を目で見比べる
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      for (final v in PromptVariant.values)
+                        ChoiceChip(
+                          label: Text(v.label),
+                          selected: _variant == v,
+                          onSelected: _running
+                              ? null
+                              : (_) => setState(() => _variant = v),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
           Card(
             child: Padding(
               padding: const EdgeInsets.all(16),

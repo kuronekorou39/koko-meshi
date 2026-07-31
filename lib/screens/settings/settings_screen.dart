@@ -7,6 +7,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../config/features.dart';
 import '../../database/local_database.dart';
 import '../../models/saved_place.dart';
 import '../../providers/app_settings_providers.dart';
@@ -365,8 +366,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           ]),
 
-          // 開発ビルドのみ。プロンプト調整の効果を測るための計測画面
-          if (kDebugMode) ...[
+          // プロンプト調整の効果を測るための計測画面。開発ビルド、または
+          // 旗を立てたリリースビルド(実データで測るため)でだけ出す
+          if (kDebugMode || AppFeatures.analysisBench) ...[
             _sectionLabel('開発者'),
             _sectionCard([
               ListTile(

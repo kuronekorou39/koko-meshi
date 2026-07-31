@@ -73,6 +73,32 @@ enum GemmaModelKind {
 
 enum GemmaInstallSource { localFile, network }
 
+/// サンプリングの版。ベンチで効果を比べるために切り替える。
+///
+/// 既定(0.9/40)は「再解析で毎回違う結果を出す」ために入れたもの。ただし
+/// 振れ幅が大きく、同じ写真・同じプロンプトでもカロリーが320→1500のように
+/// 変わる。プロンプトの効果を測るには、まずこの揺れを止める必要がある。
+enum SamplingVariant {
+  current('現在 (0.9/40)', 0.9, 40),
+  lowTemp('低温 (0.1/1)', 0.1, 1);
+
+  const SamplingVariant(this.label, this.temperature, this.topK);
+
+  final String label;
+  final double temperature;
+  final int topK;
+}
+
+/// 解析に使うプロンプトの版。ベンチで効果を比べるために切り替える。
+enum PromptVariant {
+  current('現在'),
+  withHints('観察ヒント追加');
+
+  const PromptVariant(this.label);
+
+  final String label;
+}
+
 /// オンデバイス Gemma 4 (vision, LiteRT-LM) サービス。
 /// E2B / E4B の両方を個別にインストールでき、どちらをロードするか選べる。
 /// プロンプトは小型モデル向けの精度対策(ジャンル固定リスト・麺類の観察
@@ -103,7 +129,7 @@ class GemmaOnDeviceService {
   /// 内訳の例は必ず抽象形にすること。具体的な料理名で例示すると、似た写真で
   /// 例文の中身と合計値をそのまま書き写してくる(実測: 鮭の例文を出したら
   /// 鮭の写真で例文の合計515kcalがそのまま返ってきた)。
-  static const _prompt = '''この写真の料理を特定してください。
+  static const _promptBase = '''この写真の料理を特定してください。
 
 【1】内訳: 見えているものを分けて、それぞれのカロリーを積み上げる（1〜2行）
 書き方) 〈見えた品〉=〈kcal〉, 〈見えた品〉=〈kcal〉 → 合計〈kcal〉
@@ -134,6 +160,24 @@ image_typeは次の3つから1つ選んでください:
 - cuisine_genreは次のリストから最も近いものを1つだけ選んでください: $_genreList
 - 撮影状況（食事種別・場所・時間帯）が与えられている場合は、判断の参考にしてください
 - image_typeが"food"でない場合は【1】を省き、JSONだけを返してください。写っているものを短く描写してmenu_nameに入れ、estimated_priceとestimated_caloriesは0、cuisine_genreは「写真」としてください（例: menu_name「夕焼けの海」）''';
+
+  /// 試している追加指示。既定のプロンプトの「注意」に足す形で効果を測る。
+  ///
+  /// 実測した外れ方から書いた:
+  /// - チキン南蛮(タルタルソース)を「鮭」と誤った。揚げ物は魚のフライと
+  ///   紛れやすいので、麺類と同じように観察の手がかりを与える
+  /// - 弁当を「定食」と呼び、中身を並べた名前になった。容器で判断させる
+  /// - パッケージの印字は解析時に1文字7px程度まで潰れるので読めないが、
+  ///   大きく写っているときは効くはず。読めないときに創作しないよう、
+  ///   「読み取れる場合」と条件を付ける
+  static const _promptExtraHints = '''
+- 揚げ物は、衣の色と厚み・中身の断面・添えられたソース(タルタル/ウスター/ポン酢)を観察して、唐揚げ・チキン南蛮・とんかつ・白身魚のフライ・エビフライを慎重に区別してください
+- 使い捨ての容器やフィルムに入っている場合は弁当・惣菜です。「定食」ではなく「〜弁当」「〜惣菜」のように商品として名前を付けてください
+- パッケージやラベルに商品名・カロリーが印字されていて**文字がはっきり読み取れる場合**は、それを最優先で使ってください。読み取れない場合は推測で文字を創作しないでください''';
+
+  /// 測りたいプロンプトの版。
+  static const _prompt = _promptBase;
+  static const _promptWithHints = '$_promptBase$_promptExtraHints';
 
   /// サンプリング設定。topKを1(貪欲法)から広げないと、何度やり直しても
   /// まったく同じ文言しか出ない。構造化出力(JSON)が壊れない範囲で振れ幅を持たせる。
@@ -203,10 +247,11 @@ image_typeは次の3つから1つ選んでください:
   /// 候補を広げたうえで実行ごとにシードを振り直し、再解析すれば表現が変わる
   /// ようにする。数値(価格・カロリー)も揺れるが、そもそも唯一の正解がある
   /// 値ではなく、大きく外れていなければよいという整理。
-  Future<InferenceChat> _newChat() => _model!.createChat(
+  Future<InferenceChat> _newChat({SamplingVariant? sampling}) =>
+      _model!.createChat(
         supportImage: true,
-        temperature: _temperature,
-        topK: _topK,
+        temperature: sampling?.temperature ?? _temperature,
+        topK: sampling?.topK ?? _topK,
         randomSeed: _random.nextInt(1 << 31),
       );
 
@@ -216,6 +261,8 @@ image_typeは次の3つから1つ選んでください:
   Future<GemmaAnalysisResult> analyze(
     Uint8List originalBytes, {
     String? context,
+    PromptVariant variant = PromptVariant.current,
+    SamplingVariant? sampling,
   }) async {
     if (_model == null) {
       throw StateError('モデルが未ロードです');
@@ -224,13 +271,16 @@ image_typeは次の3つから1つ選んでください:
     // 同じパラメータで作り直すためシードが変わらず、再解析しても出力が
     // 一字一句同じになってしまう
     await _chat?.close();
-    final chat = _chat = await _newChat();
+    final chat = _chat = await _newChat(sampling: sampling);
 
     final resized = await compute(resizeForModel, originalBytes);
 
-    final prompt = (context == null || context.isEmpty)
-        ? _prompt
-        : '$context\n\n$_prompt';
+    final body = switch (variant) {
+      PromptVariant.current => _prompt,
+      PromptVariant.withHints => _promptWithHints,
+    };
+    final prompt =
+        (context == null || context.isEmpty) ? body : '$context\n\n$body';
     final sw = Stopwatch()..start();
     await chat.addQueryChunk(Message.withImages(
       text: prompt,

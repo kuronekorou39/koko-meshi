@@ -54,6 +54,8 @@ class AnalysisBench {
   /// [photos] を再解析して結果を返す。モデルのロード/解放もここで行う。
   static Future<BenchReport> run(
     List<MealPhoto> photos, {
+    PromptVariant variant = PromptVariant.current,
+    SamplingVariant sampling = SamplingVariant.current,
     void Function(int done, int total)? onProgress,
   }) async {
     if (AiAnalysisService.isBusy) {
@@ -73,7 +75,8 @@ class AnalysisBench {
 
     try {
       for (var i = 0; i < photos.length; i++) {
-        cases.add(await _runOne(photos[i], svc, savedPlaces));
+        cases.add(
+            await _runOne(photos[i], svc, savedPlaces, variant, sampling));
         onProgress?.call(i + 1, photos.length);
       }
     } finally {
@@ -82,13 +85,16 @@ class AnalysisBench {
       await svc.disposeModel();
     }
 
-    return BenchReport(loadMs: loadMs, cases: cases);
+    return BenchReport(
+        loadMs: loadMs, cases: cases, variant: variant, sampling: sampling);
   }
 
   static Future<BenchCase> _runOne(
     MealPhoto photo,
     GemmaOnDeviceService svc,
     List<SavedPlace> savedPlaces,
+    PromptVariant variant,
+    SamplingVariant sampling,
   ) async {
     final path = await PhotoCacheService.getOriginalPath(
       localPath: photo.localPath,
@@ -101,7 +107,9 @@ class AnalysisBench {
       final bytes = await File(path).readAsBytes();
       final context =
           await AiAnalysisService.buildOnDeviceContext(photo, savedPlaces);
-      final res = await svc.analyze(bytes, context: context);
+      final res =
+          await svc.analyze(bytes,
+              context: context, variant: variant, sampling: sampling);
       if (res.parsed == null) {
         return BenchCase(
           photo: photo,
@@ -185,10 +193,21 @@ class BenchCase {
 
 /// ベンチ全体の集計。件数(n)を必ず一緒に見ること。
 class BenchReport {
-  const BenchReport({required this.loadMs, required this.cases});
+  const BenchReport({
+    required this.loadMs,
+    required this.cases,
+    this.variant = PromptVariant.current,
+    this.sampling = SamplingVariant.current,
+  });
 
   final int loadMs;
   final List<BenchCase> cases;
+
+  /// どのプロンプトで走らせたか
+  final PromptVariant variant;
+
+  /// どのサンプリングで走らせたか
+  final SamplingVariant sampling;
 
   List<BenchCase> get succeeded => cases.where((c) => c.ok).toList();
   int get parseFailedCount => cases.where((c) => c.parseFailed).length;
