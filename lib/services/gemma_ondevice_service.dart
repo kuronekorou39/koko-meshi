@@ -226,7 +226,7 @@ image_typeは次の3つから1つ選んでください:
     await _chat?.close();
     final chat = _chat = await _newChat();
 
-    final resized = await compute(_resizeJpeg, originalBytes);
+    final resized = await compute(resizeForModel, originalBytes);
 
     final prompt = (context == null || context.isEmpty)
         ? _prompt
@@ -345,10 +345,28 @@ image_typeは次の3つから1つ選んでください:
     }
   }
 
-  /// 別isolateで長辺_maxImageSideにリサイズしJPEGバイトを返す
-  static Uint8List _resizeJpeg(Uint8List bytes) {
-    final image = img.decodeImage(bytes);
-    if (image == null) return bytes;
+  /// 別isolateで長辺_maxImageSideにリサイズしJPEGバイトを返す。
+  ///
+  /// **EXIFの回転を必ず焼き込む。** スマホの写真は縦持ちでも画素は横向きで
+  /// 保存され、向きはEXIFのOrientationにしか書かれていない(手元のPixelの
+  /// 写真は Orientation=6 = 90°回転が必要だった)。decodeImage はこれを
+  /// 適用しないので、焼き込まないとモデルには倒れた画像が渡る。表示側
+  /// (FlutterのImage)は回転を適用するため、画面では正しく見えているのに
+  /// 解析だけ外すという食い違いになる。
+  @visibleForTesting
+  static Uint8List resizeForModel(Uint8List bytes) {
+    // decodeImage は壊れた/途中で切れたファイルに対して null を返すのではなく
+    // 例外を投げることがある。読めないなら加工せず渡して、判断はモデルと
+    // 呼び出し側の失敗処理に任せる
+    final img.Image? decoded;
+    try {
+      decoded = img.decodeImage(bytes);
+    } catch (e) {
+      debugPrint('[Gemma] 画像を読めないのでそのまま渡す: $e');
+      return bytes;
+    }
+    if (decoded == null) return bytes;
+    final image = img.bakeOrientation(decoded);
     img.Image out = image;
     if (image.width > _maxImageSide || image.height > _maxImageSide) {
       out = image.width >= image.height

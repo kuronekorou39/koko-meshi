@@ -168,9 +168,14 @@ class PhotoService {
 
   static Future<void> _resizeImage(_ResizeParams params) async {
     final bytes = await File(params.inputPath).readAsBytes();
-    final image = img.decodeImage(bytes);
-    if (image == null) return;
+    final decoded = img.decodeImage(bytes);
+    if (decoded == null) return;
 
+    // EXIFの回転を焼き込む。縦持ちの写真は画素が横向きで保存されていて、
+    // 向きはOrientationにしか書かれていない。焼き込まないと横倒しの
+    // サムネイルができる(再エンコードでOrientationが落ちるため、
+    // 表示側で直すこともできない)
+    final image = img.bakeOrientation(decoded);
     final resized = img.copyResize(image, width: params.maxWidth);
     final encoded = img.encodeJpg(resized, quality: 80);
     await File(params.outputPath).writeAsBytes(encoded);
