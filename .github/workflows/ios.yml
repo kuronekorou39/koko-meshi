@@ -11,6 +11,7 @@ on:
   push:
     paths:
       - 'ios/**'
+      - 'lib/**' # Dart側の変更でもiOSのコンパイルは壊れうる
       - 'pubspec.yaml'
       - 'pubspec.lock'
       - '.github/workflows/ios.yml'

@@ -3,10 +3,12 @@ import 'package:flutter/services.dart';
 
 /// この端末で何ができるか。いまは端末内AIが動くかどうかだけ。
 ///
-/// 端末内AIの実体(LiteRT-LM)は arm64-v8a 版しか無い。32bit端末を弾いて
-/// しまえば話は早いが、このアプリの本体は食事の記録であって、AIはその補助
-/// でしかない。AI解析オフのモードも元からあるので、32bit端末では
+/// 端末内AIの実体(LiteRT-LM)は Android では arm64-v8a 版しか無い。32bit端末を
+/// 弾いてしまえば話は早いが、このアプリの本体は食事の記録であって、AIはその
+/// 補助でしかない。AI解析オフのモードも元からあるので、32bit端末では
 /// 「AIだけ使えないアプリ」として動かす。
+///
+/// iOS は arm64 のみなのでこの区別が要らず、常に対応として扱う。
 class DeviceCapability {
   DeviceCapability._();
 
@@ -22,6 +24,11 @@ class DeviceCapability {
   static bool get onDeviceAi => _onDeviceAi;
 
   /// 起動時に一度だけ確認する。端末が変わることは無いので以後は使い回す。
+  ///
+  /// 確認するのは Android だけ。32bit端末という区別があるのは Android の
+  /// 話で、iOS は arm64 しか無いため常に対応している(CIのビルドでも
+  /// LiteRtLm.framework と LiteRtMetalAccelerator.framework が
+  /// 同梱されることを確認済み)。
   static Future<void> init() async {
     if (defaultTargetPlatform != TargetPlatform.android) return;
     try {
