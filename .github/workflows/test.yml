@@ -53,9 +53,12 @@ jobs:
             echo "行カバレッジ: $((hit * 100 / total))%"
           fi
 
+      # 毎pushで積み上がるので短めに切る。数字はログにも出ているので、
+      # ファイル自体を長く持つ必要は無い
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: coverage
           path: coverage/lcov.info
           if-no-files-found: ignore
+          retention-days: 7
