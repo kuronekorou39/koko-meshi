@@ -37,6 +37,9 @@ enum MealAiState {
 
   /// 解析に失敗して結果が出ていない
   failed,
+
+  /// 解析はできたが答えが割れている。利用者に選んでほしい
+  needsReview,
 }
 
 /// 写真群から表示すべき状態を決める。
@@ -67,6 +70,8 @@ MealAiState resolveMealAiState(
   }
 
   if (photos.any((p) => p.aiStatus == 'failed')) return MealAiState.failed;
+  // 解析は通ったが決めきれなかったもの。急かさないので失敗より後に見る
+  if (photos.any((p) => p.needsNameReview)) return MealAiState.needsReview;
   return MealAiState.none;
 }
 
@@ -79,6 +84,7 @@ MealAiState resolveMealAiState(
 /// 黙り、詳細画面でだけ事情を説明する。
 bool hasMealAiStatus(List<MealPhoto> photos) => photos.any((p) =>
     p.aiStatus == 'failed' ||
+    p.needsNameReview ||
     (!p.skipAi && (p.aiStatus == 'pending' || p.aiStatus == 'processing')));
 
 /// 写真の上(スクリム内)に置くAI解析状態の表示。
@@ -171,6 +177,7 @@ class MealAiStatusLine extends StatelessWidget {
         MealAiState.deviceUnsupported => Icons.phonelink_off,
         MealAiState.modelMissing => Icons.download_for_offline_outlined,
         MealAiState.failed => Icons.error_outline,
+        MealAiState.needsReview => Icons.help_outline,
         // analyzing はスピナー、none はここへ来ない
         _ => Icons.smart_toy_outlined,
       };
@@ -182,6 +189,7 @@ class MealAiStatusLine extends StatelessWidget {
         MealAiState.deviceUnsupported => 'この端末はAI解析に非対応',
         MealAiState.modelMissing => 'AIモデル未ダウンロード',
         MealAiState.failed => 'AI解析に失敗',
+        MealAiState.needsReview => '候補から選べます',
         MealAiState.none => '',
       };
 }

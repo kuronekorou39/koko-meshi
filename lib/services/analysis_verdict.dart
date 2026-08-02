@@ -82,7 +82,14 @@ const double _sameAnswerThreshold = 0.45;
 /// - 曖昧な言い回ししか得られなければ、それは「分からなかった」ということ
 /// - 何度まわしても近い答えなら、そのまま採用してよい
 /// - 答えが割れたなら、モデルは決めきれていない。利用者に選んでもらう
-AnalysisVerdict judgeAnalysis(List<String> names) {
+/// [keepFirstAsPrimary] を立てると、[names] の1つ目を採用名に固定する。
+/// 1回目の結果を先に画面へ出す運用のため、後から名前が入れ替わると
+/// 利用者が見たものが勝手に変わってしまう。ただし1つ目が曖昧な言い回しで、
+/// まともな代替がある場合はそちらを採る(曖昧なまま残す意味が無い)。
+AnalysisVerdict judgeAnalysis(
+  List<String> names, {
+  bool keepFirstAsPrimary = false,
+}) {
   assert(names.isNotEmpty, '呼ぶ前に空を除くこと');
 
   // 同じ答えをまとめる。先に出たものを代表にする
@@ -108,7 +115,21 @@ AnalysisVerdict judgeAnalysis(List<String> names) {
     return aVague.compareTo(bVague);
   });
 
-  final candidates = [for (final g in groups) _bestOf(g)];
+  var candidates = [for (final g in groups) _bestOf(g)];
+
+  if (keepFirstAsPrimary) {
+    final first = names.first;
+    final head = candidates.indexWhere(
+      (c) => nameSimilarity(c, first) >= _sameAnswerThreshold,
+    );
+    // 1つ目が曖昧で、曖昧でない候補が他にあるならそちらを立てる
+    final betterExists =
+        isVagueName(first) && candidates.any((c) => !isVagueName(c));
+    if (head > 0 && !betterExists) {
+      candidates = [candidates[head], ...candidates]..removeAt(head + 1);
+    }
+  }
+
   final primary = candidates.first;
 
   // 答えが割れた、または採用する名前が曖昧なら選んでもらう

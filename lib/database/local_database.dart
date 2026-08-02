@@ -22,7 +22,7 @@ class LocalDatabase {
 
     return openDatabase(
       path,
-      version: 12,
+      version: 13,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -75,6 +75,8 @@ class LocalDatabase {
         ai_estimated_calories INTEGER,
         ai_cuisine_genre TEXT,
         ai_model TEXT,
+        ai_confidence TEXT,
+        ai_candidates TEXT,
         user_corrected_name TEXT,
         user_corrected_price INTEGER,
         user_corrected_calories INTEGER,
@@ -133,6 +135,11 @@ class LocalDatabase {
       // 食事のアドバイス(写真単位と期間単位)。生成に時間がかかるので保存する
       await db.execute('ALTER TABLE meal_photos ADD COLUMN ai_advice TEXT');
       await _createDietAdvicesTable(db);
+    }
+    if (oldVersion < 13) {
+      // 解析の確からしさと、割れたときの候補。低い場合は利用者に選んでもらう
+      await db.execute('ALTER TABLE meal_photos ADD COLUMN ai_confidence TEXT');
+      await db.execute('ALTER TABLE meal_photos ADD COLUMN ai_candidates TEXT');
     }
   }
 

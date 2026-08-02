@@ -117,6 +117,8 @@ void main() {
     });
   });
 
+  _keepFirstTests();
+
   group('実測の並びで通す', () {
     test('ベンチで出た3条件の答えは割れたと判定される', () {
       // 同じパスタの写真から出た3つ
@@ -127,6 +129,47 @@ void main() {
       ]);
       expect(v.needsReview, isTrue);
       expect(v.candidates.length, greaterThan(1));
+    });
+  });
+}
+
+/// 1回目を先に画面へ出す運用のためのふるまい。
+/// 後から採用名が入れ替わると、利用者が見ていたものが勝手に変わってしまう。
+void _keepFirstTests() {
+  group('1回目を主候補に固定', () {
+    test('答えが割れても1回目が主候補のまま', () {
+      final v = judgeAnalysis(
+        ['スクランブルエッグとベーコンのグラタン', 'ハムエッグ'],
+        keepFirstAsPrimary: true,
+      );
+      expect(v.primary, 'スクランブルエッグとベーコンのグラタン');
+      expect(v.candidates.length, 2);
+      expect(v.needsReview, isTrue);
+    });
+
+    test('多数決より1回目を優先する', () {
+      final v = judgeAnalysis(
+        ['ナポリタン', '唐揚げ弁当', '唐揚げ定食'],
+        keepFirstAsPrimary: true,
+      );
+      expect(v.primary, 'ナポリタン', reason: '唐揚げが2票でも1回目を動かさない');
+    });
+
+    test('1回目が曖昧なら、まともな候補に譲る', () {
+      final v = judgeAnalysis(
+        ['黄色い麺料理', 'ナポリタン'],
+        keepFirstAsPrimary: true,
+      );
+      expect(v.primary, 'ナポリタン');
+    });
+
+    test('揃えば候補は1つで自信あり', () {
+      final v = judgeAnalysis(
+        ['鮭の塩焼き定食', '鮭とご飯の定食'],
+        keepFirstAsPrimary: true,
+      );
+      expect(v.confidence, AnalysisConfidence.high);
+      expect(v.candidates, ['鮭の塩焼き定食']);
     });
   });
 }

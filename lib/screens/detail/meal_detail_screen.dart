@@ -667,6 +667,89 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
   }
 
   /// 解析完了時の結果表示
+  /// 解析が決めきれなかったときの候補。
+  ///
+  /// AIが何度まわしても答えが割れたか、料理名になっていない言い回しだった
+  /// 場合に出る。押しつけがましくならないよう、結果カードの上に静かに置いて
+  /// 無視もできるようにする(既に主候補は採用されているので、選ばなくても
+  /// 記録としては成立している)。
+  Widget _buildCandidatePicker(MealPhoto photo) {
+    if (!photo.needsNameReview) return const SizedBox.shrink();
+    final candidates = photo.candidateNames;
+    final tokens = KokoTokens.of(context);
+    final scheme = Theme.of(context).colorScheme;
+
+    return Container(
+      width: double.infinity,
+      color: scheme.surfaceContainerHigh,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.help_outline, size: 16, color: tokens.textMuted),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  candidates.length > 1
+                      ? 'AIが決めきれませんでした。近いものを選べます'
+                      : 'AIが料理名を絞りきれませんでした',
+                  style: TextStyle(fontSize: 12.5, color: tokens.textMuted),
+                ),
+              ),
+            ],
+          ),
+          if (candidates.length > 1) ...[
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final name in candidates)
+                  ActionChip(
+                    label: Text(name),
+                    onPressed: () => _applyCandidate(photo, name),
+                    visualDensity: VisualDensity.compact,
+                  ),
+              ],
+            ),
+          ],
+          const SizedBox(height: 6),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => _showEditSheet(photo),
+              icon: const Icon(Icons.edit_outlined, size: 15),
+              label: const Text('自分で入力する'),
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                textStyle: const TextStyle(fontSize: 12.5),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 候補を選んだときの反映。
+  ///
+  /// 選んだ名前は手修正として保存する(AIの推測より利用者の選択が上)。
+  /// あわせてキーワードにも入れて、次に再解析したときの手がかりにする。
+  Future<void> _applyCandidate(MealPhoto photo, String name) async {
+    await LocalDatabase.updateMealPhoto(photo.copyWith(
+      userCorrectedName: name,
+      aiHint: name,
+      aiConfidence: 'high',
+      clearCandidates: true,
+    ));
+    if (!mounted) return;
+    ref.invalidate(mealPhotosProvider(widget.mealLogId));
+    ref.read(mealLogsProvider.notifier).refresh();
+    AiAnalysisService.resultsVersion.value++;
+  }
+
   Widget _buildCompletedResult(MealPhoto photo) {
     final tokens = KokoTokens.of(context);
     final scheme = Theme.of(context).colorScheme;
@@ -683,6 +766,7 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _buildCandidatePicker(photo),
           // 記録本体(メニュー名 + 価格/カロリー)。ここ全体がひとつの編集導線。
           // 別に「編集」ボタンを置くと入口が二重になるため、値そのものを
           // タップさせる形に一本化している

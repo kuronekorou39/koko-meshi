@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -8,6 +9,7 @@ import '../models/meal_photo.dart';
 import '../models/meal_type.dart';
 import '../models/saved_place.dart';
 import '../models/sensitive_mood.dart';
+import 'analysis_verdict.dart';
 import 'analysis_foreground_service.dart';
 import 'app_settings_service.dart';
 import 'device_capability.dart';
@@ -273,17 +275,24 @@ class AiAnalysisService {
         );
         return;
       }
+      // 1回目の結果はここで確定させて一覧へ出す。確からしさの判定を待たせると
+      // 「撮ってすぐ名前が出る」体験が損なわれる
+      final firstName = sanitizeMenuName(rawName);
       await _writeAiResult(
         photo.id,
         aiStatus: 'completed',
-        aiMenuName: sanitizeMenuName(rawName),
+        aiMenuName: firstName,
         aiEstimatedPrice: res.price,
         aiEstimatedCalories: res.calories,
         aiCuisineGenre: res.genre,
         aiModel: _onDeviceModelLabel,
       );
-      debugPrint('[AI] on-device completed: ${res.menuName} '
-          '(${res.inferenceMs}ms)');
+      debugPrint('[AI] on-device completed: $firstName (${res.inferenceMs}ms)');
+
+      // 確かめのもう1回。答えが揃えば自信あり、割れたら候補として出す。
+      // 温度0.9で言い回しが毎回変わるので、この揺れがそのまま確からしさの
+      // 目安になる(1回目だけでは、自信を持って外していても気づけない)
+      await _confirmWithSecondOpinion(photo, svc, savedPlaces, firstName);
     } catch (e) {
       debugPrint('[AI] on-device analyze error for ${photo.id}: $e');
       final msg = e.toString();
@@ -293,6 +302,56 @@ class AiAnalysisService {
         aiError:
             '解析中にエラーが発生しました: ${msg.length > 120 ? '${msg.substring(0, 120)}…' : msg}',
       );
+    }
+  }
+
+  /// 同じ写真をもう1回だけ解析し、1回目と揃うかで確からしさを決める。
+  ///
+  /// 揃えば 'high'。割れたら 'low' にして両方を候補に残し、利用者に
+  /// 選んでもらう。採用名は1回目のまま動かさない(先に画面へ出したものが
+  /// 後から入れ替わると、見ていたものが勝手に変わってしまう)。
+  ///
+  /// 失敗しても黙って戻る。1回目の結果は既に保存されていて、確からしさが
+  /// 付かないだけ(未判定として扱われ、確認は促さない)。
+  static Future<void> _confirmWithSecondOpinion(
+    MealPhoto photo,
+    GemmaOnDeviceService svc,
+    List<SavedPlace> savedPlaces,
+    String firstName,
+  ) async {
+    try {
+      final path = await PhotoCacheService.getOriginalPath(
+        localPath: photo.localPath,
+        originalUrl: photo.originalUrl,
+      );
+      final source = path ?? photo.thumbnailUrl;
+      if (source == null) return;
+
+      final bytes = await File(source).readAsBytes();
+      final context = await buildOnDeviceContext(photo, savedPlaces);
+      final res = await svc.analyze(bytes, context: context);
+      final second = res.menuName?.trim();
+      if (second == null || second.isEmpty) return;
+
+      final verdict = judgeAnalysis(
+        [firstName, sanitizeMenuName(second)],
+        keepFirstAsPrimary: true,
+      );
+      final split = verdict.candidates.length > 1;
+
+      await _writeAiResult(
+        photo.id,
+        aiStatus: 'completed',
+        // 割れたら1回目より良い名前が立つことがある(1回目が曖昧なとき)
+        aiMenuName: verdict.primary,
+        aiConfidence: verdict.confidence.name,
+        aiCandidates: split ? jsonEncode(verdict.candidates) : null,
+        clearCandidates: !split,
+      );
+      debugPrint('[AI] 確認: ${verdict.confidence.name} '
+          '候補${verdict.candidates.length} (${res.inferenceMs}ms)');
+    } catch (e) {
+      debugPrint('[AI] 確認の解析に失敗(1回目の結果はそのまま): $e');
     }
   }
 
@@ -310,6 +369,9 @@ class AiAnalysisService {
     int? aiEstimatedCalories,
     String? aiCuisineGenre,
     String? aiModel,
+    String? aiConfidence,
+    String? aiCandidates,
+    bool clearCandidates = false,
   }) async {
     final current = await LocalDatabase.getMealPhoto(photoId);
     if (current == null) return;
@@ -323,6 +385,9 @@ class AiAnalysisService {
       aiEstimatedCalories: aiEstimatedCalories,
       aiCuisineGenre: aiCuisineGenre,
       aiModel: aiModel,
+      aiConfidence: aiConfidence,
+      aiCandidates: aiCandidates,
+      clearCandidates: clearCandidates,
     ));
     resultsVersion.value++;
   }
