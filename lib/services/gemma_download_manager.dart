@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:background_downloader/background_downloader.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:path_provider/path_provider.dart';
@@ -43,6 +44,7 @@ class GemmaModelCorruptedException implements Exception {
 /// (設定・PoC・食事詳細)が同じ状態を購読できる。
 class GemmaDownloadManager {
   GemmaDownloadManager._() {
+    _watchDownloadFailures();
     // 起動時(正確には初回アクセス時)にインストール済みフラグを埋める
     for (final k in GemmaModelKind.values) {
       refreshInstalled(k);
@@ -50,6 +52,45 @@ class GemmaDownloadManager {
   }
 
   static final GemmaDownloadManager instance = GemmaDownloadManager._();
+
+  /// ダウンロードが失敗したときの生の情報。
+  ///
+  /// flutter_gemma は失敗の詳細(HTTPコード・例外)を gemmaLog に出すが、
+  /// あれは `if (!kDebugMode) return;` でリリースビルドでは消える。
+  /// 呼び出し側に届くのは「Existing download failed: TaskStatus.failed」
+  /// のような、原因を含まない文字列だけ。
+  ///
+  /// 実機で困るのはリリースビルドなので、こちらで直接ストリームを聞いて
+  /// 原因を残し、画面に出せるようにする。
+  String? _lastFailureDetail;
+
+  /// 直近の失敗の詳細(HTTPコードなど)。無ければ null
+  String? get lastFailureDetail => _lastFailureDetail;
+
+  void _watchDownloadFailures() {
+    try {
+      FileDownloader().updates.listen((update) {
+        if (update is! TaskStatusUpdate) return;
+        if (update.status != TaskStatus.failed &&
+            update.status != TaskStatus.notFound &&
+            update.status != TaskStatus.canceled) {
+          return;
+        }
+        final parts = <String>[
+          '状態: ${update.status.name}',
+          if (update.responseStatusCode != null)
+            'HTTP: ${update.responseStatusCode}',
+          if (update.exception != null) '例外: ${update.exception}',
+          if (update.responseBody != null && update.responseBody!.isNotEmpty)
+            '応答: ${update.responseBody!.length > 200 ? '${update.responseBody!.substring(0, 200)}…' : update.responseBody}',
+        ];
+        _lastFailureDetail = parts.join(' / ');
+        debugPrint('[GemmaDL] 失敗の詳細: $_lastFailureDetail');
+      });
+    } catch (e) {
+      debugPrint('[GemmaDL] 更新の購読に失敗: $e');
+    }
+  }
 
   final Map<GemmaModelKind, ValueNotifier<GemmaDownloadState>> _states = {
     for (final k in GemmaModelKind.values)
@@ -113,7 +154,11 @@ class GemmaDownloadManager {
       unawaited(AiAnalysisService.processPendingPhotos());
       return source;
     } catch (e) {
-      notifier.value = GemmaDownloadState(error: e.toString());
+      // パッケージが返す文言は原因を含まないので、拾っておいた詳細を添える
+      final detail = _lastFailureDetail;
+      notifier.value = GemmaDownloadState(
+        error: detail == null ? e.toString() : '$e\n\n[詳細] $detail',
+      );
       rethrow;
     }
   }

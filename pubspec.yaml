@@ -74,6 +74,7 @@ dependencies:
 
   # 端末内AI解析中のフォアグラウンドサービス(プロセス凍結防止+進捗通知)
   flutter_foreground_task: ^10.0.0
+  background_downloader: ^9.5.7
 
 # vendorパッチ版: visual token budget(画像の実効解像度)を設定可能にする
 # (pub.dev 1.0.4にはFFIバインディングだけあり公開APIが無い。詳細は

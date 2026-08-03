@@ -598,12 +598,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       ),
                     ),
                   ),
+                  // 失敗の詳細(HTTPコード等)を含むので、省略せず全文を出す。
+                  // 実機で原因を読む唯一の手段になる(パッケージ側のログは
+                  // リリースビルドでは消えている)
                   if (dl.error != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
-                      child: Text(
+                      child: SelectableText(
                         dl.error!,
-                        style: TextStyle(fontSize: 12, color: scheme.error),
+                        style: TextStyle(
+                            fontSize: 12, height: 1.5, color: scheme.error),
                       ),
                     ),
                 ],
