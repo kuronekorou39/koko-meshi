@@ -7,6 +7,7 @@ import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'ai_analysis_service.dart';
+import 'download_updates.dart';
 import 'gemma_ondevice_service.dart';
 
 /// モデルDLの現在状態(不変オブジェクト)。
@@ -57,39 +58,39 @@ class GemmaDownloadManager {
   ///
   /// flutter_gemma は失敗の詳細(HTTPコード・例外)を gemmaLog に出すが、
   /// あれは `if (!kDebugMode) return;` でリリースビルドでは消える。
-  /// 呼び出し側に届くのは「Existing download failed: TaskStatus.failed」
-  /// のような、原因を含まない文字列だけ。
+  /// 呼び出し側に届くのは「Download failed after N attempts: ...」のような
+  /// 原因を含まない文字列だけ。実機で困るのはリリースビルドなので、
+  /// こちらでも同じ更新を聞いて原因を残す。
   ///
-  /// 実機で困るのはリリースビルドなので、こちらで直接ストリームを聞いて
-  /// 原因を残し、画面に出せるようにする。
+  /// **購読は必ず [DownloadUpdates.stream] 経由にすること。**
+  /// `FileDownloader().updates` は単一購読で、直接listenすると
+  /// flutter_gemma 側が購読できず「Stream has already been listened to」で
+  /// ダウンロードそのものが死ぬ(実際にそれで壊した)。
   String? _lastFailureDetail;
 
   /// 直近の失敗の詳細(HTTPコードなど)。無ければ null
   String? get lastFailureDetail => _lastFailureDetail;
 
   void _watchDownloadFailures() {
-    try {
-      FileDownloader().updates.listen((update) {
-        if (update is! TaskStatusUpdate) return;
-        if (update.status != TaskStatus.failed &&
-            update.status != TaskStatus.notFound &&
-            update.status != TaskStatus.canceled) {
-          return;
-        }
-        final parts = <String>[
-          '状態: ${update.status.name}',
-          if (update.responseStatusCode != null)
-            'HTTP: ${update.responseStatusCode}',
-          if (update.exception != null) '例外: ${update.exception}',
-          if (update.responseBody != null && update.responseBody!.isNotEmpty)
-            '応答: ${update.responseBody!.length > 200 ? '${update.responseBody!.substring(0, 200)}…' : update.responseBody}',
-        ];
-        _lastFailureDetail = parts.join(' / ');
-        debugPrint('[GemmaDL] 失敗の詳細: $_lastFailureDetail');
-      });
-    } catch (e) {
-      debugPrint('[GemmaDL] 更新の購読に失敗: $e');
-    }
+    DownloadUpdates.stream.listen((update) {
+      if (update is! TaskStatusUpdate) return;
+      if (update.status != TaskStatus.failed &&
+          update.status != TaskStatus.notFound &&
+          update.status != TaskStatus.canceled) {
+        return;
+      }
+      final body = update.responseBody;
+      final parts = <String>[
+        '状態: ${update.status.name}',
+        if (update.responseStatusCode != null)
+          'HTTP: ${update.responseStatusCode}',
+        if (update.exception != null) '例外: ${update.exception}',
+        if (body != null && body.isNotEmpty)
+          '応答: ${body.length > 200 ? '${body.substring(0, 200)}…' : body}',
+      ];
+      _lastFailureDetail = parts.join(' / ');
+      debugPrint('[GemmaDL] 失敗の詳細: $_lastFailureDetail');
+    });
   }
 
   final Map<GemmaModelKind, ValueNotifier<GemmaDownloadState>> _states = {

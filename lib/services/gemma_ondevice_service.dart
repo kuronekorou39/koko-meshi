@@ -9,6 +9,8 @@ import 'package:flutter_gemma_litertlm/flutter_gemma_litertlm.dart';
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 
+import 'download_updates.dart';
+
 /// PoC で切り替え可能なオンデバイスGemmaモデル。
 enum GemmaModelKind {
   e2b(
@@ -196,7 +198,12 @@ image_typeは次の3つから1つ選んでください:
   /// engine登録(1回だけ)
   Future<void> _ensureInit() async {
     if (_initialized) return;
-    await FlutterGemma.initialize(inferenceEngines: [LiteRtLmEngine()]);
+    await FlutterGemma.initialize(
+      inferenceEngines: [LiteRtLmEngine()],
+      // 更新ストリームは単一購読なので、broadcast化した同じものを渡す。
+      // アプリ側も失敗の詳細を拾うために同じストリームを聞いている
+      downloadUpdatesStream: DownloadUpdates.stream,
+    );
     _initialized = true;
   }
 
