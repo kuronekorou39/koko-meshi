@@ -64,6 +64,21 @@ jobs:
           echo "=== 同梱フレームワーク ==="
           ls "$APP/Frameworks" 2>/dev/null || echo "(なし)"
 
+      # プライバシーマニフェストは2024年5月以降、無いとアップロードで弾かれる。
+      # pbxproj への登録漏れ(Resources ビルドフェーズに入れ忘れ)は
+      # コンパイルが通ってしまうので気づけない。ここを門にする
+      - name: プライバシーマニフェストの同梱を確認
+        run: |
+          APP=build/ios/iphoneos/Runner.app
+          if [ ! -f "$APP/PrivacyInfo.xcprivacy" ]; then
+            echo "PrivacyInfo.xcprivacy が Runner.app に入っていません。"
+            echo "ios/Runner.xcodeproj/project.pbxproj の Resources ビルドフェーズを確認してください。"
+            exit 1
+          fi
+          plutil -lint "$APP/PrivacyInfo.xcprivacy"
+          echo "--- 宣言内容 ---"
+          plutil -p "$APP/PrivacyInfo.xcprivacy"
+
       # Sideloadly で手元のiPhoneに入れるための IPA。
       # .app を Payload/ に入れて zip するだけでよい。署名は Sideloadly が
       # 自分の証明書でやり直すので、ここで署名しても意味がない。

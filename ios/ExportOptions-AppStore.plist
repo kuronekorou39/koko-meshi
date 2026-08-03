@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  App Store 提出用 IPA の書き出し設定 (xcodebuild -exportArchive -exportOptionsPlist)。
+
+  teamID は OmniVerse と同じ Apple Developer アカウント。
+  provisioningProfiles のキーは Bundle ID、値は App Store Connect / Developer
+  ポータルで作ったプロビジョニングプロファイル名。プロファイルを作るときに
+  名前を変えたら、ここも合わせること。
+
+  signingStyle = manual なので、CI で使うなら証明書(.p12)とプロファイル
+  (.mobileprovision)をキーチェーンに入れる手順が別途要る。
+  手元の Mac で Xcode Organizer から出す場合はこのファイルは不要。
+-->
+<plist version="1.0">
+<dict>
+	<key>method</key>
+	<string>app-store</string>
+	<key>teamID</key>
+	<string>M5D5CQRGX8</string>
+	<key>signingStyle</key>
+	<string>manual</string>
+	<key>provisioningProfiles</key>
+	<dict>
+		<key>com.kokomeshi.kokoMeshi</key>
+		<string>KokoMeshi AppStore</string>
+	</dict>
+	<key>compileBitcode</key>
+	<false/>
+	<key>stripSwiftSymbols</key>
+	<true/>
+	<key>uploadSymbols</key>
+	<true/>
+</dict>
+</plist>

@@ -29,6 +29,11 @@
 	     meta-data で同じ値を渡しているのと対になる -->
 	<key>GOOGLE_MAPS_API_KEY</key>
 	<string>$(GOOGLE_MAPS_API_KEY)</string>
+	<!-- 輸出コンプライアンス。使っている暗号はHTTPS(OSのTLS)だけで、独自の
+	     暗号は載せていない。この宣言が無いと、アップロードのたびに
+	     App Store Connect で同じ質問に答えさせられる -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<!-- 権限の説明文。iOSは説明文が無いまま権限APIを呼ぶとその場で落ちるので、

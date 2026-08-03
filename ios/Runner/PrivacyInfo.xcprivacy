@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  プライバシーマニフェスト(2024年5月以降、審査で必須)。
+
+  このアプリは記録・写真・位置をすべて端末内に保存し、外部へ送らない。
+  アカウントも無く、解析も端末内で完結する(Gemma/LiteRT-LM)。
+  したがって NSPrivacyCollectedDataTypes は空にしている。
+
+  外部と通信するのは次の3つだけで、いずれも利用者のデータを送らない:
+    - Google Maps SDK / Places API (地図の表示と店舗検索)
+    - HuggingFace (AIモデルファイルのダウンロード)
+    - GitHub API (新しいバージョンの確認)
+
+  NSPrivacyAccessedAPITypes は「理由の宣言が要るAPI」の一覧。使っている
+  パッケージから逆算して並べている。
+-->
+<plist version="1.0">
+<dict>
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+
+	<!-- 端末内で完結するため、収集しているデータは無い -->
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<!-- shared_preferences(設定の保存)。CA92.1 = 自アプリ内でのみ利用 -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+
+		<!-- 写真・サムネ・バックアップzipの読み書き(path_provider / archive /
+		     background_downloader)。
+		     C617.1 = 自アプリのコンテナ内、DDA9.1 = 利用者が選んだファイル -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
+				<string>DDA9.1</string>
+			</array>
+		</dict>
+
+		<!-- 2.4GBのAIモデルを落とす前の空き容量確認。E174.1 = 端末内の判断にのみ利用 -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryDiskSpace</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>E174.1</string>
+			</array>
+		</dict>
+
+		<!-- 解析の所要時間の計測など。35F9.1 = 端末内での時間計測 -->
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>35F9.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>
