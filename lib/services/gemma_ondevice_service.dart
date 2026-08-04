@@ -376,12 +376,18 @@ image_typeは次の3つから1つ選んでください:
       fileType: ModelFileType.litertlm,
     );
     final localPath = await _prePlacedModelPath(kind);
-    // foreground: true → background_downloaderが通知+フォアグラウンドサービスで
-    // DLする(非フォアグラウンドWorkManagerの9分タイムアウト→0%リトライ対策)。
-    // 必要なPOST_NOTIFICATIONS権限はSmartDownloaderがDL開始前に自動要求する
+    // Androidでは foreground: true → background_downloaderが通知+フォアグラウンド
+    // サービスでDLする(非フォアグラウンドWorkManagerの9分タイムアウト→0%リトライ
+    // 対策)。必要なPOST_NOTIFICATIONS権限はSmartDownloaderがDL開始前に自動要求する。
+    //
+    // iOSでは渡さない(null=パッケージ既定)。フォアグラウンドサービスはAndroidの
+    // 概念で、iOSでは効果が無いのに通知許可ダイアログだけが出る
     builder = localPath != null
         ? builder.fromFile(localPath)
-        : builder.fromNetwork(kind.url, foreground: true);
+        : builder.fromNetwork(
+            kind.url,
+            foreground: Platform.isAndroid ? true : null,
+          );
     if (onProgress != null) {
       builder = builder.withProgress(onProgress);
     }

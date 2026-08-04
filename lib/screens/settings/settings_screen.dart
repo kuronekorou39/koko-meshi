@@ -1,5 +1,6 @@
 ﻿import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:geocoding/geocoding.dart';
@@ -15,6 +16,7 @@ import '../../providers/meal_providers.dart';
 import '../../services/app_settings_service.dart';
 import '../../services/backup_service.dart';
 import '../../services/device_capability.dart';
+import '../../services/download_log.dart';
 import '../../services/gemma_download_manager.dart';
 import '../../services/gemma_ondevice_service.dart';
 import '../../services/update_service.dart';
@@ -66,6 +68,55 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         );
       }
     }
+  }
+
+  /// DLの経過ログを見せる。iOS実機ではPCからログを読めないので、ここから
+  /// コピーして貼れることが唯一の切り分け手段になる
+  void _showDownloadLog() {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('ダウンロードの記録'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: SelectableText(
+              DownloadLog.instance.text,
+              style: const TextStyle(fontSize: 11, height: 1.5),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              DownloadLog.instance.clear();
+              Navigator.pop(context);
+            },
+            child: const Text('消す'),
+          ),
+          TextButton(
+            onPressed: () async {
+              // ダイアログを閉じるとこの context は無効になるので、
+              // スナックバー用の messenger は await の前に掴んでおく
+              final messenger = ScaffoldMessenger.of(context);
+              final navigator = Navigator.of(context);
+              await Clipboard.setData(
+                ClipboardData(text: DownloadLog.instance.text),
+              );
+              navigator.pop();
+              messenger.showSnackBar(
+                const SnackBar(content: Text('記録をコピーしました')),
+              );
+            },
+            child: const Text('コピー'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('閉じる'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _loadVersion() async {
@@ -566,14 +617,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             if (installed == true) {
               return Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.check_circle_outline,
-                        size: 16, color: tokens.success),
-                    const SizedBox(width: 6),
-                    Text('AIモデルの準備ができています',
-                        style:
-                            TextStyle(fontSize: 12, color: tokens.textMuted)),
+                    Row(
+                      children: [
+                        Icon(Icons.check_circle_outline,
+                            size: 16, color: tokens.success),
+                        const SizedBox(width: 6),
+                        Text('AIモデルの準備ができています',
+                            style: TextStyle(
+                                fontSize: 12, color: tokens.textMuted)),
+                      ],
+                    ),
+                    _buildDownloadLogLink(),
                   ],
                 ),
               );
@@ -610,10 +667,35 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             fontSize: 12, height: 1.5, color: scheme.error),
                       ),
                     ),
+                  _buildDownloadLogLink(),
                 ],
               ),
             );
           },
+        );
+      },
+    );
+  }
+
+  /// DLの経過ログへの入口。記録が無いうちは出さない
+  Widget _buildDownloadLogLink() {
+    return ValueListenableBuilder<int>(
+      valueListenable: DownloadLog.instance.revision,
+      builder: (context, _, child) {
+        if (DownloadLog.instance.isEmpty) return const SizedBox.shrink();
+        return Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: _showDownloadLog,
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            icon: const Icon(Icons.receipt_long_outlined, size: 16),
+            label: const Text('ダウンロードの記録を見る',
+                style: TextStyle(fontSize: 12)),
+          ),
         );
       },
     );
