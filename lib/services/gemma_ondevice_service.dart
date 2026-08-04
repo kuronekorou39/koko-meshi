@@ -2,6 +2,7 @@
 import 'dart:io';
 import 'dart:math';
 
+import 'package:background_downloader/background_downloader.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_gemma/flutter_gemma.dart';
@@ -9,7 +10,9 @@ import 'package:flutter_gemma_litertlm/flutter_gemma_litertlm.dart';
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 
+import 'download_log.dart';
 import 'download_updates.dart';
+import 'model_downloader.dart';
 
 /// PoC で切り替え可能なオンデバイスGemmaモデル。
 enum GemmaModelKind {
@@ -73,7 +76,16 @@ enum GemmaModelKind {
   final int visualTokenBudget;
 }
 
-enum GemmaInstallSource { localFile, network }
+enum GemmaInstallSource {
+  /// adb push で事前配置されたファイル
+  localFile,
+
+  /// パッケージ(background_downloader)によるDL
+  network,
+
+  /// 自前DL([ModelDownloader])。iOSはこれ
+  selfDownload,
+}
 
 /// サンプリングの版。ベンチで効果を比べるために切り替える。
 ///
@@ -210,7 +222,16 @@ image_typeは次の3つから1つ選んでください:
   /// 指定モデルが端末に既にインストール済みか
   Future<bool> isInstalled(GemmaModelKind kind) async {
     await _ensureInit();
-    return FlutterGemma.isModelInstalled(kind.fileName);
+    if (!await FlutterGemma.isModelInstalled(kind.fileName)) return false;
+    // パッケージの「インストール済み」は SharedPreferences のフラグだけで、
+    // 実体の有無を見ていない。iOSは自前DLしたファイルを外部パスとして
+    // 登録しているだけなので、実体が消えるとフラグだけが残る。
+    // 「準備できています」と言うのにロードで落ちるのを防ぐため確かめる
+    if (Platform.isIOS) {
+      final f = File(await _selfDownloadPath(kind));
+      return await f.exists() && await f.length() == kind.expectedBytes;
+    }
+    return true;
   }
 
   /// 指定モデルをインストール(進捗0-100)。返り値はインストール元。
@@ -375,24 +396,73 @@ image_typeは次の3つから1つ選んでください:
       modelType: ModelType.gemma4,
       fileType: ModelFileType.litertlm,
     );
-    final localPath = await _prePlacedModelPath(kind);
+
+    // 事前配置(adb push)があればそれが最優先
+    var localPath = await _prePlacedModelPath(kind);
+    var source =
+        localPath != null ? GemmaInstallSource.localFile : GemmaInstallSource.network;
+
+    // iOSはパッケージのDLが使えないので自分で落として、その場所を登録する。
+    // fromFile はファイルをコピーせず外部パスを登録するだけなので、
+    // ディスクを二重に食わない([ModelDownloader] のコメントに経緯)
+    if (localPath == null && Platform.isIOS) {
+      localPath = await _selfDownload(kind, onProgress);
+      source = GemmaInstallSource.selfDownload;
+    }
+
     // Androidでは foreground: true → background_downloaderが通知+フォアグラウンド
     // サービスでDLする(非フォアグラウンドWorkManagerの9分タイムアウト→0%リトライ
-    // 対策)。必要なPOST_NOTIFICATIONS権限はSmartDownloaderがDL開始前に自動要求する。
-    //
-    // iOSでは渡さない(null=パッケージ既定)。フォアグラウンドサービスはAndroidの
-    // 概念で、iOSでは効果が無いのに通知許可ダイアログだけが出る
+    // 対策)。必要なPOST_NOTIFICATIONS権限はSmartDownloaderがDL開始前に自動要求する
     builder = localPath != null
         ? builder.fromFile(localPath)
-        : builder.fromNetwork(
-            kind.url,
-            foreground: Platform.isAndroid ? true : null,
-          );
+        : builder.fromNetwork(kind.url, foreground: true);
     if (onProgress != null) {
       builder = builder.withProgress(onProgress);
     }
     await builder.install();
-    return localPath != null ? GemmaInstallSource.localFile : GemmaInstallSource.network;
+    return source;
+  }
+
+  /// 自前DLの保存先。パッケージのDL先(Documents直下)とは分けて、
+  /// どちらが置いたファイルなのかが混ざらないようにする。
+  Future<String> _selfDownloadPath(GemmaModelKind kind) async {
+    final dir = await getApplicationDocumentsDirectory();
+    return '${dir.path}/models/${kind.fileName}';
+  }
+
+  /// iOS用の自前DL。すでに落ちていればそれを使う(再インストールで
+  /// 2.4GBを落とし直させない)。
+  Future<String> _selfDownload(
+    GemmaModelKind kind,
+    void Function(int)? onProgress,
+  ) async {
+    final destPath = await _selfDownloadPath(kind);
+    final dest = File(destPath);
+    if (await dest.exists() && await dest.length() == kind.expectedBytes) {
+      onProgress?.call(100);
+      return destPath;
+    }
+    // 前回のパッケージ側のDLがバックグラウンドで走り続けていることがある
+    // (実測: 失敗しても再enqueueされ、2.4GBを何度も落とし直していた)。
+    // 自前DLと二重に通信しないよう止める
+    await _cancelPackageDownloads();
+    return ModelDownloader.download(
+      url: kind.url,
+      destPath: destPath,
+      expectedBytes: kind.expectedBytes,
+      onProgress: onProgress,
+    );
+  }
+
+  Future<void> _cancelPackageDownloads() async {
+    try {
+      final ids = await FileDownloader().allTaskIds();
+      if (ids.isEmpty) return;
+      DownloadLog.instance.add('残っていたDLタスクを止める: ${ids.length}件');
+      await FileDownloader().cancelTasksWithIds(ids);
+    } catch (e) {
+      DownloadLog.instance.add('残タスクの停止に失敗(続行): $e');
+    }
   }
 
   /// adb push で配置された正規モデルのパス(存在すれば)。
