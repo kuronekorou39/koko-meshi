@@ -914,17 +914,16 @@ class _MapTabState extends ConsumerState<MapTab> {
                     ),
                   ),
 
-                // 「このエリアで検索」ボタン
-                if (_showSearchButton)
+                // 「このエリアで検索」ボタン。
+                // 配布ビルドでは丸ごと出さない([AppFeatures.placeSearch])。
+                // 以前は「準備中」と分かる形のボタンを置いていたが、App Review
+                // ガイドライン2.1 が coming soon 表示を差し戻し対象にしている
+                if (_showSearchButton && AppFeatures.placeSearch)
                   Positioned(
                     top: 16,
                     left: 0,
                     right: 0,
-                    child: Center(
-                      child: AppFeatures.placeSearch
-                          ? _buildSearchButton()
-                          : _buildSearchComingSoon(),
-                    ),
+                    child: Center(child: _buildSearchButton()),
                   ),
 
                 // 検索結果の一覧
@@ -1029,46 +1028,6 @@ class _MapTabState extends ConsumerState<MapTab> {
                 Icon(Icons.filter_alt,
                     size: 15, color: theme.colorScheme.primary),
               ],
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// 配布ビルドでの表示。Places は従量課金なので、費用を誰が持つかが
-  /// 決まるまで出せない([AppFeatures.placeSearch])。押せないボタンを黙って
-  /// 置くと壊れて見えるので、準備中だと分かる形にする
-  Widget _buildSearchComingSoon() {
-    final theme = Theme.of(context);
-    final tokens = KokoTokens.of(context);
-    return Material(
-      color: theme.brightness == Brightness.light
-          ? theme.colorScheme.surface
-          : theme.colorScheme.surfaceContainerHigh,
-      shape: StadiumBorder(
-        side: BorderSide(color: tokens.hairline, width: 0.8),
-      ),
-      child: InkWell(
-        customBorder: const StadiumBorder(),
-        onTap: () => ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('お店の検索は準備中です。記録の保存と地図の表示はそのままお使いいただけます'),
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.storefront_outlined, size: 18, color: tokens.textFaint),
-              const SizedBox(width: 8),
-              Text(
-                'お店の検索（準備中）',
-                style: theme.textTheme.labelLarge?.copyWith(
-                  color: tokens.textMuted,
-                ),
-              ),
             ],
           ),
         ),

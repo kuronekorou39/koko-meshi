@@ -15,22 +15,14 @@ App Store Connect の各フィールドに貼る文案と、審査前にやる�
 
 ## 審査前にやること (コード側)
 
-### 1. 「お店の検索（準備中）」ボタン — **要判断**
-
-`lib/screens/home/map_tab.dart` の `_buildSearchComingSoon()`。配布ビルドでは
-「お店の検索（準備中）」というボタンが地図上に出て、押すと「準備中です」の
-スナックバーが出る。
+### 1. 「お店の検索（準備中）」ボタン — 対応済み
 
 App Review ガイドライン 2.1 (App Completeness) は placeholder / "coming soon"
-を差し戻し理由に挙げている。**iOS 版では丸ごと隠すのが安全**。
+を差し戻し理由に挙げているため、配布ビルドでは検索ボタンを丸ごと出さない
+ようにした (`map_tab.dart` / `AppFeatures.placeSearch`)。地図表示・記録・
+マイプレイスはそのまま動く。
 
-```dart
-// map_tab.dart:918 付近
-if (_showSearchButton && AppFeatures.placeSearch)
-  Positioned(... child: _buildSearchButton()),
-```
-
-とすれば「準備中」表示は消える (地図表示・記録・マイプレイスはそのまま動く)。
+開発時は `--dart-define=PLACE_SEARCH=true` で従来どおり出せる。
 
 ### 2. Bundle ID の確認
 
@@ -192,12 +184,17 @@ AIを使わず、すべて手入力で記録することもできます。
 
 | 種類 | URL | 必須 |
 |---|---|---|
-| サポート URL | `https://rou39.com/apps/kokomeshi` | 必須 |
-| マーケティング URL | `https://rou39.com/apps/kokomeshi` | 任意 |
-| プライバシーポリシー URL | `https://rou39.com/apps/kokomeshi/privacy` | **必須** |
+| サポート URL | `https://rou39.com/apps/koko-meshi` | 必須 |
+| マーケティング URL | `https://rou39.com/apps/koko-meshi` | 任意 |
+| プライバシーポリシー URL | `https://rou39.com/kokomeshi/privacy-policy.html` | **必須** |
 
-**要対応**: `docs/privacy-policy.html` を上記 URL で公開すること。
-未公開のまま出すと必ず差し戻される。
+ポリシー本文の実体は portfolio-rou39-dev リポジトリの
+`frontend/public/kokomeshi/privacy-policy.html`。main に push すると
+Actions が S3 に反映する (OmniVerse が
+`/omniverse/privacy-policy.html` で公開されているのと同じ仕組み)。
+
+このリポジトリの `docs/privacy-policy.html` は同じ内容の控え。
+**文面を直すときは両方を直すこと**。
 
 ---
 
