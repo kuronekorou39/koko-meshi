@@ -10,7 +10,7 @@ import 'package:flutter_gemma_litertlm/flutter_gemma_litertlm.dart';
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 
-import 'download_log.dart';
+import 'ai_log.dart';
 import 'download_updates.dart';
 import 'model_downloader.dart';
 
@@ -458,10 +458,10 @@ image_typeは次の3つから1つ選んでください:
     try {
       final ids = await FileDownloader().allTaskIds();
       if (ids.isEmpty) return;
-      DownloadLog.instance.add('残っていたDLタスクを止める: ${ids.length}件');
+      AiLog.instance.add('残っていたDLタスクを止める: ${ids.length}件');
       await FileDownloader().cancelTasksWithIds(ids);
     } catch (e) {
-      DownloadLog.instance.add('残タスクの停止に失敗(続行): $e');
+      AiLog.instance.add('残タスクの停止に失敗(続行): $e');
     }
   }
 

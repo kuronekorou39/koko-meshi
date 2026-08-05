@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+
+import 'ai_log.dart';
 
 /// 端末内AI解析中に、アプリがバックグラウンドへ回ったり画面が消えたりしても
 /// OSにプロセスを凍結されないよう保つためのフォアグラウンドサービスの薄い
@@ -26,6 +30,15 @@ class AnalysisForegroundService {
   /// サービス起動中かどうか(このラッパー側での追跡)。起動に失敗した場合や
   /// 未起動のときにupdate/stopを空振りさせるために使う。
   static bool _running = false;
+
+  /// 起動処理の打ち切り時間。
+  ///
+  /// 通知許可の要求もサービス起動もOSの応答待ちで、返ってこないことがある
+  /// (許可ダイアログが出たまま放置される、対応していないプラットフォームで
+  /// 応答が来ない等)。[start] は解析バッチがモデルをロードする手前で
+  /// awaitされるので、ここで止まると「解析の順番待ち」のまま永久に進まない。
+  /// 通知はあくまで補助なので、待てなければ諦めて解析を進める。
+  static const _startTimeout = Duration(seconds: 15);
 
   static void _ensureInitialized() {
     if (_initialized) return;
@@ -64,21 +77,25 @@ class AnalysisForegroundService {
     }
     _ensureInitialized();
     try {
-      await _requestNotificationPermission();
+      await _requestNotificationPermission().timeout(_startTimeout);
       final result = await FlutterForegroundTask.startService(
         serviceId: _serviceId,
         serviceTypes: const [ForegroundServiceTypes.dataSync],
         notificationTitle: _notificationTitle,
         notificationText: _progressText(0, total),
         callback: analysisForegroundTaskCallback,
-      );
+      ).timeout(_startTimeout);
       _running = result is ServiceRequestSuccess;
       if (!_running && result is ServiceRequestFailure) {
-        debugPrint('[AI][FGS] start failed: ${result.error}');
+        AiLog.instance.add('通知サービスの起動に失敗(続行): ${result.error}');
       }
+    } on TimeoutException {
+      _running = false;
+      AiLog.instance
+          .add('通知サービスの起動が${_startTimeout.inSeconds}秒で返らないので諦めて続行');
     } catch (e) {
       _running = false;
-      debugPrint('[AI][FGS] start error: $e');
+      AiLog.instance.add('通知サービスの起動でエラー(続行): ${e.runtimeType} $e');
     }
   }
 

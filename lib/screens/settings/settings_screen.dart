@@ -16,7 +16,7 @@ import '../../providers/meal_providers.dart';
 import '../../services/app_settings_service.dart';
 import '../../services/backup_service.dart';
 import '../../services/device_capability.dart';
-import '../../services/download_log.dart';
+import '../../services/ai_log.dart';
 import '../../services/gemma_download_manager.dart';
 import '../../services/gemma_ondevice_service.dart';
 import '../../services/update_service.dart';
@@ -70,18 +70,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
   }
 
-  /// DLの経過ログを見せる。iOS実機ではPCからログを読めないので、ここから
-  /// コピーして貼れることが唯一の切り分け手段になる
-  void _showDownloadLog() {
+  /// AIの経過ログ(DL・ロード・解析)を見せる。
+  /// iOS実機ではPCからログを読めないので、ここからコピーして貼れることが
+  /// 唯一の切り分け手段になる
+  void _showAiLog() {
     showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('ダウンロードの記録'),
+        title: const Text('AIの記録'),
         content: SizedBox(
           width: double.maxFinite,
           child: SingleChildScrollView(
             child: SelectableText(
-              DownloadLog.instance.text,
+              AiLog.instance.text,
               style: const TextStyle(fontSize: 11, height: 1.5),
             ),
           ),
@@ -89,7 +90,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         actions: [
           TextButton(
             onPressed: () {
-              DownloadLog.instance.clear();
+              AiLog.instance.clear();
               Navigator.pop(context);
             },
             child: const Text('消す'),
@@ -101,7 +102,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               final messenger = ScaffoldMessenger.of(context);
               final navigator = Navigator.of(context);
               await Clipboard.setData(
-                ClipboardData(text: DownloadLog.instance.text),
+                ClipboardData(text: AiLog.instance.text),
               );
               navigator.pop();
               messenger.showSnackBar(
@@ -630,7 +631,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                 fontSize: 12, color: tokens.textMuted)),
                       ],
                     ),
-                    _buildDownloadLogLink(),
+                    _buildAiLogLink(),
                   ],
                 ),
               );
@@ -667,7 +668,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             fontSize: 12, height: 1.5, color: scheme.error),
                       ),
                     ),
-                  _buildDownloadLogLink(),
+                  _buildAiLogLink(),
                 ],
               ),
             );
@@ -677,23 +678,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     );
   }
 
-  /// DLの経過ログへの入口。記録が無いうちは出さない
-  Widget _buildDownloadLogLink() {
+  /// AIの経過ログへの入口。記録が無いうちは出さない
+  Widget _buildAiLogLink() {
     return ValueListenableBuilder<int>(
-      valueListenable: DownloadLog.instance.revision,
+      valueListenable: AiLog.instance.revision,
       builder: (context, _, child) {
-        if (DownloadLog.instance.isEmpty) return const SizedBox.shrink();
+        if (AiLog.instance.isEmpty) return const SizedBox.shrink();
         return Align(
           alignment: Alignment.centerLeft,
           child: TextButton.icon(
-            onPressed: _showDownloadLog,
+            onPressed: _showAiLog,
             style: TextButton.styleFrom(
               padding: const EdgeInsets.symmetric(horizontal: 4),
               minimumSize: Size.zero,
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
             icon: const Icon(Icons.receipt_long_outlined, size: 16),
-            label: const Text('ダウンロードの記録を見る',
+            label: const Text('AIの記録を見る',
                 style: TextStyle(fontSize: 12)),
           ),
         );

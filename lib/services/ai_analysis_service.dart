@@ -9,6 +9,7 @@ import '../models/meal_photo.dart';
 import '../models/meal_type.dart';
 import '../models/saved_place.dart';
 import '../models/sensitive_mood.dart';
+import 'ai_log.dart';
 import 'analysis_verdict.dart';
 import 'analysis_foreground_service.dart';
 import 'app_settings_service.dart';
@@ -104,6 +105,10 @@ class AiAnalysisService {
     photos = [...photos, ...failedPhotos, ...stuckPhotos];
     if (photos.isEmpty) return;
 
+    // ここから先の失敗はどれも「順番待ちのまま動かない」に見える。
+    // 実機ではdebugPrintが読めないので、経過を残す
+    AiLog.instance.startAttempt('解析バッチ開始 (${photos.length}枚)');
+
     // 端末内AI(オンデバイスGemma)
     await _processOnDevice(photos);
   }
@@ -116,7 +121,7 @@ class AiAnalysisService {
     // UnsatisfiedLinkError になるだけなので、その手前で降りる
     // (写真はpendingのまま残り、表示側が非対応として扱う)
     if (!DeviceCapability.onDeviceAi) {
-      debugPrint('[AI] この端末は端末内AI非対応。解析しない');
+      AiLog.instance.add('中断: この端末は端末内AI非対応');
       return;
     }
 
@@ -126,12 +131,12 @@ class AiAnalysisService {
     try {
       installed = await svc.isInstalled(GemmaModelKind.e2b);
     } catch (e) {
-      debugPrint('[AI] on-device init failed: $e');
+      AiLog.instance.add('中断: インストール確認で例外 ${e.runtimeType} $e');
       return;
     }
     if (!installed) {
       // モデル未DL: pendingのまま残す(設定画面でDLを促す)
-      debugPrint('[AI] on-device model not installed; leaving photos pending');
+      AiLog.instance.add('中断: モデルが入っていない');
       return;
     }
 
@@ -139,12 +144,16 @@ class AiAnalysisService {
     // できるよう、フォアグラウンドサービスでプロセスを保ちつつ進捗を通知する。
     // (起動失敗は握られ、通知が出ないだけで解析自体は続行される)
     await AnalysisForegroundService.start(photos.length);
+    AiLog.instance.add('フォアグラウンドサービスの起動を試行(失敗しても続行)');
     try {
       try {
-        await svc.load(GemmaModelKind.e2b);
+        final ms = await svc.load(GemmaModelKind.e2b);
+        AiLog.instance.add('モデルをロードした (${ms}ms)');
       } catch (e) {
-        debugPrint('[AI] on-device load failed: $e');
-        return; // ロード失敗(OOM等)。pendingのまま(finallyでFGS停止)
+        // OOM・バックエンド未対応・ファイル欠損など。ここで黙って戻ると
+        // 「順番待ちのまま何も起きない」に見える
+        AiLog.instance.add('中断: モデルのロードに失敗 ${e.runtimeType} $e');
+        return; // pendingのまま(finallyでFGS停止)
       }
 
       // 撮影状況コンテキストの組み立てに使う(バッチ中は不変なので1回だけ読む)
@@ -155,12 +164,12 @@ class AiAnalysisService {
       _disposeTimer?.cancel();
       _disposeTimer = null;
 
-      debugPrint('[AI] Processing ${photos.length} photos on-device (E2B)');
       try {
         var done = 0;
         for (final photo in photos) {
           await _analyzePhotoOnDevice(photo, svc, savedPlaces);
           done++;
+          AiLog.instance.add('解析 $done/${photos.length} 枚');
           await AnalysisForegroundService.updateProgress(done, photos.length);
         }
       } finally {
@@ -294,7 +303,7 @@ class AiAnalysisService {
       // 目安になる(1回目だけでは、自信を持って外していても気づけない)
       await _confirmWithSecondOpinion(photo, svc, savedPlaces, firstName);
     } catch (e) {
-      debugPrint('[AI] on-device analyze error for ${photo.id}: $e');
+      AiLog.instance.add('解析に失敗 (${photo.id}): ${e.runtimeType} $e');
       final msg = e.toString();
       await _writeAiResult(
         photo.id,

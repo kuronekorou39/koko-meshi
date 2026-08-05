@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'download_log.dart';
+import 'ai_log.dart';
 
 /// 途中まで落ちている `.part` の扱い。
 enum ResumePlan {
@@ -93,7 +93,7 @@ class ModelDownloader {
 
     final partBytes = await part.exists() ? await part.length() : 0;
     final plan = planResume(partBytes: partBytes, expectedBytes: expectedBytes);
-    DownloadLog.instance
+    AiLog.instance
         .add('自前DL: ${plan.name} (途中 $partBytes / $expectedBytes バイト)');
 
     if (plan == ResumePlan.alreadyComplete) {
@@ -117,7 +117,7 @@ class ModelDownloader {
         request.headers.set(HttpHeaders.rangeHeader, 'bytes=$offset-');
       }
       final response = await request.close();
-      DownloadLog.instance.add(
+      AiLog.instance.add(
         '自前DL: HTTP ${response.statusCode} / 本文長 ${response.contentLength}',
       );
 
@@ -136,7 +136,7 @@ class ModelDownloader {
       );
       final append = writePlan == WritePlan.append;
       if (!append && offset > 0) {
-        DownloadLog.instance.add('自前DL: 範囲要求が効かないので先頭から落とし直す');
+        AiLog.instance.add('自前DL: 範囲要求が効かないので先頭から落とし直す');
       }
 
       final sink =
@@ -154,7 +154,7 @@ class ModelDownloader {
       }
 
       final actual = await part.length();
-      DownloadLog.instance.add('自前DL: 受信完了 $actual / $expectedBytes バイト');
+      AiLog.instance.add('自前DL: 受信完了 $actual / $expectedBytes バイト');
       if (actual != expectedBytes) {
         throw ModelDownloadException(
           'ダウンロードしたモデルの大きさが合いません '
@@ -205,7 +205,7 @@ class ModelDownloader {
           if (percent != lastPercent) {
             lastPercent = percent;
             onProgress?.call(percent);
-            DownloadLog.instance
+            AiLog.instance
                 .addProgress(percent, expectedBytes: expectedBytes);
           }
         }

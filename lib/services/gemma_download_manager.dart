@@ -7,7 +7,7 @@ import 'package:flutter_gemma/flutter_gemma.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'ai_analysis_service.dart';
-import 'download_log.dart';
+import 'ai_log.dart';
 import 'download_updates.dart';
 import 'gemma_ondevice_service.dart';
 
@@ -75,7 +75,7 @@ class GemmaDownloadManager {
   void _watchDownloadFailures() {
     DownloadUpdates.stream.listen((update) {
       if (update is TaskProgressUpdate) {
-        DownloadLog.instance.addProgress(
+        AiLog.instance.addProgress(
           (update.progress * 100).round(),
           expectedBytes: update.expectedFileSize,
           speed: update.networkSpeed > 0
@@ -99,7 +99,7 @@ class GemmaDownloadManager {
           '応答: ${body.length > 200 ? '${body.substring(0, 200)}…' : body}',
       ];
       final line = parts.join(' / ');
-      DownloadLog.instance.add(line);
+      AiLog.instance.add(line);
 
       if (update.status == TaskStatus.failed ||
           update.status == TaskStatus.notFound ||
@@ -151,7 +151,7 @@ class GemmaDownloadManager {
   Future<GemmaInstallSource> _download(GemmaModelKind kind) async {
     final notifier = _states[kind]!;
     notifier.value = const GemmaDownloadState(downloading: true);
-    DownloadLog.instance.startAttempt('${kind.label} のDL開始');
+    AiLog.instance.startAttempt('${kind.label} のDL開始');
     try {
       final source = await GemmaOnDeviceService.instance.install(
         kind,
@@ -159,7 +159,7 @@ class GemmaDownloadManager {
           notifier.value = GemmaDownloadState(downloading: true, progress: p);
         },
       );
-      DownloadLog.instance.add('install() 完了 (元: ${source.name})');
+      AiLog.instance.add('install() 完了 (元: ${source.name})');
       // ネットワークDLは中断時の追記破損が既知問題なのでサイズ検証する。
       // fromFile経路(adb push配置)はファイルがDocuments外にあるため対象外
       if (source == GemmaInstallSource.network) {
@@ -173,7 +173,7 @@ class GemmaDownloadManager {
       unawaited(AiAnalysisService.processPendingPhotos());
       return source;
     } catch (e) {
-      DownloadLog.instance.add('例外で終了: ${e.runtimeType} $e');
+      AiLog.instance.add('例外で終了: ${e.runtimeType} $e');
       // パッケージが返す文言は原因を含まないので、拾っておいた詳細を添える
       final detail = _lastFailureDetail;
       notifier.value = GemmaDownloadState(
@@ -189,7 +189,7 @@ class GemmaDownloadManager {
   Future<void> _verifyInstalledSize(GemmaModelKind kind) async {
     final file = await _installedModelFile(kind);
     final actual = await file.exists() ? await file.length() : 0;
-    DownloadLog.instance
+    AiLog.instance
         .add('サイズ検証: $actual / ${kind.expectedBytes} @ ${file.path}');
     if (actual == kind.expectedBytes) return;
 

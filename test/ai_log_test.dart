@@ -1,9 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:koko_meshi/services/download_log.dart';
+import 'package:koko_meshi/services/ai_log.dart';
 
 /// シングルトンなので各テストの先頭で消す。
 void main() {
-  final log = DownloadLog.instance;
+  final log = AiLog.instance;
 
   setUp(log.clear);
 

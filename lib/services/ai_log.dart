@@ -1,18 +1,20 @@
 import 'package:flutter/foundation.dart';
 
-/// モデルDLの経過を端末内に残す。
+/// 端末内AIの経過(モデルDL・ロード・解析)を端末内に残す。
 ///
 /// iOS実機ではPCからログを読む手段が無く(macOS/Xcodeが必要)、パッケージ側の
-/// ログは `if (!kDebugMode) return;` でリリースビルドでは消える。そのため
-/// 「同じエラーが出る」以上の情報が手元に来ない状態が続いた。
+/// ログは `if (!kDebugMode) return;` でリリースビルドでは消える。アプリ側も
+/// 失敗を `debugPrint` に流すだけの箇所が多く、実機では「動かない」以上の
+/// 情報が手元に来ない状態が続いた。DLの原因究明もロードが進まない件も、
+/// どちらもここが無いと当て推量になる。
 ///
-/// 原因の切り分けに要る情報だけを残す:
+/// 切り分けに要る情報だけを残す:
 /// 状態遷移・HTTPコード・例外・応答の先頭・期待サイズ・経過秒。
 /// 進捗は10%刻みに間引く(2.4GBのDLで数千行になるのを防ぐ)。
-class DownloadLog {
-  DownloadLog._();
+class AiLog {
+  AiLog._();
 
-  static final DownloadLog instance = DownloadLog._();
+  static final AiLog instance = AiLog._();
 
   /// 古い行から捨てる上限。1回のDLは間引き後せいぜい数十行になる
   static const _maxLines = 200;
