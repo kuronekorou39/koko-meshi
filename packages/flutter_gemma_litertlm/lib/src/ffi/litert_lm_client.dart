@@ -13,6 +13,7 @@ import 'package:mutex/mutex.dart';
 import 'package:flutter_gemma/flutter_gemma_interface.dart';
 import 'package:flutter_gemma/core/parsing/sdk_text_extractor.dart';
 import '../native_log.dart';
+import '../vision_backend.dart';
 import '../visual_token_budget.dart';
 import 'litert_lm_bindings.dart';
 
@@ -649,7 +650,10 @@ class LiteRtLmFfiClient {
     // Create engine settings
     final modelPathPtr = modelPath.toNativeUtf8();
     final backendPtr = backend.toNativeUtf8();
-    final visionBackendPtr = enableVision ? backend.toNativeUtf8() : nullptr;
+    // ココメシ vendorパッチ: 画像エンコーダだけ別のバックエンドに逃がせる
+    // (メモリの足りない端末でMetalのテクスチャ確保に失敗するのを避ける)
+    final visionBackend = litertLmVisionBackend ?? backend;
+    final visionBackendPtr = enableVision ? visionBackend.toNativeUtf8() : nullptr;
     final audioBackendPtr = enableAudio ? 'cpu'.toNativeUtf8() : nullptr;
 
     try {
@@ -746,7 +750,8 @@ class LiteRtLmFfiClient {
       // Create engine in a background isolate to avoid blocking UI.
       // Pass settings pointer as int address (Pointer can't cross isolates).
       gemmaLog(
-        '[LiteRtLmFfi] Creating engine from $modelPath (backend=$backend, maxTokens=$maxTokens) ...',
+        '[LiteRtLmFfi] Creating engine from $modelPath (backend=$backend, '
+        'vision=${enableVision ? visionBackend : "off"}, maxTokens=$maxTokens) ...',
       );
       gemmaLog(
         '[LiteRtLmFfi/perf] === START litert_lm_engine_create (native — model load + accelerator init + KV cache prefill) ===',

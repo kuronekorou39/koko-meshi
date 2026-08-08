@@ -1,6 +1,7 @@
 import Flutter
 import GoogleMaps
 import UIKit
+import os // os_proc_available_memory
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
@@ -41,17 +42,25 @@ import UIKit
     }
   }
 
-  /// 例: `iPhone14,5 / RAM 4.0GB`。
-  /// 機種名(iPhone 13 等)への変換表は持たない。識別子のままでも調べれば
-  /// 分かるし、表は端末が出るたび古くなる
+  /// 例: `iPhone13,3 / RAM 5.6GB / あと確保できる 2.1GB`。
+  ///
+  /// 機種名(iPhone 12 Pro 等)への変換表は持たない。識別子のままでも調べれば
+  /// 分かるし、表は端末が出るたび古くなる。
+  ///
+  /// 3つ目は `os_proc_available_memory()`。iOSはアプリ1つが使えるメモリを
+  /// 端末のRAMから割った上限で切るので、RAMの量だけでは2.4GBのモデルが
+  /// 載るかどうか分からない。Runner.entitlements のメモリ上限の引き上げが
+  /// 署名で生きているかどうかも、この値の大きさに出る
   private static func deviceSummary() -> String {
     var info = utsname()
     uname(&info)
     let machine = withUnsafeBytes(of: &info.machine) { raw in
       String(cString: raw.baseAddress!.assumingMemoryBound(to: CChar.self))
     }
-    let ramGB = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824
-    return String(format: "%@ / RAM %.1fGB", machine, ramGB)
+    let gb = 1_073_741_824.0
+    let ramGB = Double(ProcessInfo.processInfo.physicalMemory) / gb
+    let availGB = Double(os_proc_available_memory()) / gb
+    return String(format: "%@ / RAM %.1fGB / あと確保できる %.1fGB", machine, ramGB, availGB)
   }
 
   /// 地図SDKにAPIキーを渡す。

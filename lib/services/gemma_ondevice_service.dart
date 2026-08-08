@@ -214,6 +214,12 @@ image_typeは次の3つから1つ選んでください:
     // 失敗理由を例外の文面に載せてもらい、AiLogに残るようにする。
     // Androidは stderr がlogcatに出るので、リダイレクトすると逆に見えなくなる
     litertLmCaptureNativeLog = Platform.isIOS;
+    // 画像エンコーダはCPUで動かす。iPhone 12 Pro(RAM 6GB)では、本体2.4GBを
+    // 抱えた状態でエンコーダをMetalに載せようとして
+    // 「Failed to allocate id<MTLTexture>」で確保に失敗し、推論セッションの
+    // 作成ごと落ちていた。エンコーダが動くのは画像1枚につき1回だけなので、
+    // ここをCPUに落としてもトークン生成の速度には効かない
+    litertLmVisionBackend = Platform.isIOS ? 'cpu' : null;
     await FlutterGemma.initialize(
       inferenceEngines: [LiteRtLmEngine()],
       // 更新ストリームは単一購読なので、broadcast化した同じものを渡す。
@@ -259,6 +265,12 @@ image_typeは次の3つから1つ選んでください:
     await _ensureInstalledAndActive(kind, null);
     // vendorパッチ経由で画像の実効解像度を設定(メッセージ送信時に反映される)
     litertLmVisualTokenBudget = kind.visualTokenBudget;
+    // どの設定でロードしたのかを残す。次に失敗したとき、何が効いていないのか
+    // ログだけで分かるようにするため
+    AiLog.instance.add(
+      'ロード開始 ${kind.label}: 本体=gpu / 画像=${litertLmVisionBackend ?? 'gpu'} / '
+      'maxTokens=${kind.maxTokens} / 画像トークン=${kind.visualTokenBudget}',
+    );
     final sw = Stopwatch()..start();
     _model = await FlutterGemma.getActiveModel(
       maxTokens: kind.maxTokens,

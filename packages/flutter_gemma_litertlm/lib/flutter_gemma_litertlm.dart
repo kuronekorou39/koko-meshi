@@ -17,3 +17,5 @@ export 'src/litert_lm_engine_web.dart'
 export 'src/visual_token_budget.dart';
 // ココメシ vendorパッチ: ネイティブのログをリリースビルドでも拾うためのフラグ
 export 'src/native_log.dart';
+// ココメシ vendorパッチ: 画像エンコーダだけ別のバックエンドに逃がすための設定
+export 'src/vision_backend.dart';
