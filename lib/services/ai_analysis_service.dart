@@ -106,8 +106,11 @@ class AiAnalysisService {
     if (photos.isEmpty) return;
 
     // ここから先の失敗はどれも「順番待ちのまま動かない」に見える。
-    // 実機ではdebugPrintが読めないので、経過を残す
+    // 実機ではdebugPrintが読めないので、経過を残す。
+    // 端末の素性(iOSは機種とRAM)も添える。ロードの失敗が端末の都合なのか
+    // 実装の問題なのかは、メモリ量が分からないと切り分けられない
     AiLog.instance.startAttempt('解析バッチ開始 (${photos.length}枚)');
+    AiLog.instance.add('端末: ${await DeviceCapability.summary()}');
 
     // 端末内AI(オンデバイスGemma)
     await _processOnDevice(photos);

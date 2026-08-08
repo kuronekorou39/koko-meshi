@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -40,5 +42,25 @@ class DeviceCapability {
     } catch (e) {
       debugPrint('[Device] 端末内AIの対応確認に失敗: $e');
     }
+  }
+
+  /// 記録に残す端末の素性。iOSは機種識別子と物理メモリまで取る。
+  ///
+  /// 端末内AIが動くかどうかは実質メモリ量で決まる(モデルが2.4GBあり、iOSは
+  /// アプリ1つが使えるメモリを端末のRAMから割った上限で切る)のに、実機から
+  /// 回収できる「AIの記録」に端末の情報が無く、ロード失敗の理由が端末なのか
+  /// 実装なのか分けられなかった。
+  ///
+  /// チャネルが無いプラットフォーム(Android)や呼び出し失敗のときはOSの情報
+  /// だけを返す。ここで失敗しても解析の流れは止めないこと。
+  static Future<String> summary() async {
+    final os = '${Platform.operatingSystem} ${Platform.operatingSystemVersion}';
+    try {
+      final s = await _channel.invokeMethod<String>('deviceSummary');
+      if (s != null && s.isNotEmpty) return '$s / $os';
+    } catch (_) {
+      // 未実装・呼び出し失敗。OSの情報だけで足りることにする
+    }
+    return os;
   }
 }

@@ -15,3 +15,5 @@ export 'src/litert_lm_engine_web.dart'
     if (dart.library.ffi) 'src/litert_lm_engine.dart';
 // ココメシ vendorパッチ: visual token budget設定用のグローバル変数
 export 'src/visual_token_budget.dart';
+// ココメシ vendorパッチ: ネイティブのログをリリースビルドでも拾うためのフラグ
+export 'src/native_log.dart';

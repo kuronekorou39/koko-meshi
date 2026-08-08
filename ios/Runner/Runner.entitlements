@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  端末内AI(Gemma 4 E2B, 2.4GB)を動かすためのメモリ上限の引き上げ。
+  flutter_gemma のiOS手順で「大きいモデルには必須」とされているのに
+  入っていなかったもの。
+
+  iOSはアプリ1つが使えるメモリを端末のRAMから割った上限で切る。この宣言は
+  その上限を上げるだけで、RAMそのものを増やすわけではない。4GB級の端末では
+  宣言しても足りない可能性がある。
+
+  Xcode のプロジェクト(project.pbxproj)には CODE_SIGN_ENTITLEMENTS として
+  Debug/Profile/Release の3構成に登録済み。ファイル参照は登録していないので
+  Xcode のナビゲータには出ないが、署名には効く。
+
+  注意: Sideloadly の無料 Apple ID での署名では、プロファイルに無い宣言は
+  署名時に落とされる(=効かない)ことがある。App Store / 有料アカウントの
+  署名では有効。
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.developer.kernel.extended-virtual-addressing</key>
+	<true/>
+	<key>com.apple.developer.kernel.increased-memory-limit</key>
+	<true/>
+	<key>com.apple.developer.kernel.increased-debugging-memory-limit</key>
+	<true/>
+</dict>
+</plist>

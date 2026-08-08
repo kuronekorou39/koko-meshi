@@ -12,6 +12,7 @@ on:
     paths:
       - 'ios/**'
       - 'lib/**' # Dart側の変更でもiOSのコンパイルは壊れうる
+      - 'packages/**' # vendorパッチ(flutter_gemma_litertlm)もiOSに効く
       - 'pubspec.yaml'
       - 'pubspec.lock'
       - '.github/workflows/ios.yml'
@@ -23,6 +24,14 @@ jobs:
     timeout-minutes: 40 # 詰まったときに macOS 分を食い潰さないための上限
     steps:
       - uses: actions/checkout@v4
+
+      # 成果物の名前にバージョンを入れる。同じ名前のIPAが手元に何個も並ぶと、
+      # 解凍したあとどれがどれだか分からなくなるため。調査ビルドは同じ
+      # バージョンで何度も回すので、ビルド番号と短縮SHAまで名前に含める
+      - name: 成果物の名前を決める
+        run: |
+          V=$(sed -n 's/^version: *//p' pubspec.yaml | tr -d '\r')
+          echo "ARTIFACT=kokomeshi-ios-v${V%%+*}-b${V##*+}-$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
 
       # ios/Podfile が .env を読んで Env.xcconfig を作る。実キーが無くても
       # 地図が出ないだけでビルドは通るので、Secret が無ければダミーで進める
@@ -86,14 +95,14 @@ jobs:
         run: |
           mkdir -p Payload
           cp -R build/ios/iphoneos/Runner.app Payload/
-          zip -qry kokomeshi.ipa Payload
-          ls -lh kokomeshi.ipa
+          zip -qry "$ARTIFACT.ipa" Payload
+          ls -lh "$ARTIFACT.ipa"
 
       # 注意: public リポジトリではこの成果物をGitHubにログインした誰でも
       # ダウンロードできる。IPA には .env のAPIキーが埋まっているため、
       # 配布APKと同じ扱い(抽出され得る前提)になる
       - uses: actions/upload-artifact@v4
         with:
-          name: kokomeshi-ios-unsigned
-          path: kokomeshi.ipa
+          name: ${{ env.ARTIFACT }}
+          path: ${{ env.ARTIFACT }}.ipa
           retention-days: 7

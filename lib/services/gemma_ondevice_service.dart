@@ -210,6 +210,10 @@ image_typeは次の3つから1つ選んでください:
   /// engine登録(1回だけ)
   Future<void> _ensureInit() async {
     if (_initialized) return;
+    // iOS実機の配布ビルドはPCからログを読めない。ネイティブ(LiteRT-LM)側の
+    // 失敗理由を例外の文面に載せてもらい、AiLogに残るようにする。
+    // Androidは stderr がlogcatに出るので、リダイレクトすると逆に見えなくなる
+    litertLmCaptureNativeLog = Platform.isIOS;
     await FlutterGemma.initialize(
       inferenceEngines: [LiteRtLmEngine()],
       // 更新ストリームは単一購読なので、broadcast化した同じものを渡す。

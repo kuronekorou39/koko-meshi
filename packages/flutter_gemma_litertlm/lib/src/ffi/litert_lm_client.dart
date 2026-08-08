@@ -12,6 +12,7 @@ import 'package:mutex/mutex.dart';
 
 import 'package:flutter_gemma/flutter_gemma_interface.dart';
 import 'package:flutter_gemma/core/parsing/sdk_text_extractor.dart';
+import '../native_log.dart';
 import '../visual_token_budget.dart';
 import 'litert_lm_bindings.dart';
 
@@ -394,6 +395,31 @@ class LiteRtLmFfiClient {
     }
   }
 
+  /// ココメシ vendorパッチ: 直前のネイティブ出力の末尾を、例外メッセージに
+  /// 添えられる形で返す。
+  ///
+  /// [_dumpNativeLog] は `gemmaLog` 経由なのでリリースビルドでは何も出ない。
+  /// iOS実機で「なぜ null が返ったのか」を知る手段がそれしか無いので、
+  /// 例外の文面に載せてDart側まで持ち出す。
+  /// [litertLmCaptureNativeLog] が false のときは空文字(既定の挙動を変えない)。
+  String _nativeLogTail({int maxChars = 2000}) {
+    if (!litertLmCaptureNativeLog) return '';
+    final p = _nativeLogPath;
+    if (p == null) return '\n(native log: リダイレクト未設定)';
+    try {
+      final f = File(p);
+      if (!f.existsSync()) return '\n(native log: ファイルが無い $p)';
+      final content = f.readAsStringSync().trimRight();
+      if (content.isEmpty) return '\n(native log: 出力なし)';
+      final tail = content.length <= maxChars
+          ? content
+          : content.substring(content.length - maxChars);
+      return '\n--- native log (末尾) ---\n$tail';
+    } catch (e) {
+      return '\n(native log: 読めない $e)';
+    }
+  }
+
   bool get isInitialized => _isInitialized;
 
   /// Path to the redirected native stderr log (LiteRT-LM absl/glog output).
@@ -570,7 +596,9 @@ class LiteRtLmFfiClient {
     // Linux: flutter test does not surface child-process stderr, so without
     // this Linux integration tests get the same opaque 'Failed to create
     // engine' as iOS without any native diagnostics.
-    if (kDebugMode &&
+    // ココメシ vendorパッチ: litertLmCaptureNativeLog を立てるとリリース
+    // ビルドでもリダイレクトする(iOS実機ではこれが唯一の切り分け手段)
+    if ((kDebugMode || litertLmCaptureNativeLog) &&
         (Platform.isIOS || Platform.isLinux || Platform.isMacOS)) {
       _nativeLogPath = '${Directory.systemTemp.path}/litertlm_native.log';
       final redirect = proxyLib
@@ -766,9 +794,12 @@ class LiteRtLmFfiClient {
       b.litert_lm_engine_settings_delete(settings);
 
       if (_engine == null || _engine == nullptr) {
+        // ココメシ vendorパッチ: 理由をDart側に持ち出してから debugPrint する
+        // (_dumpNativeLog はログを読んだあと切り詰めるので、順序を変えない)
+        final tail = _nativeLogTail();
         _dumpNativeLog();
         throw Exception(
-          'Failed to create engine. Model may be invalid: $modelPath',
+          'Failed to create engine. Model may be invalid: $modelPath$tail',
         );
       }
 
@@ -979,8 +1010,10 @@ class LiteRtLmFfiClient {
     }
 
     if (conv == nullptr) {
+      // ココメシ vendorパッチ: 理由をDart側に持ち出してから debugPrint する
+      final tail = _nativeLogTail();
       _dumpNativeLog();
-      throw Exception('Failed to create conversation');
+      throw Exception('Failed to create conversation$tail');
     }
 
     _liveConvs.add(conv); // #379: track liveness so late cancels can't UAF
