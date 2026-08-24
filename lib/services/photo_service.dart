@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:exif/exif.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
@@ -24,6 +25,7 @@ class PhotoExifData {
 class PhotoService {
   static final _picker = ImagePicker();
   static const _uuid = Uuid();
+  static const _deviceChannel = MethodChannel('com.kokomeshi.koko_meshi/device');
 
   /// カメラで撮影（オリジナル画質をそのまま保持）
   static Future<XFile?> takePhoto() async {
@@ -34,7 +36,26 @@ class PhotoService {
 
   /// ライブラリから選択（複数可）
   static Future<List<XFile>> pickPhotos() async {
+    await _ensureMediaLocationPermission();
     return _picker.pickMultiImage();
+  }
+
+  /// EXIFの位置情報を受け取るための権限を選択前に確保する。
+  ///
+  /// Android 10以降、ACCESS_MEDIA_LOCATION が無いとライブラリの写真は
+  /// OSが位置情報を削って渡してくる(image_picker_android のvendorパッチと対)。
+  /// 拒否されても選択は続行する。その場合は今までどおり位置なしで記録される。
+  static Future<void> _ensureMediaLocationPermission() async {
+    if (defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      final granted = await _deviceChannel
+          .invokeMethod<bool>('requestMediaLocationPermission');
+      if (granted != true) {
+        debugPrint('[Photo] ACCESS_MEDIA_LOCATION が未許可。位置情報なしで続行');
+      }
+    } catch (e) {
+      debugPrint('[Photo] 権限リクエストに失敗: $e');
+    }
   }
 
   /// 写真をアプリのローカルディレクトリに保存し、パスを返す

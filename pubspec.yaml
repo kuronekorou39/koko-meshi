@@ -82,6 +82,11 @@ dependencies:
 dependency_overrides:
   flutter_gemma_litertlm:
     path: packages/flutter_gemma_litertlm
+  # vendorパッチ版: ライブラリ写真のEXIF位置情報を保持する
+  # (Android 10+はACCESS_MEDIA_LOCATION無しだとOSが位置情報を削って渡す。
+  #  詳細は packages/image_picker_android/.../FileUtils.java の [KokoMeshi patch])
+  image_picker_android:
+    path: packages/image_picker_android
 
 dev_dependencies:
   flutter_test:
