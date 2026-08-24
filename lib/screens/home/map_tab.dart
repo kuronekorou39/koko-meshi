@@ -22,6 +22,7 @@ import '../../services/places_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/app_logo.dart';
 import '../../widgets/cached_photo_image.dart';
+import '../trace/trace_screen.dart';
 import 'place_editor_screen.dart';
 import 'place_search_sheet.dart';
 
@@ -821,6 +822,13 @@ class _MapTabState extends ConsumerState<MapTab> {
       appBar: AppBar(
         title: const AppLogo(),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.play_circle_outline),
+            tooltip: '軌跡を再生',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const TraceScreen()),
+            ),
+          ),
           IconButton(
             icon: Badge(
               isLabelVisible: _filter.isActive,
