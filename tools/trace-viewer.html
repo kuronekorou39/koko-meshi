@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ココメシ 軌跡ビューア</title>
+<style>
+  :root {
+    --bg: #101216;
+    --panel: rgba(31, 35, 43, .92);
+    --text: #e8e6e0;
+    --sub: #9aa0ab;
+    --accent: #ffb35c;
+    --border: #333a46;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text); overflow: hidden;
+    font-family: "Hiragino Sans", "Yu Gothic UI", "Meiryo", sans-serif;
+  }
+  #cv { display: block; width: 100vw; height: 100vh; cursor: grab; }
+  #cv.dragging { cursor: grabbing; }
+
+  #hud {
+    position: fixed; top: 18px; left: 22px; pointer-events: none;
+    text-shadow: 0 1px 6px rgba(0,0,0,.8);
+  }
+  #hudDate { font-size: 30px; font-weight: 600; letter-spacing: .04em; }
+  #hudSub { font-size: 13px; color: var(--sub); margin-top: 2px; }
+  #hudLabel { font-size: 15px; color: var(--accent); margin-top: 6px; min-height: 1.4em; }
+
+  #bar {
+    position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+    display: flex; gap: 10px; align-items: center;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; padding: 10px 14px;
+    max-width: calc(100vw - 24px);
+  }
+  button, .filebtn, select {
+    background: #262b35; color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 7px 12px; font-size: 13px; cursor: pointer;
+    font-family: inherit; white-space: nowrap;
+  }
+  button:hover, .filebtn:hover { border-color: var(--accent); }
+  #play { width: 72px; }
+  #seek { width: min(300px, 30vw); accent-color: var(--accent); }
+
+  #splash {
+    position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px;
+    background: var(--bg); text-align: center; padding: 20px;
+  }
+  #splash h1 { font-size: 22px; margin: 0; }
+  #splash p { color: var(--sub); font-size: 13px; margin: 0; max-width: 480px; line-height: 1.7; }
+  #splash .btns { display: flex; gap: 12px; margin-top: 8px; }
+  #splash .primary { background: var(--accent); color: #1c1710; border-color: var(--accent); font-weight: 600; }
+  #err { color: #ff8a80; font-size: 13px; min-height: 1.2em; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+
+<div id="hud" hidden>
+  <div id="hudDate"></div>
+  <div id="hudSub"></div>
+  <div id="hudLabel"></div>
+</div>
+
+<div id="bar" hidden>
+  <label class="filebtn">開く<input type="file" id="pick2" accept=".json" hidden></label>
+  <button id="play">再生</button>
+  <button id="replay">最初から</button>
+  <select id="dur">
+    <option value="15">15秒</option>
+    <option value="30" selected>30秒</option>
+    <option value="60">60秒</option>
+    <option value="180">3分</option>
+  </select>
+  <input type="range" id="seek" min="0" max="1000" value="0">
+</div>
+
+<div id="splash">
+  <h1>ココメシ 軌跡ビューア</h1>
+  <p>trace-extract.html などで作った JSON を開くと、日時と場所の動きをアニメーションで再生します。データはこの端末内でだけ処理され、通信は発生しません。</p>
+  <p>ホイールで拡大縮小、ドラッグで移動、ダブルクリックで全体表示に戻ります。</p>
+  <div class="btns">
+    <label class="filebtn primary">JSON を開く<input type="file" id="pick" accept=".json" hidden></label>
+    <button id="sample">サンプルを見る</button>
+  </div>
+  <div id="err"></div>
+</div>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const cv = $('cv'), ctx = cv.getContext('2d');
+
+const COLORS = { meal: '#ffb35c', photo: '#6fd3c7' };
+const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
+
+let pts = [];              // {t, end, lat, lng, count, label, kind} 時刻順
+let t0 = 0, t1 = 1;        // データの時間範囲(ms)
+let proj = null;           // 基準投影(fit時のスケールと中心)
+let zoom = 1, panX = 0, panY = 0;
+let progress = 0;          // 0..1
+let playing = false;
+let lastFrame = 0;
+let dpr = 1;
+
+// ---- 読み込み ----
+$('pick').addEventListener('change', e => loadFile(e.target.files[0]));
+$('pick2').addEventListener('change', e => loadFile(e.target.files[0]));
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => {
+  e.preventDefault();
+  if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+});
+$('sample').addEventListener('click', () => start(sampleData()));
+
+function loadFile(file) {
+  if (!file) return;
+  file.text().then(txt => {
+    const j = JSON.parse(txt);
+    const arr = Array.isArray(j) ? j : j.points;
+    if (!Array.isArray(arr)) throw new Error('points がありません');
+    const parsed = arr.map(p => {
+      const t = typeof p.t === 'number' ? p.t : new Date(p.t).getTime();
+      const end = p.end ? (typeof p.end === 'number' ? p.end : new Date(p.end).getTime()) : t;
+      return { t, end, lat: +p.lat, lng: +p.lng, count: p.count || 1, label: p.label || '', kind: p.kind || 'meal' };
+    }).filter(p => isFinite(p.t) && isFinite(p.lat) && isFinite(p.lng));
+    if (!parsed.length) throw new Error('有効な地点がありません');
+    start(parsed);
+  }).catch(e => { $('err').textContent = '読み込めませんでした: ' + e.message; });
+}
+
+function start(parsed) {
+  pts = parsed.sort((a, b) => a.t - b.t);
+  t0 = pts[0].t;
+  t1 = Math.max(pts[pts.length - 1].end, pts[pts.length - 1].t, t0 + 1);
+  $('splash').style.display = 'none';
+  $('hud').hidden = false;
+  $('bar').hidden = false;
+  resize();
+  fitView();
+  progress = 0;
+  playing = true;
+  $('play').textContent = '一時停止';
+  lastFrame = performance.now();
+}
+
+// ---- 投影・ビュー ----
+function fitView() {
+  const lats = pts.map(p => p.lat), lngs = pts.map(p => p.lng);
+  const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+  const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
+  const midLat = (minLat + maxLat) / 2, midLng = (minLng + maxLng) / 2;
+  const kx = Math.cos(midLat * Math.PI / 180);
+  const spanX = Math.max((maxLng - minLng) * kx, 1e-5);
+  const spanY = Math.max(maxLat - minLat, 1e-5);
+  const w = cv.width / dpr, h = cv.height / dpr;
+  const s = Math.min((w * 0.84) / spanX, (h * 0.78) / spanY);
+  proj = { midLat, midLng, kx, s };
+  zoom = 1; panX = 0; panY = 0;
+}
+
+function toScreen(p) {
+  const w = cv.width / dpr, h = cv.height / dpr;
+  return {
+    x: w / 2 + (p.lng - proj.midLng) * proj.kx * proj.s * zoom + panX,
+    y: h / 2 - (p.lat - proj.midLat) * proj.s * zoom + panY,
+  };
+}
+
+cv.addEventListener('wheel', e => {
+  e.preventDefault();
+  if (!proj) return;
+  const k = Math.exp(-e.deltaY * 0.0012);
+  const nz = Math.min(400, Math.max(0.5, zoom * k));
+  const r = nz / zoom;
+  // カーソル位置を不動点にする
+  const w = cv.width / dpr, h = cv.height / dpr;
+  panX = e.clientX - w / 2 - (e.clientX - w / 2 - panX) * r;
+  panY = e.clientY - h / 2 - (e.clientY - h / 2 - panY) * r;
+  zoom = nz;
+}, { passive: false });
+
+let drag = null;
+cv.addEventListener('pointerdown', e => {
+  drag = { x: e.clientX, y: e.clientY };
+  cv.classList.add('dragging');
+  cv.setPointerCapture(e.pointerId);
+});
+cv.addEventListener('pointermove', e => {
+  if (!drag) return;
+  panX += e.clientX - drag.x;
+  panY += e.clientY - drag.y;
+  drag = { x: e.clientX, y: e.clientY };
+});
+cv.addEventListener('pointerup', () => { drag = null; cv.classList.remove('dragging'); });
+cv.addEventListener('dblclick', fitView);
+
+function resize() {
+  dpr = window.devicePixelRatio || 1;
+  cv.width = innerWidth * dpr;
+  cv.height = innerHeight * dpr;
+  cv.style.width = innerWidth + 'px';
+  cv.style.height = innerHeight + 'px';
+}
+addEventListener('resize', () => { resize(); if (pts.length) fitView(); });
+
+// ---- 再生コントロール ----
+$('play').addEventListener('click', () => {
+  if (!playing && progress >= 1) progress = 0;
+  playing = !playing;
+  $('play').textContent = playing ? '一時停止' : '再生';
+  lastFrame = performance.now();
+});
+$('replay').addEventListener('click', () => {
+  progress = 0; playing = true;
+  $('play').textContent = '一時停止';
+  lastFrame = performance.now();
+});
+$('seek').addEventListener('input', e => { progress = e.target.value / 1000; });
+
+// ---- 描画 ----
+function idxAt(tt) {
+  let lo = 0, hi = pts.length;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (pts[m].t <= tt) lo = m + 1; else hi = m; }
+  return lo;
+}
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (!pts.length || !proj) return;
+
+  if (playing) {
+    progress += (now - lastFrame) / (+$('dur').value * 1000);
+    if (progress >= 1) { progress = 1; playing = false; $('play').textContent = '再生'; }
+    $('seek').value = Math.round(progress * 1000);
+  }
+  lastFrame = now;
+
+  const cur = t0 + progress * (t1 - t0);
+  const idx = idxAt(cur);
+  const range = t1 - t0;
+  const fadeWin = range * 0.06;
+  const rippleWin = range * 0.012;
+
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const w = cv.width / dpr, h = cv.height / dpr;
+  ctx.fillStyle = '#101216';
+  ctx.fillRect(0, 0, w, h);
+
+  // 軌跡(最近の移動ほど濃い線)
+  ctx.lineWidth = 1.2;
+  for (let j = Math.max(1, idxFloor(idx, cur, fadeWin)); j < idx; j++) {
+    const age = (cur - pts[j].t) / fadeWin;
+    if (age > 1) continue;
+    const a = toScreen(pts[j - 1]), b = toScreen(pts[j]);
+    ctx.strokeStyle = `rgba(255,179,92,${(1 - age) * 0.35})`;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+
+  // 出現済みの点
+  for (let j = 0; j < idx; j++) {
+    const p = pts[j], s = toScreen(p);
+    if (s.x < -20 || s.x > w + 20 || s.y < -20 || s.y > h + 20) continue;
+    const age = (cur - p.t) / fadeWin;
+    const alpha = age > 1 ? 0.3 : 0.3 + (1 - age) * 0.7;
+    const r = Math.min(2 + Math.sqrt(p.count) * 0.9, 9);
+    ctx.fillStyle = hexA(COLORS[p.kind] || COLORS.meal, alpha);
+    ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, Math.PI * 2); ctx.fill();
+
+    // 出現直後のリング
+    const rp = (cur - p.t) / rippleWin;
+    if (rp < 1) {
+      ctx.strokeStyle = hexA(COLORS[p.kind] || COLORS.meal, (1 - rp) * 0.6);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(s.x, s.y, r + rp * 20, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
+
+  // 次の地点へ向かう「移動中」の頭
+  if (playing && idx > 0 && idx < pts.length) {
+    const a = pts[idx - 1], b = pts[idx];
+    const f = Math.min(1, Math.max(0, (cur - a.t) / Math.max(b.t - a.t, 1)));
+    const sa = toScreen(a), sb = toScreen(b);
+    const hx = sa.x + (sb.x - sa.x) * f, hy = sa.y + (sb.y - sa.y) * f;
+    ctx.strokeStyle = 'rgba(255,220,180,.5)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(sa.x, sa.y); ctx.lineTo(hx, hy); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,235,210,.95)';
+    ctx.beginPath(); ctx.arc(hx, hy, 2.5, 0, Math.PI * 2); ctx.fill();
+  }
+
+  drawScaleBar(w, h);
+  updateHud(cur, idx);
+}
+requestAnimationFrame(frame);
+
+// フェード対象の始点だけを二分探索で求める(全件ループを避ける)
+function idxFloor(idx, cur, fadeWin) {
+  const tMin = cur - fadeWin;
+  let lo = 0, hi = idx;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (pts[m].t < tMin) lo = m + 1; else hi = m; }
+  return lo;
+}
+
+function hexA(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${Math.max(0, Math.min(1, a))})`;
+}
+
+function drawScaleBar(w, h) {
+  // 経度1度(中心緯度)のピクセル数から距離スケールを出す
+  const mPerPx = 111320 / (proj.s * zoom); // 緯度1度≒111.32km
+  const target = 120 * mPerPx;
+  const nice = [1, 2, 5].map(k => k * Math.pow(10, Math.floor(Math.log10(target))))
+    .reduce((best, v) => Math.abs(v - target) < Math.abs(best - target) ? v : best);
+  const px = nice / mPerPx;
+  const x = w - px - 24, y = h - 24;
+  ctx.strokeStyle = 'rgba(154,160,171,.8)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(x, y - 4); ctx.lineTo(x, y); ctx.lineTo(x + px, y); ctx.lineTo(x + px, y - 4);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(154,160,171,.9)';
+  ctx.font = '11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText(nice >= 1000 ? (nice / 1000) + ' km' : nice + ' m', x + px / 2, y - 8);
+}
+
+function updateHud(cur, idx) {
+  const d = new Date(cur);
+  $('hudDate').textContent =
+    `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')} (${WEEKDAYS[d.getDay()]})`;
+  $('hudSub').textContent = `${idx} / ${pts.length} 地点`;
+  const last = idx > 0 ? pts[idx - 1] : null;
+  $('hudLabel').textContent = last && last.label ? last.label : '';
+}
+
+// ---- サンプルデータ(東京の日常90日+関西旅行) ----
+function sampleData() {
+  const day = 86400000, hour = 3600000;
+  const startDay = new Date();
+  startDay.setHours(0, 0, 0, 0);
+  const start = startDay.getTime() - 90 * day;
+  const home = { lat: 35.665, lng: 139.705 };
+  const office = { lat: 35.685, lng: 139.765 };
+  const spots = [
+    { lat: 35.659, lng: 139.700, label: '渋谷' }, { lat: 35.690, lng: 139.700, label: '新宿' },
+    { lat: 35.644, lng: 139.699, label: '中目黒' }, { lat: 35.703, lng: 139.580, label: '吉祥寺' },
+    { lat: 35.712, lng: 139.796, label: '浅草' }, { lat: 35.466, lng: 139.622, label: '横浜' },
+    { lat: 35.630, lng: 139.740, label: '五反田' }, { lat: 35.702, lng: 139.774, label: '上野' },
+  ];
+  const trip = [
+    { lat: 34.976, lng: 138.383, label: '静岡' }, { lat: 35.170, lng: 136.906, label: '名古屋' },
+    { lat: 35.011, lng: 135.768, label: '京都' }, { lat: 34.702, lng: 135.496, label: '大阪' },
+    { lat: 34.686, lng: 135.520, label: '大阪' }, { lat: 35.004, lng: 135.778, label: '京都' },
+  ];
+  const jit = (p, m) => ({
+    lat: p.lat + (Math.random() - 0.5) * m / 55000,
+    lng: p.lng + (Math.random() - 0.5) * m / 45000,
+  });
+  const out = [];
+  const push = (t, p, label) => out.push({ t, end: t, ...jit(p, 250), count: 1 + (Math.random() * 3 | 0), label: label || '', kind: 'meal' });
+
+  const tripStart = 40; // 40日目から2泊3日
+  for (let i = 0; i < 90; i++) {
+    const d0 = start + i * day;
+    const dow = new Date(d0).getDay();
+    if (i >= tripStart && i < tripStart + 3) {
+      const leg = (i - tripStart) * 2;
+      push(d0 + 12 * hour, trip[leg], trip[leg].label);
+      push(d0 + 19 * hour, trip[leg + 1], trip[leg + 1].label);
+      continue;
+    }
+    if (dow >= 1 && dow <= 5) {
+      if (Math.random() < 0.8) push(d0 + 12.2 * hour + Math.random() * hour, office, 'オフィス周辺');
+      push(d0 + 19.5 * hour + Math.random() * 2 * hour, Math.random() < 0.75 ? home : spots[Math.random() * spots.length | 0]);
+    } else {
+      push(d0 + 11.5 * hour + Math.random() * 2 * hour, Math.random() < 0.5 ? home : spots[Math.random() * spots.length | 0]);
+      const sp = spots[Math.random() * spots.length | 0];
+      push(d0 + 18.5 * hour + Math.random() * 2 * hour, sp, sp.label);
+    }
+  }
+  return out;
+}
+</script>
+</body>
+</html>
