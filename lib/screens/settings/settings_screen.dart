@@ -42,10 +42,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   /// AIで自動解析するか(= 端末内Gemmaを使うか)
   bool _aiEnabled = true;
 
+  /// カメラロールに保存する写真へ位置情報を埋め込むか
+  bool _exportExifGps = false;
+
   @override
   void initState() {
     super.initState();
     _aiEnabled = AppSettings.aiMode == AiAnalysisMode.onDevice;
+    _exportExifGps = AppSettings.exportExifGps;
     _loadSavedPlaces();
     _loadVersion();
     _checkUpdate();
@@ -56,6 +60,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await AppSettings.setAiMode(
         enabled ? AiAnalysisMode.onDevice : AiAnalysisMode.off);
     if (mounted) setState(() => _aiEnabled = enabled);
+  }
+
+  Future<void> _setExportExifGps(bool enabled) async {
+    await AppSettings.setExportExifGps(enabled);
+    if (mounted) setState(() => _exportExifGps = enabled);
   }
 
   Future<void> _downloadModel() async {
@@ -396,6 +405,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               trailing: const Icon(Icons.chevron_right),
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const FontSettingsScreen()),
+              ),
+            ),
+          ]),
+
+          _sectionLabel('写真の書き出し'),
+          _sectionCard([
+            SwitchListTile(
+              secondary: const Icon(Icons.add_location_alt_outlined),
+              title: const Text('位置情報を付けて保存する'),
+              subtitle: const Text('カメラロールに保存する写真に、記録した場所を埋め込みます'),
+              value: _exportExifGps,
+              onChanged: _setExportExifGps,
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+              child: Text(
+                'オフのときは、撮影日時だけを埋め込みます。'
+                '保存した写真を誰かに渡すと、食べた場所も一緒に渡ることに'
+                'なるため、既定ではオフにしています。',
+                style: TextStyle(fontSize: 12, color: tokens.textMuted),
               ),
             ),
           ]),

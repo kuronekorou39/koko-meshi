@@ -73,6 +73,19 @@ class AppSettings {
     );
   }
 
+  // --- 書き出す写真に位置情報を含めるか ---
+  static const _keyExportExifGps = 'export_exif_gps';
+
+  /// カメラロールへ保存する写真に、記録の位置情報をEXIFで書き込むか。
+  ///
+  /// 既定はオフ。書き出した写真は端末の外に出ていく(共有・バックアップ)ので、
+  /// 食べた場所が一緒に付いていくことを選んでいない利用者に黙って付けない。
+  static bool get exportExifGps => _prefs?.getBool(_keyExportExifGps) ?? false;
+
+  static Future<void> setExportExifGps(bool enabled) async {
+    await _prefs?.setBool(_keyExportExifGps, enabled);
+  }
+
   // --- 本文フォント ---
   static const _keyFont = 'app_font';
 

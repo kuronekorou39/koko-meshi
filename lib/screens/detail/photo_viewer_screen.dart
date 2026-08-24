@@ -4,7 +4,9 @@ import 'package:flutter/services.dart';
 import 'package:gal/gal.dart';
 
 import '../../models/meal_photo.dart';
+import '../../services/app_settings_service.dart';
 import '../../services/photo_cache_service.dart';
+import '../../services/photo_export_service.dart';
 
 class PhotoViewerScreen extends StatefulWidget {
   final List<MealPhoto> photos;
@@ -64,8 +66,21 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
         return;
       }
 
-      // カメラロールに保存
-      await Gal.putImage(path, album: 'ココメシ');
+      // 記録が持っている日時と場所をEXIFに戻してから保存する。編集した写真は
+      // 焼き込みでEXIFが落ちており、撮影したものは元から位置が入っていない
+      final exportPath = await PhotoExportService.prepareForExport(
+        sourcePath: path,
+        shotAt: photo.shotAt,
+        latitude: photo.latitude,
+        longitude: photo.longitude,
+        includeGps: AppSettings.exportExifGps,
+      );
+
+      try {
+        await Gal.putImage(exportPath, album: 'ココメシ');
+      } finally {
+        await PhotoExportService.cleanup(exportPath, path);
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
