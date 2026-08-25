@@ -96,6 +96,9 @@ dev_dependencies:
   build_runner: ^2.4.15
   flutter_launcher_icons: ^0.14.4
   sqflite_common_ffi: ^2.4.2
+  # 書き出しのテストで getTemporaryDirectory を差し替えるために直接使う
+  path_provider_platform_interface: ^2.1.2
+  plugin_platform_interface: ^2.1.8
 
 flutter:
   uses-material-design: true
