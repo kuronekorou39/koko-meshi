@@ -48,6 +48,8 @@ class TraceCursor {
     required this.head,
     required this.visitedCount,
     required this.moving,
+    required this.traveledMeters,
+    required this.legIndex,
   });
 
   /// 出発点から先頭までの線
@@ -61,6 +63,13 @@ class TraceCursor {
 
   /// 地点の間を移動している最中か
   final bool moving;
+
+  /// ここまでに動いた距離(m)
+  final double traveledMeters;
+
+  /// いま向かっている区間の番号(点[legIndex] → 点[legIndex+1])。
+  /// どこにも向かっていなければ -1
+  final int legIndex;
 }
 
 /// まとめの既定値。アプリ内のグルーピング(同じ場所・近い時間)と揃えてある
@@ -118,6 +127,24 @@ class TraceTimeline {
       points.first.at,
       points.last.end.isAfter(points.last.at) ? points.last.end : points.last.at,
     );
+  }
+
+  /// 実時間の [from]〜[to] が、再生時間全体のどれだけを占めるか(0..1)。
+  ///
+  /// カメラの動きを再生に合わせるために使う。詰められた停滞は短く出る。
+  double weightOfRange(DateTime from, DateTime to) {
+    if (_totalWeight <= 0 || !to.isAfter(from)) return 0;
+    var sum = 0.0;
+    for (final span in _spans) {
+      final start = span.from.isAfter(from) ? span.from : from;
+      final endAt = span.to.isBefore(to) ? span.to : to;
+      if (!endAt.isAfter(start)) continue;
+      final realMs = span.to.difference(span.from).inMilliseconds;
+      if (realMs <= 0) continue;
+      // 区間の一部だけが重なる場合は、その割合ぶんの重みを取る
+      sum += span.weight * (endAt.difference(start).inMilliseconds / realMs);
+    }
+    return sum / _totalWeight;
   }
 
   /// 再生位置(0..1)に対応する実際の時刻
@@ -215,30 +242,50 @@ class TraceService {
     var head = first;
     var visited = 0;
     var moving = false;
+    var traveled = 0.0;
+    var leg = -1;
 
     for (var i = 0; i < points.length; i++) {
       final p = points[i];
       if (p.at.isAfter(now)) break;
       visited = i + 1;
-      head = TraceLatLng(p.latitude, p.longitude);
-      if (i > 0) path.add(head);
+      final here = TraceLatLng(p.latitude, p.longitude);
+      if (i > 0) {
+        traveled += distanceM(
+          path.last.latitude,
+          path.last.longitude,
+          here.latitude,
+          here.longitude,
+        );
+        path.add(here);
+      }
+      head = here;
 
       final next = i + 1 < points.length ? points[i + 1] : null;
       if (next != null && !next.at.isAfter(now)) continue;
 
       // ここが最後に着いた地点。次へ発つ時刻を過ぎていれば移動の途中
-      if (next != null && now.isAfter(p.end)) {
-        final legMs = next.at.difference(p.end).inMilliseconds;
-        final f = legMs <= 0
-            ? 1.0
-            : (now.difference(p.end).inMilliseconds / legMs).clamp(0.0, 1.0);
-        if (f > 0) {
-          head = TraceLatLng(
-            p.latitude + (next.latitude - p.latitude) * f,
-            p.longitude + (next.longitude - p.longitude) * f,
-          );
-          path.add(head);
-          moving = true;
+      if (next != null) {
+        leg = i;
+        if (now.isAfter(p.end)) {
+          final legMs = next.at.difference(p.end).inMilliseconds;
+          final f = legMs <= 0
+              ? 1.0
+              : (now.difference(p.end).inMilliseconds / legMs).clamp(0.0, 1.0);
+          if (f > 0) {
+            head = TraceLatLng(
+              p.latitude + (next.latitude - p.latitude) * f,
+              p.longitude + (next.longitude - p.longitude) * f,
+            );
+            traveled += distanceM(
+              path.last.latitude,
+              path.last.longitude,
+              head.latitude,
+              head.longitude,
+            );
+            path.add(head);
+            moving = true;
+          }
         }
       }
       break;
@@ -249,7 +296,30 @@ class TraceService {
       head: head,
       visitedCount: visited,
       moving: moving,
+      traveledMeters: traveled,
+      legIndex: leg,
     );
+  }
+
+  /// 全区間を足した移動距離(m)
+  static double totalDistanceM(List<TracePoint> points) {
+    var total = 0.0;
+    for (var i = 1; i < points.length; i++) {
+      total += distanceM(
+        points[i - 1].latitude,
+        points[i - 1].longitude,
+        points[i].latitude,
+        points[i].longitude,
+      );
+    }
+    return total;
+  }
+
+  /// 距離の表示文字列。1km未満はm、それ以上はkm
+  static String formatDistance(double meters) {
+    if (meters < 1000) return '${meters.round()} m';
+    if (meters < 10000) return '${(meters / 1000).toStringAsFixed(1)} km';
+    return '${(meters / 1000).round()} km';
   }
 
   /// 2点間の距離(m)。数十km程度の範囲で使うので平面近似で足りる

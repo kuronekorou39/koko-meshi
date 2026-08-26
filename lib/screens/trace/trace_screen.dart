@@ -63,10 +63,14 @@ class _TraceScreenState extends State<TraceScreen>
   /// しまう。既定では寄って追いかけ、全体を見たいときだけ引く。
   bool _follow = true;
 
-  /// カメラを動かした時刻。毎フレーム動かすと地図が追いつかないので間引く
-  DateTime? _lastCameraMove;
+  /// カメラを合わせ終えた区間。同じ区間で何度もカメラを動かさないための印
+  int _cameraLeg = -1;
 
   List<TracePoint> _points = [];
+
+  /// 全区間を足した距離。毎フレーム数えずに済むよう読み込み時に出しておく
+  double _totalMeters = 0;
+
   bool _loading = true;
   String? _error;
 
@@ -90,26 +94,81 @@ class _TraceScreenState extends State<TraceScreen>
     _load();
   }
 
-  /// 再生に合わせてカメラを先頭へ寄せる。
+  /// 再生に合わせてカメラを動かす。
   ///
-  /// ズームは動かさない(利用者が決めた縮尺を保つ)。描画とは別に間引いて
-  /// 呼ぶので、地図の追従が重くならない。
-  void _followHead() {
+  /// 毎フレーム位置を送るとカクつくので、区間(地点から次の地点まで)に入った
+  /// ときに一度だけ、その区間の再生時間ぶんのアニメーションを地図に任せる。
+  /// 補間はSDK側が60fpsで行うため滑らかに流れる。
+  ///
+  /// 行き先が今の画面に収まっているなら動かさない。収まっているのに追いかける
+  /// と、地図が細かく揺れて見づらいだけになる。
+  Future<void> _followHead() async {
     if (!_follow || _points.isEmpty) return;
     final controller = _mapController;
     if (controller == null) return;
 
-    final now = DateTime.now();
-    if (_lastCameraMove != null &&
-        now.difference(_lastCameraMove!) < const Duration(milliseconds: 90)) {
-      return;
-    }
-    _lastCameraMove = now;
+    final cursor = TraceService.cursorAt(_points, _currentTime());
+    final leg = cursor.legIndex;
+    if (leg < 0 || leg == _cameraLeg) return; // 同じ区間には一度だけ
+    _cameraLeg = leg;
 
-    final head = TraceService.cursorAt(_points, _currentTime()).head;
-    controller.moveCamera(
-      CameraUpdate.newLatLng(LatLng(head.latitude, head.longitude)),
+    final from = _points[leg];
+    final to = _points[leg + 1];
+    final target = _legBounds(from, to);
+
+    // すでに見えているなら動かさない
+    final region = await controller.getVisibleRegion();
+    if (_boundsContains(region, target)) return;
+    if (!mounted || _cameraLeg != leg) return;
+
+    // 基本は区間の再生時間に合わせる。ただし詰めた停滞のせいで一瞬になる
+    // ことがあり、それだと飛んだように見える。距離なりの時間は最低限かける
+    final share = (_timeline ??= _buildTimeline())
+        .weightOfRange(from.end, to.at)
+        .clamp(0.0, 1.0);
+    final playMs = (_durationSec * 1000 * share).round();
+    final km = TraceService.distanceM(
+          from.latitude,
+          from.longitude,
+          to.latitude,
+          to.longitude,
+        ) /
+        1000;
+    final minMs = km < 5
+        ? 500
+        : km < 50
+            ? 800
+            : 1200;
+
+    await controller.animateCamera(
+      CameraUpdate.newLatLngBounds(target, 72),
+      duration: Duration(milliseconds: playMs.clamp(minMs, 2500)),
     );
+  }
+
+  /// 区間の両端が入る範囲。同じ場所どうしでつぶれないよう少し広げる
+  LatLngBounds _legBounds(TracePoint a, TracePoint b) {
+    final minLat = a.latitude < b.latitude ? a.latitude : b.latitude;
+    final maxLat = a.latitude > b.latitude ? a.latitude : b.latitude;
+    final minLng = a.longitude < b.longitude ? a.longitude : b.longitude;
+    final maxLng = a.longitude > b.longitude ? a.longitude : b.longitude;
+    // 近所の移動で寄りすぎないよう、最低でもこのくらいの幅を確保する
+    const minSpan = 0.004;
+    final padLat = ((minSpan - (maxLat - minLat)) / 2).clamp(0.0, minSpan);
+    final padLng = ((minSpan - (maxLng - minLng)) / 2).clamp(0.0, minSpan);
+    return LatLngBounds(
+      southwest: LatLng(minLat - padLat, minLng - padLng),
+      northeast: LatLng(maxLat + padLat, maxLng + padLng),
+    );
+  }
+
+  /// [outer] が [inner] を完全に含むか。日付変更線をまたぐ場合は諦めて false
+  bool _boundsContains(LatLngBounds outer, LatLngBounds inner) {
+    if (outer.northeast.longitude < outer.southwest.longitude) return false;
+    return outer.southwest.latitude <= inner.southwest.latitude &&
+        outer.northeast.latitude >= inner.northeast.latitude &&
+        outer.southwest.longitude <= inner.southwest.longitude &&
+        outer.northeast.longitude >= inner.northeast.longitude;
   }
 
   @override
@@ -129,7 +188,9 @@ class _TraceScreenState extends State<TraceScreen>
       if (!mounted) return;
       setState(() {
         _points = points;
+        _totalMeters = TraceService.totalDistanceM(points);
         _timeline = null;
+        _cameraLeg = -1;
         _sourceName = null;
         _loading = false;
         _error = points.isEmpty ? '場所の記録がまだありません' : null;
@@ -162,7 +223,9 @@ class _TraceScreenState extends State<TraceScreen>
       if (!mounted) return;
       setState(() {
         _points = points;
+        _totalMeters = TraceService.totalDistanceM(points);
         _timeline = null;
+        _cameraLeg = -1;
         _sourceName = result!.files.single.name;
         _error = null;
       });
@@ -241,7 +304,7 @@ class _TraceScreenState extends State<TraceScreen>
   void _toggleFollow() {
     setState(() => _follow = !_follow);
     if (_follow) {
-      _lastCameraMove = null;
+      _cameraLeg = -1;
       _zoomToHead();
     } else {
       _fitCamera();
@@ -525,6 +588,26 @@ class _TraceScreenState extends State<TraceScreen>
                 ),
               ),
               const SizedBox(height: 3),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  Text(
+                    TraceService.formatDistance(cursor.traveledMeters),
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: _traceHeadColor,
+                    ),
+                  ),
+                  Text(
+                    ' / ${TraceService.formatDistance(_totalMeters)}',
+                    style: const TextStyle(fontSize: 12, color: Colors.white54),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 1),
               Text(
                 '${_two(now.hour)}:${_two(now.minute)}'
                 ' ・ ${cursor.visitedCount} / ${_points.length} 地点'
@@ -561,13 +644,19 @@ class _TraceScreenState extends State<TraceScreen>
               IconButton(
                 icon: const Icon(Icons.replay),
                 tooltip: '最初から',
-                onPressed: () => _controller.forward(from: 0),
+                onPressed: () {
+                  _cameraLeg = -1;
+                  _controller.forward(from: 0);
+                  _resetCamera();
+                },
               ),
               Expanded(
                 child: Slider(
                   value: _controller.value.clamp(0.0, 1.0),
                   onChanged: (v) {
                     _controller.stop();
+                    // 飛んだ先は続きではないので、カメラも合わせ直す
+                    _cameraLeg = -1;
                     _controller.value = v;
                   },
                 ),

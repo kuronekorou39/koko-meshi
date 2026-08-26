@@ -169,6 +169,67 @@ void main() {
     });
   });
 
+  group('移動距離', () {
+    final base = DateTime(2026, 8, 1, 12);
+    // 緯度1度ぶん(約111km)動く2地点
+    final points = [
+      TracePoint(at: base, end: base, latitude: 35, longitude: 139),
+      TracePoint(
+        at: base.add(const Duration(hours: 1)),
+        end: base.add(const Duration(hours: 1)),
+        latitude: 36,
+        longitude: 139,
+      ),
+    ];
+
+    test('着いた時点で全区間ぶんの距離になる', () {
+      final c = TraceService.cursorAt(
+        points,
+        base.add(const Duration(hours: 1)),
+      );
+      expect(c.traveledMeters, closeTo(111000, 1000));
+    });
+
+    test('移動の途中では距離も途中まで積まれる', () {
+      final c = TraceService.cursorAt(
+        points,
+        base.add(const Duration(minutes: 30)),
+      );
+      expect(c.traveledMeters, closeTo(55500, 1000));
+    });
+
+    test('出発前は0', () {
+      final c = TraceService.cursorAt(points, base);
+      expect(c.traveledMeters, 0);
+    });
+
+    test('totalDistanceMは全区間の合計', () {
+      expect(TraceService.totalDistanceM(points), closeTo(111000, 1000));
+      expect(TraceService.totalDistanceM([points.first]), 0);
+      expect(TraceService.totalDistanceM([]), 0);
+    });
+
+    test('表示は桁に応じて単位が変わる', () {
+      expect(TraceService.formatDistance(320), '320 m');
+      expect(TraceService.formatDistance(1500), '1.5 km');
+      expect(TraceService.formatDistance(111000), '111 km');
+    });
+
+    test('向かっている区間の番号が取れる', () {
+      final c = TraceService.cursorAt(
+        points,
+        base.add(const Duration(minutes: 30)),
+      );
+      expect(c.legIndex, 0);
+      // 最後の地点に着いたら、もう向かう先はない
+      final done = TraceService.cursorAt(
+        points,
+        base.add(const Duration(hours: 2)),
+      );
+      expect(done.legIndex, -1);
+    });
+  });
+
   group('TraceTimeline', () {
     final base = DateTime(2026, 8, 1, 12);
 
@@ -238,6 +299,21 @@ void main() {
         () => TraceTimeline.build([]),
         throwsA(isA<ArgumentError>()),
       );
+    });
+
+    test('weightOfRangeは再生時間に占める割合を返す', () {
+      final t = TraceTimeline.build(points, cap: const Duration(minutes: 20));
+      // 重みは 10分 + 10分(移動) + 20分(詰めた滞在) = 40分ぶん
+      final moving = t.weightOfRange(
+        base.add(const Duration(minutes: 10)),
+        base.add(const Duration(minutes: 20)),
+      );
+      expect(moving, closeTo(0.25, 0.001), reason: '移動の10分は全体の1/4');
+
+      // 全体を渡せば1になる
+      expect(t.weightOfRange(t.start, t.end), closeTo(1.0, 0.001));
+      // 逆向きや同時刻は0
+      expect(t.weightOfRange(t.end, t.start), 0);
     });
   });
 
