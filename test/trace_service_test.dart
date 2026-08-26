@@ -169,6 +169,78 @@ void main() {
     });
   });
 
+  group('TraceTimeline', () {
+    final base = DateTime(2026, 8, 1, 12);
+
+    /// 12:00に着いて12:10までいる → 10分で次へ移動 → そこに8時間居座る
+    final points = [
+      TracePoint(
+        at: base,
+        end: base.add(const Duration(minutes: 10)),
+        latitude: 35,
+        longitude: 139,
+      ),
+      TracePoint(
+        at: base.add(const Duration(minutes: 20)),
+        end: base.add(const Duration(hours: 8, minutes: 20)),
+        latitude: 36,
+        longitude: 140,
+      ),
+    ];
+
+    test('先頭と末尾の時刻は実際の範囲に一致する', () {
+      final t = TraceTimeline.build(points);
+      expect(t.timeAt(0), base);
+      expect(t.timeAt(1), base.add(const Duration(hours: 8, minutes: 20)));
+    });
+
+    test('長い停滞は詰められ、動きのある区間に時間が回る', () {
+      final t = TraceTimeline.build(points, cap: const Duration(minutes: 20));
+      // 重みは 10分(滞在) + 10分(移動) + 20分(8時間の滞在を詰めたもの) = 40分
+      // 前半半分(20分ぶん)で、移動を終えて次の地点に着いているはず
+      expect(t.timeAt(0.5), base.add(const Duration(minutes: 20)));
+    });
+
+    test('capがnullなら実時間のまま進む', () {
+      final t = TraceTimeline.build(points, cap: null);
+      // 全体8時間20分の半分 → 16:10。長い停滞の途中で止まっている
+      expect(t.timeAt(0.5), base.add(const Duration(hours: 4, minutes: 10)));
+    });
+
+    test('詰めても時刻が巻き戻ったり飛び越えたりしない', () {
+      final t = TraceTimeline.build(points);
+      var prev = t.timeAt(0);
+      for (var i = 1; i <= 50; i++) {
+        final now = t.timeAt(i / 50);
+        expect(now.isBefore(prev), isFalse, reason: '$i 番目で巻き戻った');
+        expect(now.isAfter(t.end), isFalse, reason: '$i 番目で範囲を超えた');
+        prev = now;
+      }
+    });
+
+    test('範囲の外を渡しても端で止まる', () {
+      final t = TraceTimeline.build(points);
+      expect(t.timeAt(-1), base);
+      expect(t.timeAt(5), t.end);
+    });
+
+    test('1地点だけ・時間の幅が無くても落ちない', () {
+      final single = [
+        TracePoint(at: base, end: base, latitude: 35, longitude: 139),
+      ];
+      final t = TraceTimeline.build(single);
+      expect(t.timeAt(0), base);
+      expect(t.timeAt(1), base);
+    });
+
+    test('空の入力は例外', () {
+      expect(
+        () => TraceTimeline.build([]),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+  });
+
   group('distanceM', () {
     test('緯度1度は約111km', () {
       final d = TraceService.distanceM(35.0, 139.0, 36.0, 139.0);

@@ -67,6 +67,86 @@ class TraceCursor {
 const _defaultRadiusM = 50.0;
 const _defaultGap = Duration(hours: 2);
 
+/// 動きのない時間をどこまで見せるか。これを超えた分は再生上で詰める
+const _defaultStillCap = Duration(minutes: 20);
+
+/// 再生の進み具合を実際の時刻に対応させる時間軸。
+///
+/// 実時間のまま流すと、寝ている時間や職場にいる時間で何も動かない絵が延々と
+/// 続く。動きの無い区間は頭打ちにして、動いているところに時間を回す。
+class TraceTimeline {
+  TraceTimeline._(this._spans, this._totalWeight, this.start, this.end);
+
+  final List<_TimeSpan> _spans;
+  final double _totalWeight;
+  final DateTime start;
+  final DateTime end;
+
+  /// [cap] を渡すと、それより長い停滞は再生上 [cap] の長さに詰める。
+  /// null なら実時間のまま流す。
+  factory TraceTimeline.build(
+    List<TracePoint> points, {
+    Duration? cap = _defaultStillCap,
+  }) {
+    if (points.isEmpty) throw ArgumentError('points が空です');
+
+    final spans = <_TimeSpan>[];
+    var total = 0.0;
+
+    void add(DateTime from, DateTime to) {
+      final real = to.difference(from).inMilliseconds;
+      if (real <= 0) return;
+      // 動きの無い区間だけを詰める。移動そのものは実時間の比を保つ
+      final weight = cap == null
+          ? real.toDouble()
+          : real.clamp(0, cap.inMilliseconds).toDouble();
+      spans.add(_TimeSpan(from: from, to: to, weight: weight));
+      total += weight;
+    }
+
+    for (var i = 0; i < points.length; i++) {
+      final p = points[i];
+      add(p.at, p.end); // その場に留まっている間
+      if (i + 1 < points.length) {
+        add(p.end, points[i + 1].at); // 次の地点へ向かう間
+      }
+    }
+
+    return TraceTimeline._(
+      spans,
+      total,
+      points.first.at,
+      points.last.end.isAfter(points.last.at) ? points.last.end : points.last.at,
+    );
+  }
+
+  /// 再生位置(0..1)に対応する実際の時刻
+  DateTime timeAt(double progress) {
+    if (_spans.isEmpty || _totalWeight <= 0) return start;
+    final target = (progress.clamp(0.0, 1.0)) * _totalWeight;
+
+    var acc = 0.0;
+    for (final span in _spans) {
+      if (target <= acc + span.weight) {
+        final f = span.weight <= 0 ? 0.0 : (target - acc) / span.weight;
+        final realMs = span.to.difference(span.from).inMilliseconds;
+        return span.from.add(Duration(milliseconds: (realMs * f).round()));
+      }
+      acc += span.weight;
+    }
+    return end;
+  }
+}
+
+class _TimeSpan {
+  const _TimeSpan({required this.from, required this.to, required this.weight});
+  final DateTime from;
+  final DateTime to;
+
+  /// 再生時間の取り分
+  final double weight;
+}
+
 class TraceService {
   TraceService._();
 

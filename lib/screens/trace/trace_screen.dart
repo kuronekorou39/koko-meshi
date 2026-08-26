@@ -33,11 +33,38 @@ class _TraceScreenState extends State<TraceScreen>
     180: '3分',
   };
 
+  /// 動きのない時間をどこまで見せるか(「間を詰める」がオンのとき)
+  static const _stillCap = Duration(minutes: 20);
+
+  /// 軌跡の色。地図は明るい配色なので、テーマの漆をそのまま濃く乗せる
+  static const _traceColor = Color(0xFFB0492A);
+
+  /// 先頭とその手前。進んでいる場所を一目で拾えるように明るくする
+  static const _traceHeadColor = Color(0xFFFF6B2C);
+
+  /// 追いかけるときの縮尺。街区の移動が分かる程度
+  static const _followZoom = 13.5;
+
   late final AnimationController _controller;
   GoogleMapController? _mapController;
 
   /// 先頭に置く丸いドット。用意できるまでマーカーは出さない
   BitmapDescriptor? _headIcon;
+
+  /// 再生位置から実際の時刻を引くための時間軸。点や設定が変わったら作り直す
+  TraceTimeline? _timeline;
+
+  /// 動きのない時間を詰めるか
+  bool _skipStill = true;
+
+  /// 先頭を追いかけるか。
+  ///
+  /// 全体が入るように引くと、遠出が1本混じっただけで日々の移動が点に潰れて
+  /// しまう。既定では寄って追いかけ、全体を見たいときだけ引く。
+  bool _follow = true;
+
+  /// カメラを動かした時刻。毎フレーム動かすと地図が追いつかないので間引く
+  DateTime? _lastCameraMove;
 
   List<TracePoint> _points = [];
   bool _loading = true;
@@ -57,9 +84,32 @@ class _TraceScreenState extends State<TraceScreen>
     )..addStatusListener((status) {
         // 終わったら再生ボタンの見た目を戻す
         if (status == AnimationStatus.completed) setState(() {});
-      });
+      })
+      ..addListener(_followHead);
     _prepareHeadIcon();
     _load();
+  }
+
+  /// 再生に合わせてカメラを先頭へ寄せる。
+  ///
+  /// ズームは動かさない(利用者が決めた縮尺を保つ)。描画とは別に間引いて
+  /// 呼ぶので、地図の追従が重くならない。
+  void _followHead() {
+    if (!_follow || _points.isEmpty) return;
+    final controller = _mapController;
+    if (controller == null) return;
+
+    final now = DateTime.now();
+    if (_lastCameraMove != null &&
+        now.difference(_lastCameraMove!) < const Duration(milliseconds: 90)) {
+      return;
+    }
+    _lastCameraMove = now;
+
+    final head = TraceService.cursorAt(_points, _currentTime()).head;
+    controller.moveCamera(
+      CameraUpdate.newLatLng(LatLng(head.latitude, head.longitude)),
+    );
   }
 
   @override
@@ -79,6 +129,7 @@ class _TraceScreenState extends State<TraceScreen>
       if (!mounted) return;
       setState(() {
         _points = points;
+        _timeline = null;
         _sourceName = null;
         _loading = false;
         _error = points.isEmpty ? '場所の記録がまだありません' : null;
@@ -111,6 +162,7 @@ class _TraceScreenState extends State<TraceScreen>
       if (!mounted) return;
       setState(() {
         _points = points;
+        _timeline = null;
         _sourceName = result!.files.single.name;
         _error = null;
       });
@@ -129,9 +181,11 @@ class _TraceScreenState extends State<TraceScreen>
     _controller
       ..duration = Duration(seconds: _durationSec)
       ..forward(from: 0);
-    // カメラを全体が入る位置へ。地図ができる前は onMapCreated 側で消化する
-    _fitCamera();
+    // 地図ができる前は onMapCreated 側で消化する
+    _resetCamera();
   }
+
+  void _resetCamera() => _follow ? _zoomToHead() : _fitCamera();
 
   void _togglePlay() {
     setState(() {
@@ -145,6 +199,35 @@ class _TraceScreenState extends State<TraceScreen>
     });
   }
 
+  /// 動きのない時間を詰めるかを切り替える。
+  ///
+  /// 見ている時刻を保ったまま切り替えたいので、いまの時刻が新しい時間軸の
+  /// どこに当たるかを二分探索で拾い直す。
+  void _toggleSkipStill() {
+    final now = _currentTime();
+    setState(() {
+      _skipStill = !_skipStill;
+      _timeline = _buildTimeline();
+    });
+
+    final timeline = _timeline!;
+    var lo = 0.0, hi = 1.0;
+    for (var i = 0; i < 24; i++) {
+      final mid = (lo + hi) / 2;
+      if (timeline.timeAt(mid).isBefore(now)) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+    final wasPlaying = _controller.isAnimating;
+    if (wasPlaying) {
+      _controller.forward(from: lo);
+    } else {
+      _controller.value = lo;
+    }
+  }
+
   void _setDuration(int sec) {
     setState(() => _durationSec = sec);
     final at = _controller.value;
@@ -152,6 +235,30 @@ class _TraceScreenState extends State<TraceScreen>
     if (_controller.isAnimating) {
       _controller.forward(from: at);
     }
+  }
+
+  /// 追いかけるか、全体を見るかを切り替える
+  void _toggleFollow() {
+    setState(() => _follow = !_follow);
+    if (_follow) {
+      _lastCameraMove = null;
+      _zoomToHead();
+    } else {
+      _fitCamera();
+    }
+  }
+
+  /// 先頭に寄る。日々の移動が読み取れるくらいの縮尺にする
+  Future<void> _zoomToHead() async {
+    final controller = _mapController;
+    if (controller == null || _points.isEmpty) return;
+    final head = TraceService.cursorAt(_points, _currentTime()).head;
+    await controller.animateCamera(
+      CameraUpdate.newLatLngZoom(
+        LatLng(head.latitude, head.longitude),
+        _followZoom,
+      ),
+    );
   }
 
   /// 全ての点が入るようにカメラを合わせる
@@ -181,15 +288,13 @@ class _TraceScreenState extends State<TraceScreen>
   }
 
   /// いま表示すべき時刻
-  DateTime _currentTime() {
-    final first = _points.first.at;
-    final span = _points.last.end.difference(first);
-    return first.add(
-      Duration(
-        milliseconds: (span.inMilliseconds * _controller.value).round(),
-      ),
-    );
-  }
+  DateTime _currentTime() =>
+      (_timeline ??= _buildTimeline()).timeAt(_controller.value);
+
+  TraceTimeline _buildTimeline() => TraceTimeline.build(
+        _points,
+        cap: _skipStill ? _stillCap : null,
+      );
 
   LatLng _toLatLng(TraceLatLng p) => LatLng(p.latitude, p.longitude);
 
@@ -213,26 +318,35 @@ class _TraceScreenState extends State<TraceScreen>
     if (cursor.path.length < 2) return const {};
     final path = cursor.path.map(_toLatLng).toList();
 
-    // 直近の区間だけ濃く重ねる。全部を同じ濃さで描くと、どこまで進んだのか
-    // 分からなくなる
+    // 直近の区間だけ明るく重ねる。通った跡はしっかり残したいので、古い方も
+    // 薄くしすぎない(この画面は軌跡そのものを見るためのもの)
     const recentLegs = 6;
     final tail =
         path.length > recentLegs ? path.sublist(path.length - recentLegs) : path;
 
     return {
+      // 白の下敷き。地図の地色や道路の上でも線の輪郭が立つ
+      Polyline(
+        polylineId: const PolylineId('trace_outline'),
+        points: path,
+        color: Colors.white.withValues(alpha: 0.9),
+        width: 9,
+        geodesic: true,
+      ),
       Polyline(
         polylineId: const PolylineId('trace_past'),
         points: path,
-        color: const Color(0xFFFFB35C).withValues(alpha: 0.35),
-        width: 3,
+        color: _traceColor,
+        width: 5,
+        zIndex: 1,
         geodesic: true,
       ),
       Polyline(
         polylineId: const PolylineId('trace_recent'),
         points: tail,
-        color: const Color(0xFFFFB35C),
-        width: 5,
-        zIndex: 1,
+        color: _traceHeadColor,
+        width: 6,
+        zIndex: 2,
         geodesic: true,
       ),
     };
@@ -241,25 +355,26 @@ class _TraceScreenState extends State<TraceScreen>
   /// 先頭に置く丸いドット。既定のピンは影と尖りで場所を指すので、動いている
   /// ものには合わない
   Future<void> _prepareHeadIcon() async {
-    const size = 30.0;
+    const size = 38.0;
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
-    final center = const Offset(size / 2, size / 2);
+    const center = Offset(size / 2, size / 2);
 
+    // 外側のにじみ → 白フチ → 芯。地図の上でも埋もれないように三重にする
     canvas.drawCircle(
       center,
       size / 2,
-      Paint()..color = const Color(0x33FFB35C),
+      Paint()..color = _traceHeadColor.withValues(alpha: 0.28),
     );
     canvas.drawCircle(
       center,
-      size / 4,
-      Paint()..color = const Color(0xFFFFFFFF),
+      size / 3.4,
+      Paint()..color = Colors.white,
     );
     canvas.drawCircle(
       center,
-      size / 4 - 2.5,
-      Paint()..color = const Color(0xFFFF9A3C),
+      size / 3.4 - 3.5,
+      Paint()..color = _traceHeadColor,
     );
 
     final image = await recorder
@@ -280,6 +395,22 @@ class _TraceScreenState extends State<TraceScreen>
       appBar: AppBar(
         title: const Text('軌跡'),
         actions: [
+          IconButton(
+            icon: Icon(
+              _follow ? Icons.my_location : Icons.zoom_out_map,
+              color: _follow ? _traceColor : null,
+            ),
+            tooltip: _follow ? '現在地を追いかけている' : '全体を表示している',
+            onPressed: _points.isEmpty ? null : _toggleFollow,
+          ),
+          IconButton(
+            icon: Icon(
+              _skipStill ? Icons.compress : Icons.schedule,
+              color: _skipStill ? _traceColor : null,
+            ),
+            tooltip: _skipStill ? '止まっている時間を詰めている' : '実際の時間で流している',
+            onPressed: _points.isEmpty ? null : _toggleSkipStill,
+          ),
           IconButton(
             icon: const Icon(Icons.file_open_outlined),
             tooltip: 'JSONを開く',
@@ -321,7 +452,7 @@ class _TraceScreenState extends State<TraceScreen>
                           compassEnabled: false,
                           onMapCreated: (controller) {
                             _mapController = controller;
-                            _fitCamera();
+                            _resetCamera();
                           },
                         ),
                         _buildHud(now, cursor),
@@ -372,41 +503,41 @@ class _TraceScreenState extends State<TraceScreen>
 
     return Positioned(
       top: 12,
-      left: 16,
+      left: 12,
       child: IgnorePointer(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _shadowed(
-              date,
-              const TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.w700,
-                color: Colors.white,
+        // 地図と軌跡の上に重なるので、下地を敷かないと色によって読めなくなる
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 8, 14, 9),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.55),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                date,
+                style: const TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                  height: 1.1,
+                ),
               ),
-            ),
-            const SizedBox(height: 2),
-            _shadowed(
-              '${cursor.visitedCount} / ${_points.length} 地点'
-              '${cursor.moving ? ' ・ 移動中' : ''}'
-              '${_sourceName != null ? ' ・ $_sourceName' : ''}',
-              const TextStyle(fontSize: 12, color: Colors.white70),
-            ),
-          ],
+              const SizedBox(height: 3),
+              Text(
+                '${_two(now.hour)}:${_two(now.minute)}'
+                ' ・ ${cursor.visitedCount} / ${_points.length} 地点'
+                '${cursor.moving ? ' ・ 移動中' : ''}'
+                '${_sourceName != null ? ' ・ $_sourceName' : ''}',
+                style: const TextStyle(fontSize: 12, color: Colors.white70),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
-
-  Widget _shadowed(String text, TextStyle style) => Text(
-        text,
-        style: style.copyWith(
-          shadows: const [
-            Shadow(blurRadius: 6, color: Colors.black87),
-            Shadow(blurRadius: 2, color: Colors.black54),
-          ],
-        ),
-      );
 
   Widget _buildControls() {
     final playing = _controller.isAnimating;
