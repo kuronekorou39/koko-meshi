@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -32,11 +33,11 @@ class _TraceScreenState extends State<TraceScreen>
     180: '3分',
   };
 
-  /// 直近の点を強めに出す窓。全期間に対する割合
-  static const _recentWindowRatio = 0.06;
-
   late final AnimationController _controller;
   GoogleMapController? _mapController;
+
+  /// 先頭に置く丸いドット。用意できるまでマーカーは出さない
+  BitmapDescriptor? _headIcon;
 
   List<TracePoint> _points = [];
   bool _loading = true;
@@ -57,6 +58,7 @@ class _TraceScreenState extends State<TraceScreen>
         // 終わったら再生ボタンの見た目を戻す
         if (status == AnimationStatus.completed) setState(() {});
       });
+    _prepareHeadIcon();
     _load();
   }
 
@@ -189,57 +191,85 @@ class _TraceScreenState extends State<TraceScreen>
     );
   }
 
-  /// 出現済みの点(時刻順)
-  List<TracePoint> _visible(DateTime now) =>
-      _points.where((p) => !p.at.isAfter(now)).toList();
+  LatLng _toLatLng(TraceLatLng p) => LatLng(p.latitude, p.longitude);
 
-  Set<Marker> _buildMarkers(List<TracePoint> visible, DateTime now) {
-    final span = _points.last.end.difference(_points.first.at);
-    final recentMs = span.inMilliseconds * _recentWindowRatio;
-    final markers = <Marker>{};
-
-    for (var i = 0; i < visible.length; i++) {
-      final p = visible[i];
-      final ageMs = now.difference(p.at).inMilliseconds.toDouble();
-      final fresh = recentMs > 0 && ageMs < recentMs;
-      final isLast = i == visible.length - 1;
-
-      markers.add(
-        Marker(
-          markerId: MarkerId('trace_$i'),
-          position: LatLng(p.latitude, p.longitude),
-          // 古い点は薄く沈めて、いま進んでいる場所を目立たせる
-          alpha: isLast ? 1.0 : (fresh ? 0.85 : 0.45),
-          zIndexInt: isLast ? 2 : (fresh ? 1 : 0),
-          icon: BitmapDescriptor.defaultMarkerWithHue(
-            isLast
-                ? BitmapDescriptor.hueOrange
-                : (p.fromApp
-                    ? BitmapDescriptor.hueRed
-                    : BitmapDescriptor.hueCyan),
-          ),
-          infoWindow: p.label != null
-              ? InfoWindow(title: p.label)
-              : InfoWindow.noText,
-        ),
-      );
-    }
-    return markers;
+  /// 動いている先頭だけを出す。訪れた場所にピンを残すと、増えるほど地図が
+  /// 埋まって肝心の経路が見えなくなる
+  Set<Marker> _buildMarkers(TraceCursor cursor) {
+    final icon = _headIcon;
+    if (icon == null) return const {};
+    return {
+      Marker(
+        markerId: const MarkerId('trace_head'),
+        position: _toLatLng(cursor.head),
+        icon: icon,
+        anchor: const Offset(0.5, 0.5),
+        zIndexInt: 2,
+      ),
+    };
   }
 
-  Set<Polyline> _buildPolylines(List<TracePoint> visible) {
-    if (visible.length < 2) return const {};
+  Set<Polyline> _buildPolylines(TraceCursor cursor) {
+    if (cursor.path.length < 2) return const {};
+    final path = cursor.path.map(_toLatLng).toList();
+
+    // 直近の区間だけ濃く重ねる。全部を同じ濃さで描くと、どこまで進んだのか
+    // 分からなくなる
+    const recentLegs = 6;
+    final tail =
+        path.length > recentLegs ? path.sublist(path.length - recentLegs) : path;
+
     return {
       Polyline(
-        polylineId: const PolylineId('trace'),
-        points: [
-          for (final p in visible) LatLng(p.latitude, p.longitude),
-        ],
-        color: const Color(0xFFFFB35C),
+        polylineId: const PolylineId('trace_past'),
+        points: path,
+        color: const Color(0xFFFFB35C).withValues(alpha: 0.35),
         width: 3,
         geodesic: true,
       ),
+      Polyline(
+        polylineId: const PolylineId('trace_recent'),
+        points: tail,
+        color: const Color(0xFFFFB35C),
+        width: 5,
+        zIndex: 1,
+        geodesic: true,
+      ),
     };
+  }
+
+  /// 先頭に置く丸いドット。既定のピンは影と尖りで場所を指すので、動いている
+  /// ものには合わない
+  Future<void> _prepareHeadIcon() async {
+    const size = 30.0;
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+    final center = const Offset(size / 2, size / 2);
+
+    canvas.drawCircle(
+      center,
+      size / 2,
+      Paint()..color = const Color(0x33FFB35C),
+    );
+    canvas.drawCircle(
+      center,
+      size / 4,
+      Paint()..color = const Color(0xFFFFFFFF),
+    );
+    canvas.drawCircle(
+      center,
+      size / 4 - 2.5,
+      Paint()..color = const Color(0xFFFF9A3C),
+    );
+
+    final image = await recorder
+        .endRecording()
+        .toImage(size.toInt(), size.toInt());
+    final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+    if (bytes == null || !mounted) return;
+    setState(() {
+      _headIcon = BitmapDescriptor.bytes(bytes.buffer.asUint8List());
+    });
   }
 
   @override
@@ -271,7 +301,7 @@ class _TraceScreenState extends State<TraceScreen>
                   animation: _controller,
                   builder: (context, _) {
                     final now = _currentTime();
-                    final visible = _visible(now);
+                    final cursor = TraceService.cursorAt(_points, now);
                     return Stack(
                       children: [
                         GoogleMap(
@@ -282,8 +312,8 @@ class _TraceScreenState extends State<TraceScreen>
                             ),
                             zoom: 12,
                           ),
-                          markers: _buildMarkers(visible, now),
-                          polylines: _buildPolylines(visible),
+                          markers: _buildMarkers(cursor),
+                          polylines: _buildPolylines(cursor),
                           style: buildMapStyle(AppSettings.mapLabelLayers),
                           myLocationButtonEnabled: false,
                           zoomControlsEnabled: false,
@@ -294,7 +324,7 @@ class _TraceScreenState extends State<TraceScreen>
                             _fitCamera();
                           },
                         ),
-                        _buildHud(now, visible.length),
+                        _buildHud(now, cursor),
                         _buildControls(),
                       ],
                     );
@@ -335,7 +365,7 @@ class _TraceScreenState extends State<TraceScreen>
     );
   }
 
-  Widget _buildHud(DateTime now, int shown) {
+  Widget _buildHud(DateTime now, TraceCursor cursor) {
     const weekdays = ['月', '火', '水', '木', '金', '土', '日'];
     final date = '${now.year}/${_two(now.month)}/${_two(now.day)}'
         '（${weekdays[now.weekday - 1]}）';
@@ -357,7 +387,8 @@ class _TraceScreenState extends State<TraceScreen>
             ),
             const SizedBox(height: 2),
             _shadowed(
-              '$shown / ${_points.length} 地点'
+              '${cursor.visitedCount} / ${_points.length} 地点'
+              '${cursor.moving ? ' ・ 移動中' : ''}'
               '${_sourceName != null ? ' ・ $_sourceName' : ''}',
               const TextStyle(fontSize: 12, color: Colors.white70),
             ),
@@ -382,7 +413,9 @@ class _TraceScreenState extends State<TraceScreen>
     return Positioned(
       left: 12,
       right: 12,
-      bottom: 12,
+      // 地図は画面いっぱいに敷くので、ジェスチャーバーやナビゲーションバーの
+      // 下に潜り込まないよう自分でよける
+      bottom: 12 + context.systemBottomInset,
       child: Card(
         margin: EdgeInsets.zero,
         child: Padding(

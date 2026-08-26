@@ -34,6 +34,35 @@ class TracePoint {
   final bool fromApp;
 }
 
+/// 緯度経度の組。地図パッケージに依存せずに扱うための最小の型
+class TraceLatLng {
+  const TraceLatLng(this.latitude, this.longitude);
+  final double latitude;
+  final double longitude;
+}
+
+/// ある時刻における、通過済みの経路と先頭の位置。
+class TraceCursor {
+  const TraceCursor({
+    required this.path,
+    required this.head,
+    required this.visitedCount,
+    required this.moving,
+  });
+
+  /// 出発点から先頭までの線
+  final List<TraceLatLng> path;
+
+  /// いまいる位置。地点の間なら補間された座標
+  final TraceLatLng head;
+
+  /// 着いた地点の数
+  final int visitedCount;
+
+  /// 地点の間を移動している最中か
+  final bool moving;
+}
+
 /// まとめの既定値。アプリ内のグルーピング(同じ場所・近い時間)と揃えてある
 const _defaultRadiusM = 50.0;
 const _defaultGap = Duration(hours: 2);
@@ -89,6 +118,58 @@ class TraceService {
       }
     }
     return out;
+  }
+
+  /// [now] の時点で、どこまで進んでいるかを求める。
+  ///
+  /// 地点の間は時間で補間する。着いた順に点を出すだけだと瞬間移動に見えて
+  /// 動きとして読めないので、線も先頭も少しずつ伸びるようにしている。
+  /// 滞在中(その地点の [TracePoint.at] から [TracePoint.end] の間)は動かない。
+  static TraceCursor cursorAt(List<TracePoint> points, DateTime now) {
+    if (points.isEmpty) {
+      throw ArgumentError('points が空です');
+    }
+
+    final first = TraceLatLng(points.first.latitude, points.first.longitude);
+    final path = <TraceLatLng>[first];
+    var head = first;
+    var visited = 0;
+    var moving = false;
+
+    for (var i = 0; i < points.length; i++) {
+      final p = points[i];
+      if (p.at.isAfter(now)) break;
+      visited = i + 1;
+      head = TraceLatLng(p.latitude, p.longitude);
+      if (i > 0) path.add(head);
+
+      final next = i + 1 < points.length ? points[i + 1] : null;
+      if (next != null && !next.at.isAfter(now)) continue;
+
+      // ここが最後に着いた地点。次へ発つ時刻を過ぎていれば移動の途中
+      if (next != null && now.isAfter(p.end)) {
+        final legMs = next.at.difference(p.end).inMilliseconds;
+        final f = legMs <= 0
+            ? 1.0
+            : (now.difference(p.end).inMilliseconds / legMs).clamp(0.0, 1.0);
+        if (f > 0) {
+          head = TraceLatLng(
+            p.latitude + (next.latitude - p.latitude) * f,
+            p.longitude + (next.longitude - p.longitude) * f,
+          );
+          path.add(head);
+          moving = true;
+        }
+      }
+      break;
+    }
+
+    return TraceCursor(
+      path: path,
+      head: head,
+      visitedCount: visited,
+      moving: moving,
+    );
   }
 
   /// 2点間の距離(m)。数十km程度の範囲で使うので平面近似で足りる

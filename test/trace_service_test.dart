@@ -74,6 +74,101 @@ void main() {
     });
   });
 
+  group('cursorAt', () {
+    final base = DateTime(2026, 8, 1, 12);
+    // 12:00に(35,139)を出て、13:00に(36,140)へ着く2地点
+    final points = [
+      TracePoint(at: base, end: base, latitude: 35, longitude: 139),
+      TracePoint(
+        at: base.add(const Duration(hours: 1)),
+        end: base.add(const Duration(hours: 1)),
+        latitude: 36,
+        longitude: 140,
+      ),
+    ];
+
+    test('始まった直後は最初の地点にいて、動いていない', () {
+      final c = TraceService.cursorAt(points, base);
+      expect(c.visitedCount, 1);
+      expect(c.head.latitude, 35);
+      expect(c.moving, isFalse);
+      expect(c.path.length, 1, reason: 'まだ線は伸びていない');
+    });
+
+    test('区間の途中では座標が補間され、移動中になる', () {
+      final c = TraceService.cursorAt(
+        points,
+        base.add(const Duration(minutes: 30)),
+      );
+      // 半分まで来ているので緯度経度も中間
+      expect(c.head.latitude, closeTo(35.5, 0.001));
+      expect(c.head.longitude, closeTo(139.5, 0.001));
+      expect(c.moving, isTrue);
+      expect(c.visitedCount, 1, reason: 'まだ次の地点には着いていない');
+      expect(c.path.last.latitude, closeTo(35.5, 0.001));
+    });
+
+    test('次の地点に着いたら移動が止まり、線が繋がる', () {
+      final c = TraceService.cursorAt(
+        points,
+        base.add(const Duration(hours: 1)),
+      );
+      expect(c.visitedCount, 2);
+      expect(c.head.latitude, 36);
+      expect(c.moving, isFalse);
+      expect(c.path.length, 2);
+    });
+
+    test('滞在している間は先頭が動かない', () {
+      final staying = [
+        TracePoint(
+          at: base,
+          end: base.add(const Duration(minutes: 40)),
+          latitude: 35,
+          longitude: 139,
+          count: 3,
+        ),
+        TracePoint(
+          at: base.add(const Duration(hours: 1)),
+          end: base.add(const Duration(hours: 1)),
+          latitude: 36,
+          longitude: 140,
+        ),
+      ];
+      // 滞在の終わり(12:40)より前なので、まだ出発していない
+      final c = TraceService.cursorAt(
+        staying,
+        base.add(const Duration(minutes: 20)),
+      );
+      expect(c.head.latitude, 35);
+      expect(c.moving, isFalse);
+    });
+
+    test('最後の地点を過ぎても、そこから先へは進まない', () {
+      final c = TraceService.cursorAt(
+        points,
+        base.add(const Duration(days: 1)),
+      );
+      expect(c.visitedCount, 2);
+      expect(c.head.latitude, 36);
+      expect(c.moving, isFalse);
+    });
+
+    test('1地点しかなければ、その場に留まる', () {
+      final c = TraceService.cursorAt([points.first], base);
+      expect(c.visitedCount, 1);
+      expect(c.moving, isFalse);
+      expect(c.path.length, 1);
+    });
+
+    test('空の入力は例外', () {
+      expect(
+        () => TraceService.cursorAt([], base),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+  });
+
   group('distanceM', () {
     test('緯度1度は約111km', () {
       final d = TraceService.distanceM(35.0, 139.0, 36.0, 139.0);
