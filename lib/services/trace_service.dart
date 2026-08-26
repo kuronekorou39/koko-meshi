@@ -41,6 +41,27 @@ class TraceLatLng {
   final double longitude;
 }
 
+/// 緯度経度の矩形
+class TraceBounds {
+  const TraceBounds({
+    required this.south,
+    required this.west,
+    required this.north,
+    required this.east,
+  });
+
+  final double south;
+  final double west;
+  final double north;
+  final double east;
+
+  bool contains(TraceBounds other) =>
+      south <= other.south &&
+      north >= other.north &&
+      west <= other.west &&
+      east >= other.east;
+}
+
 /// ある時刻における、通過済みの経路と先頭の位置。
 class TraceCursor {
   const TraceCursor({
@@ -298,6 +319,47 @@ class TraceService {
       moving: moving,
       traveledMeters: traveled,
       legIndex: leg,
+    );
+  }
+
+  /// いまいる場所と、[until] までに通る地点が収まる範囲。
+  ///
+  /// 目の前の一区間だけを映すと、動くたびに地図が追いかけることになって
+  /// 落ち着かないうえ、カメラが追いつかず先頭が画面から出てしまう。
+  /// 少し先まで含めて引いておけば、しばらく動かさずに済む。
+  ///
+  /// [minSpan] は最低限確保する緯度経度の幅。近所だけのときに寄りすぎない。
+  static TraceBounds boundsAhead(
+    List<TracePoint> points,
+    TraceLatLng head,
+    DateTime from,
+    DateTime until, {
+    int maxPoints = 24,
+    double minSpan = 0.014,
+  }) {
+    var south = head.latitude, north = head.latitude;
+    var west = head.longitude, east = head.longitude;
+
+    var taken = 0;
+    for (final p in points) {
+      if (p.at.isAfter(until)) break;
+      // 通り過ぎた地点には引っぱられない。これから行く先だけを入れる
+      if (p.at.isBefore(from)) continue;
+      if (taken >= maxPoints) break;
+      taken++;
+      if (p.latitude < south) south = p.latitude;
+      if (p.latitude > north) north = p.latitude;
+      if (p.longitude < west) west = p.longitude;
+      if (p.longitude > east) east = p.longitude;
+    }
+
+    final padLat = ((minSpan - (north - south)) / 2).clamp(0.0, minSpan);
+    final padLng = ((minSpan - (east - west)) / 2).clamp(0.0, minSpan);
+    return TraceBounds(
+      south: south - padLat,
+      west: west - padLng,
+      north: north + padLat,
+      east: east + padLng,
     );
   }
 

@@ -42,8 +42,22 @@ class _TraceScreenState extends State<TraceScreen>
   /// 先頭とその手前。進んでいる場所を一目で拾えるように明るくする
   static const _traceHeadColor = Color(0xFFFF6B2C);
 
-  /// 追いかけるときの縮尺。街区の移動が分かる程度
-  static const _followZoom = 13.5;
+  /// 追いかけ始めるときの縮尺。街をまたぐ移動まで見える程度に引いておく
+  static const _followZoom = 12.5;
+
+  /// どれだけ先まで見越して範囲を取るか(再生時間に対する割合)。
+  /// 先を見すぎると、遠出が視野に入った瞬間に日本地図まで引いてしまう
+  static const _lookaheadShare = 0.06;
+
+  /// 行き先が今の表示に対してこれより小さくなったら寄り直す。
+  /// 「収まっていれば動かさない」だけだと、一度引いたきり戻らなくなる
+  static const _rezoomRatio = 0.4;
+
+  /// カメラを動かすかどうかを検討する最短の間隔
+  static const _cameraMinInterval = Duration(milliseconds: 1200);
+
+  /// カメラを動かすのにかける時間。急がずゆっくり寄せる
+  static const _cameraAnimation = Duration(milliseconds: 1600);
 
   late final AnimationController _controller;
   GoogleMapController? _mapController;
@@ -63,8 +77,11 @@ class _TraceScreenState extends State<TraceScreen>
   /// しまう。既定では寄って追いかけ、全体を見たいときだけ引く。
   bool _follow = true;
 
-  /// カメラを合わせ終えた区間。同じ区間で何度もカメラを動かさないための印
-  int _cameraLeg = -1;
+  /// 最後にカメラを検討した時刻。動かす頻度を抑えるために見る
+  DateTime? _lastCameraAt;
+
+  /// カメラのアニメーション中。終わるまで次を出さない
+  bool _movingCamera = false;
 
   List<TracePoint> _points = [];
 
@@ -96,79 +113,77 @@ class _TraceScreenState extends State<TraceScreen>
 
   /// 再生に合わせてカメラを動かす。
   ///
-  /// 毎フレーム位置を送るとカクつくので、区間(地点から次の地点まで)に入った
-  /// ときに一度だけ、その区間の再生時間ぶんのアニメーションを地図に任せる。
-  /// 補間はSDK側が60fpsで行うため滑らかに流れる。
-  ///
-  /// 行き先が今の画面に収まっているなら動かさない。収まっているのに追いかける
-  /// と、地図が細かく揺れて見づらいだけになる。
+  /// 目の前の一区間だけを追うと、細かい移動のたびに地図が動いて落ち着かず、
+  /// カメラも追いつかずに先頭が画面から出てしまう。これから通る範囲まで
+  /// まとめて入れて引いておき、そこに収まっている間は動かさない。
   Future<void> _followHead() async {
-    if (!_follow || _points.isEmpty) return;
+    if (!_follow || _points.isEmpty || _movingCamera) return;
     final controller = _mapController;
     if (controller == null) return;
 
-    final cursor = TraceService.cursorAt(_points, _currentTime());
-    final leg = cursor.legIndex;
-    if (leg < 0 || leg == _cameraLeg) return; // 同じ区間には一度だけ
-    _cameraLeg = leg;
+    // ゆったり構える。動かすかどうかの検討自体を間引く
+    final wall = DateTime.now();
+    if (_lastCameraAt != null &&
+        wall.difference(_lastCameraAt!) < _cameraMinInterval) {
+      return;
+    }
+    _lastCameraAt = wall;
 
-    final from = _points[leg];
-    final to = _points[leg + 1];
-    final target = _legBounds(from, to);
+    final timeline = _timeline ??= _buildTimeline();
+    final now = timeline.timeAt(_controller.value);
+    final until = timeline.timeAt(
+      (_controller.value + _lookaheadShare).clamp(0.0, 1.0),
+    );
+    final head = TraceService.cursorAt(_points, now).head;
+    final target = TraceService.boundsAhead(_points, head, now, until);
 
-    // すでに見えているなら動かさない
     final region = await controller.getVisibleRegion();
-    if (_boundsContains(region, target)) return;
-    if (!mounted || _cameraLeg != leg) return;
+    if (!mounted || !_follow) return;
+    final shown = _toTraceBounds(region);
 
-    // 基本は区間の再生時間に合わせる。ただし詰めた停滞のせいで一瞬になる
-    // ことがあり、それだと飛んだように見える。距離なりの時間は最低限かける
-    final share = (_timeline ??= _buildTimeline())
-        .weightOfRange(from.end, to.at)
-        .clamp(0.0, 1.0);
-    final playMs = (_durationSec * 1000 * share).round();
-    final km = TraceService.distanceM(
-          from.latitude,
-          from.longitude,
-          to.latitude,
-          to.longitude,
-        ) /
-        1000;
-    final minMs = km < 5
-        ? 500
-        : km < 50
-            ? 800
-            : 1200;
+    // 収まっていて、かつ引きすぎてもいないなら動かさない
+    final shownSpan = _spanOf(shown);
+    final targetSpan = _spanOf(target);
+    final tooWide = shownSpan > 0 && targetSpan / shownSpan < _rezoomRatio;
+    if (shown.contains(target) && !tooWide) return;
 
-    await controller.animateCamera(
-      CameraUpdate.newLatLngBounds(target, 72),
-      duration: Duration(milliseconds: playMs.clamp(minMs, 2500)),
-    );
+    _movingCamera = true;
+    try {
+      await controller.animateCamera(
+        CameraUpdate.newLatLngBounds(_toLatLngBounds(target), 64),
+        duration: _cameraAnimation,
+      );
+      // アニメーションが終わるまで次を出さない(途中で上書きすると飛ぶ)
+      await Future<void>.delayed(_cameraAnimation);
+    } finally {
+      _movingCamera = false;
+      _lastCameraAt = DateTime.now();
+    }
   }
 
-  /// 区間の両端が入る範囲。同じ場所どうしでつぶれないよう少し広げる
-  LatLngBounds _legBounds(TracePoint a, TracePoint b) {
-    final minLat = a.latitude < b.latitude ? a.latitude : b.latitude;
-    final maxLat = a.latitude > b.latitude ? a.latitude : b.latitude;
-    final minLng = a.longitude < b.longitude ? a.longitude : b.longitude;
-    final maxLng = a.longitude > b.longitude ? a.longitude : b.longitude;
-    // 近所の移動で寄りすぎないよう、最低でもこのくらいの幅を確保する
-    const minSpan = 0.004;
-    final padLat = ((minSpan - (maxLat - minLat)) / 2).clamp(0.0, minSpan);
-    final padLng = ((minSpan - (maxLng - minLng)) / 2).clamp(0.0, minSpan);
-    return LatLngBounds(
-      southwest: LatLng(minLat - padLat, minLng - padLng),
-      northeast: LatLng(maxLat + padLat, maxLng + padLng),
-    );
+  /// 矩形の大きさの目安。緯度経度の長い方の辺で比べる
+  double _spanOf(TraceBounds b) {
+    final lat = b.north - b.south;
+    final lng = b.east - b.west;
+    return lat > lng ? lat : lng;
   }
 
-  /// [outer] が [inner] を完全に含むか。日付変更線をまたぐ場合は諦めて false
-  bool _boundsContains(LatLngBounds outer, LatLngBounds inner) {
-    if (outer.northeast.longitude < outer.southwest.longitude) return false;
-    return outer.southwest.latitude <= inner.southwest.latitude &&
-        outer.northeast.latitude >= inner.northeast.latitude &&
-        outer.southwest.longitude <= inner.southwest.longitude &&
-        outer.northeast.longitude >= inner.northeast.longitude;
+  LatLngBounds _toLatLngBounds(TraceBounds b) => LatLngBounds(
+        southwest: LatLng(b.south, b.west),
+        northeast: LatLng(b.north, b.east),
+      );
+
+  /// 日付変更線をまたぐ表示は扱わない。またいでいたら「収まっていない」に倒す
+  TraceBounds _toTraceBounds(LatLngBounds b) {
+    if (b.northeast.longitude < b.southwest.longitude) {
+      return const TraceBounds(south: 0, west: 0, north: 0, east: 0);
+    }
+    return TraceBounds(
+      south: b.southwest.latitude,
+      west: b.southwest.longitude,
+      north: b.northeast.latitude,
+      east: b.northeast.longitude,
+    );
   }
 
   @override
@@ -190,7 +205,6 @@ class _TraceScreenState extends State<TraceScreen>
         _points = points;
         _totalMeters = TraceService.totalDistanceM(points);
         _timeline = null;
-        _cameraLeg = -1;
         _sourceName = null;
         _loading = false;
         _error = points.isEmpty ? '場所の記録がまだありません' : null;
@@ -225,7 +239,6 @@ class _TraceScreenState extends State<TraceScreen>
         _points = points;
         _totalMeters = TraceService.totalDistanceM(points);
         _timeline = null;
-        _cameraLeg = -1;
         _sourceName = result!.files.single.name;
         _error = null;
       });
@@ -304,7 +317,6 @@ class _TraceScreenState extends State<TraceScreen>
   void _toggleFollow() {
     setState(() => _follow = !_follow);
     if (_follow) {
-      _cameraLeg = -1;
       _zoomToHead();
     } else {
       _fitCamera();
@@ -645,7 +657,6 @@ class _TraceScreenState extends State<TraceScreen>
                 icon: const Icon(Icons.replay),
                 tooltip: '最初から',
                 onPressed: () {
-                  _cameraLeg = -1;
                   _controller.forward(from: 0);
                   _resetCamera();
                 },
@@ -655,8 +666,6 @@ class _TraceScreenState extends State<TraceScreen>
                   value: _controller.value.clamp(0.0, 1.0),
                   onChanged: (v) {
                     _controller.stop();
-                    // 飛んだ先は続きではないので、カメラも合わせ直す
-                    _cameraLeg = -1;
                     _controller.value = v;
                   },
                 ),

@@ -230,6 +230,102 @@ void main() {
     });
   });
 
+  group('boundsAhead', () {
+    final base = DateTime(2026, 8, 1, 12);
+    final points = [
+      TracePoint(at: base, end: base, latitude: 35.0, longitude: 139.0),
+      TracePoint(
+        at: base.add(const Duration(hours: 1)),
+        end: base.add(const Duration(hours: 1)),
+        latitude: 35.2,
+        longitude: 139.2,
+      ),
+      TracePoint(
+        at: base.add(const Duration(hours: 5)),
+        end: base.add(const Duration(hours: 5)),
+        latitude: 36.0,
+        longitude: 140.0,
+      ),
+    ];
+    const head = TraceLatLng(35.0, 139.0);
+
+    test('窓の内側にある地点まで含めて広がる', () {
+      final b = TraceService.boundsAhead(
+        points,
+        head,
+        base,
+        base.add(const Duration(hours: 2)),
+      );
+      // 2時間先までなので、35.2までは入るが36.0は入らない
+      expect(b.north, closeTo(35.2, 0.02));
+      expect(b.east, closeTo(139.2, 0.02));
+    });
+
+    test('窓を広げれば遠くの地点も入る', () {
+      final b = TraceService.boundsAhead(
+        points,
+        head,
+        base,
+        base.add(const Duration(hours: 6)),
+      );
+      expect(b.north, greaterThanOrEqualTo(36.0));
+      expect(b.east, greaterThanOrEqualTo(140.0));
+    });
+
+    test('通り過ぎた地点には引っぱられない', () {
+      // いま最後の地点にいる。手前の35.0には戻らない
+      final b = TraceService.boundsAhead(
+        points,
+        const TraceLatLng(36.0, 140.0),
+        base.add(const Duration(hours: 4)),
+        base.add(const Duration(hours: 6)),
+      );
+      expect(b.south, greaterThan(35.5));
+    });
+
+    test('近所だけでも最低限の広さを確保する', () {
+      final b = TraceService.boundsAhead(
+        points,
+        head,
+        base,
+        base, // 先に何も入らない
+        minSpan: 0.02,
+      );
+      expect(b.north - b.south, closeTo(0.02, 0.001));
+      expect(b.east - b.west, closeTo(0.02, 0.001));
+    });
+
+    test('取り込む地点数には上限がある', () {
+      final many = [
+        for (var i = 0; i < 50; i++)
+          TracePoint(
+            at: base.add(Duration(minutes: i)),
+            end: base.add(Duration(minutes: i)),
+            latitude: 35.0 + i * 0.1,
+            longitude: 139.0,
+          ),
+      ];
+      final b = TraceService.boundsAhead(
+        many,
+        head,
+        base,
+        base.add(const Duration(hours: 10)),
+        maxPoints: 5,
+      );
+      // 5地点ぶん(35.0〜35.4)までで打ち切られる
+      expect(b.north, lessThan(35.6));
+    });
+
+    test('containsは内側の矩形を判定する', () {
+      const outer =
+          TraceBounds(south: 35.0, west: 139.0, north: 36.0, east: 140.0);
+      const inner =
+          TraceBounds(south: 35.2, west: 139.2, north: 35.8, east: 139.8);
+      expect(outer.contains(inner), isTrue);
+      expect(inner.contains(outer), isFalse);
+    });
+  });
+
   group('TraceTimeline', () {
     final base = DateTime(2026, 8, 1, 12);
 
