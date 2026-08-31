@@ -13,6 +13,7 @@ import '../../models/meal_log.dart';
 import '../../models/meal_photo.dart';
 import '../../models/meal_type.dart';
 import '../../models/saved_place.dart';
+import '../../providers/app_settings_providers.dart';
 import '../../providers/map_focus_providers.dart';
 import '../../providers/meal_providers.dart';
 import '../../services/app_settings_service.dart';
@@ -822,13 +823,15 @@ class _MapTabState extends ConsumerState<MapTab> {
       appBar: AppBar(
         title: const AppLogo(),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.play_circle_outline),
-            tooltip: '軌跡を再生',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const TraceScreen()),
+          // 記録に必要な機能ではないので、設定で足した人にだけ出す
+          if (ref.watch(funFeaturesProvider).contains(FunFeature.trace))
+            IconButton(
+              icon: const Icon(Icons.play_circle_outline),
+              tooltip: '軌跡を再生',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const TraceScreen()),
+              ),
             ),
-          ),
           IconButton(
             icon: Badge(
               isLabelVisible: _filter.isActive,

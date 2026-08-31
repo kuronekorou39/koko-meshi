@@ -409,6 +409,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
           ]),
 
+          _sectionLabel('遊び要素'),
+          _buildFunSection(tokens),
+
           _sectionLabel('写真の書き出し'),
           _sectionCard([
             SwitchListTile(
@@ -561,6 +564,39 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   /// AI自動解析セクション。トグル1つ + (オンでモデル未DLなら)ダウンロード案内。
   /// 端末内AIが動かない端末では、トグルごと無効にして事情を書く。
+  /// 記録には要らないが、あると楽しい機能。既定はどれもオフ。
+  ///
+  /// [FunFeature] に足せばここに並ぶので、増えても手を入れなくてよい。
+  Widget _buildFunSection(KokoTokens tokens) {
+    final enabled = ref.watch(funFeaturesProvider);
+    return _sectionCard([
+      for (final feature in FunFeature.values) ...[
+        SwitchListTile(
+          secondary: const Icon(Icons.auto_awesome_motion_outlined),
+          title: Text(feature.label),
+          subtitle: Text(feature.description),
+          value: enabled.contains(feature),
+          onChanged: (on) => _setFunFeature(feature, on),
+        ),
+        if (enabled.contains(feature))
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Text(
+              feature.hint,
+              style: TextStyle(fontSize: 12, color: tokens.textMuted),
+            ),
+          ),
+      ],
+    ]);
+  }
+
+  Future<void> _setFunFeature(FunFeature feature, bool enabled) async {
+    await AppSettings.setFunFeature(feature, enabled);
+    if (mounted) {
+      ref.read(funFeaturesProvider.notifier).state = AppSettings.funFeatures;
+    }
+  }
+
   Widget _buildAiSection() {
     if (!DeviceCapability.onDeviceAi) return _buildAiUnsupportedSection();
     return _sectionCard([

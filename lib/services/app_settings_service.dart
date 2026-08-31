@@ -26,6 +26,26 @@ enum AppFont {
   final String description;
 }
 
+/// 記録そのものには要らないが、あると楽しい機能。
+///
+/// 食事を記録するのに必要ではないので、既定では出さない。使いたい人だけが
+/// 設定で足す。増やすときはここに追加すれば、設定画面にも項目が並ぶ。
+enum FunFeature {
+  trace(
+    '軌跡の再生',
+    '記録した場所の動きを、地図の上で再生します',
+    'マップの右上に再生ボタンが出ます',
+  );
+
+  const FunFeature(this.label, this.description, this.hint);
+
+  final String label;
+  final String description;
+
+  /// どこに出るのかの案内。オンにしたあと迷わせないため
+  final String hint;
+}
+
 class AppSettings {
   AppSettings._();
 
@@ -70,6 +90,35 @@ class AppSettings {
     await _prefs?.setStringList(
       _keyMapLabels,
       layers.map((l) => l.name).toList(),
+    );
+  }
+
+  // --- 遊び要素 ---
+  static const _keyFunFeatures = 'fun_features';
+
+  /// 有効にしている遊び要素。既定は空(どれも出さない)
+  static Set<FunFeature> get funFeatures {
+    final names = _prefs?.getStringList(_keyFunFeatures);
+    if (names == null) return const {};
+    return names
+        .map((n) => FunFeature.values.where((f) => f.name == n).firstOrNull)
+        .whereType<FunFeature>()
+        .toSet();
+  }
+
+  static bool isFunEnabled(FunFeature feature) =>
+      funFeatures.contains(feature);
+
+  static Future<void> setFunFeature(FunFeature feature, bool enabled) async {
+    final next = {...funFeatures};
+    if (enabled) {
+      next.add(feature);
+    } else {
+      next.remove(feature);
+    }
+    await _prefs?.setStringList(
+      _keyFunFeatures,
+      next.map((f) => f.name).toList(),
     );
   }
 
