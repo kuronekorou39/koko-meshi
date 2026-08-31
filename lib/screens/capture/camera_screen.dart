@@ -43,14 +43,19 @@ class _CameraScreenState extends State<CameraScreen>
   bool _isInitialized = false;
   bool _isCapturing = false;
   int _currentCameraIndex = 0;
-  FlashMode _flashMode = FlashMode.auto;
+  /// 料理を撮るのに焚くことはまずないので、既定は消しておく
+  FlashMode _flashMode = FlashMode.off;
 
   // 撮影後の確認モード
   XFile? _capturedPhoto;
   bool get _isReviewMode => _capturedPhoto != null;
 
-  // 手動回転 (0, 90, 180, 270)
+  /// 撮ったあとに掛ける回転 (0, 90, 180, 270)。
+  /// 横に構えて撮ったときのために、確認画面で直せるようにしている
   int _rotationDegrees = 0;
+
+  /// 保存の処理中。回転を焼き込む間、確定を二度押しさせない
+  bool _saving = false;
 
   // フラッシュ演出
   late AnimationController _flashAnimController;
@@ -259,18 +264,11 @@ class _CameraScreenState extends State<CameraScreen>
     try {
       final xfile = await _controller!.takePicture();
 
-      // 回転が必要なら適用、不要ならそのまま使用
-      String photoPath = xfile.path;
-      if (_rotationDegrees != 0) {
-        final tempDir = await getTemporaryDirectory();
-        final rotatedPath = p.join(tempDir.path, 'rotated_${DateTime.now().millisecondsSinceEpoch}.jpg');
-        await _saveRotated(xfile.path, rotatedPath);
-        photoPath = rotatedPath;
-      }
-
+      // 回転は撮ったものを見てから決める。ここでは触らない
       if (mounted) {
         setState(() {
-          _capturedPhoto = XFile(photoPath);
+          _capturedPhoto = xfile;
+          _rotationDegrees = 0;
           _isCapturing = false;
         });
       }
@@ -299,7 +297,10 @@ class _CameraScreenState extends State<CameraScreen>
 
   /// 撮り直し
   void _retake() {
-    setState(() => _capturedPhoto = null);
+    setState(() {
+      _capturedPhoto = null;
+      _rotationDegrees = 0;
+    });
   }
 
   /// 手動回転 (90°ずつ)
@@ -309,11 +310,33 @@ class _CameraScreenState extends State<CameraScreen>
     });
   }
 
-  /// 保存確定
-  void _confirm() {
-    if (_capturedPhoto == null) return;
+  /// 保存確定。回した分はここで画像に焼き込む
+  Future<void> _confirm() async {
+    final captured = _capturedPhoto;
+    if (captured == null || _saving) return;
+
+    var photo = captured;
+    if (_rotationDegrees != 0) {
+      setState(() => _saving = true);
+      try {
+        final tempDir = await getTemporaryDirectory();
+        final rotatedPath = p.join(
+          tempDir.path,
+          'rotated_${DateTime.now().millisecondsSinceEpoch}.jpg',
+        );
+        await _saveRotated(captured.path, rotatedPath);
+        photo = XFile(rotatedPath);
+      } catch (e) {
+        // 回せなくても撮った写真は残したいので、そのまま先へ進める
+        debugPrint('[Camera] 回転を焼き込めませんでした: $e');
+      } finally {
+        if (mounted) setState(() => _saving = false);
+      }
+    }
+
+    if (!mounted) return;
     final result = CameraCaptureResult(
-      photo: _capturedPhoto!,
+      photo: photo,
       aiEnabled: _aiEnabled,
       position: _position,
       address: _address,
@@ -342,21 +365,18 @@ class _CameraScreenState extends State<CameraScreen>
           children: [
             // メイン表示
             if (_isReviewMode)
-              // 撮影済み写真（回転適用済み）
-              Center(
-                child: Image.file(
-                  File(_capturedPhoto!.path),
-                  fit: BoxFit.contain,
-                ),
-              )
-            else if (_isInitialized)
-              // カメラプレビュー（回転付き）
+              // 撮影済み写真。回した向きのまま保存される
               Center(
                 child: RotatedBox(
                   quarterTurns: _rotationDegrees ~/ 90,
-                  child: CameraPreview(_controller!),
+                  child: Image.file(
+                    File(_capturedPhoto!.path),
+                    fit: BoxFit.contain,
+                  ),
                 ),
               )
+            else if (_isInitialized)
+              Center(child: CameraPreview(_controller!))
             else
               const Center(
                 child: CircularProgressIndicator(color: Colors.white),
@@ -394,8 +414,18 @@ class _CameraScreenState extends State<CameraScreen>
   }
 
   Widget _buildTopBar() {
+    // 確認中は、向きを直すためだけのバーにする
     if (_isReviewMode) {
-      return const SizedBox.shrink();
+      return Row(
+        children: [
+          const Spacer(),
+          _circleButton(
+            icon: Icons.rotate_90_degrees_cw_outlined,
+            label: _rotationDegrees == 0 ? null : '$_rotationDegrees°',
+            onTap: _rotate,
+          ),
+        ],
+      );
     }
     return Row(
       children: [
@@ -404,13 +434,6 @@ class _CameraScreenState extends State<CameraScreen>
           onTap: () => Navigator.pop(context),
         ),
         const Spacer(),
-        // 回転ボタン
-        _circleButton(
-          icon: Icons.rotate_right,
-          label: _rotationDegrees == 0 ? null : '$_rotationDegrees°',
-          onTap: _rotate,
-        ),
-        const SizedBox(width: 12),
         _circleButton(
           icon: _flashIcon,
           label: _flashLabel,
@@ -497,7 +520,7 @@ class _CameraScreenState extends State<CameraScreen>
               const SizedBox(width: 24),
               // 保存ボタン（大きめ）
               GestureDetector(
-                onTap: _confirm,
+                onTap: _saving ? null : _confirm,
                 child: Container(
                   width: 64,
                   height: 64,
@@ -505,11 +528,19 @@ class _CameraScreenState extends State<CameraScreen>
                     shape: BoxShape.circle,
                     color: Theme.of(context).colorScheme.primary,
                   ),
-                  child: Icon(
-                    Icons.check,
-                    color: Theme.of(context).colorScheme.onPrimary,
-                    size: 32,
-                  ),
+                  child: _saving
+                      ? Padding(
+                          padding: const EdgeInsets.all(18),
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                            color: Theme.of(context).colorScheme.onPrimary,
+                          ),
+                        )
+                      : Icon(
+                          Icons.check,
+                          color: Theme.of(context).colorScheme.onPrimary,
+                          size: 32,
+                        ),
                 ),
               ),
               const SizedBox(width: 24),
