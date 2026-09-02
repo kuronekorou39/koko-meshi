@@ -75,8 +75,11 @@ keytool -list -v -keystore ~/.android/debug.keystore \
 ### iOSアプリ制限に登録するバンドルID
 
 ```
-com.kokomeshi.kokoMeshi
+com.rou39.kokomeshi
 ```
+
+App Store 提出にあたって `com.kokomeshi.kokoMeshi`(Flutter の既定値)から
+変えた。**Google Cloud Console 側の制限も直さないと、地図が出なくなる**。
 
 ### Places のキーにアプリ制限をかけない理由
 

@@ -22,7 +22,7 @@
 	<string>manual</string>
 	<key>provisioningProfiles</key>
 	<dict>
-		<key>com.kokomeshi.kokoMeshi</key>
+		<key>com.rou39.kokomeshi</key>
 		<string>KokoMeshi AppStore</string>
 	</dict>
 	<key>compileBitcode</key>

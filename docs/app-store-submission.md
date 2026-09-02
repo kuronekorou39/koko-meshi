@@ -24,12 +24,21 @@ App Review ガイドライン 2.1 (App Completeness) は placeholder / "coming s
 
 開発時は `--dart-define=PLACE_SEARCH=true` で従来どおり出せる。
 
-### 2. Bundle ID の確認
+### 2. Bundle ID — 対応済み
 
-現状 `com.kokomeshi.kokoMeshi` (Flutter が組織名から作った既定値)。
-App Store Connect で新規 App を作るときに、この ID を登録する。
-一度提出すると変更できないので、この ID でよいか先に決める。
-OmniVerse は `com.rou39.omniverse` を使っている。
+**`com.rou39.kokomeshi`** に変更した(2026-09-02)。
+
+もとは Flutter が組織名から作った `com.kokomeshi.kokoMeshi` だったが、Bundle ID は
+持っているドメインを逆にして名乗るのが慣習で、`kokomeshi.com` は持っていない。
+OmniVerse の `com.rou39.omniverse` と揃う形にした。大文字が混じっていたのも直した。
+
+**Android の applicationId は `com.kokomeshi.koko_meshi` のまま**にしてある。
+すでに配布済みで、変えると別アプリ扱いになって上書き更新できなくなるため。
+iOS はまだ配布していないので今のうちに変えた。両者が違っていても支障はない。
+
+**Google Cloud Console の APIキー制限も直すこと。** iOS の Maps SDK キーは
+バンドルIDで制限をかけているので、古いままだと地図が出ない
+(`docs/google-maps-setup.md` 参照)。
 
 ### 3. teamID / プロビジョニングプロファイル名
 
@@ -266,23 +275,86 @@ OmniVerse と同じ組み立てで、ハマりどころもそこで踏んだも�
 
 ### 一度だけやる準備
 
-1. **Apple Developer ポータル**
-   - App ID を登録する (`com.kokomeshi.kokoMeshi`)
-   - App Store 用のプロビジョニングプロファイルを作る。名前は
-     **`KokoMeshi AppStore`**(`ExportOptions-AppStore.plist` と
-     `release.yml` の `PROVISIONING_PROFILE_SPECIFIER` がこの名前を見ている)
-   - 配布証明書は OmniVerse と同じ Apple Distribution を使い回せる
-2. **App Store Connect** でアプリを新規作成し、同じ Bundle ID を割り当てる
-3. **Secrets を登録**する (Settings > Secrets and variables > Actions)
+Apple のサイトは2つあって役割が違う。**どちらで作業しているかを常に意識する**。
 
-| Secret | 中身 | 作り方 |
+| サイト | URL | ここでやること |
 |---|---|---|
-| `IOS_CERTIFICATE_BASE64` | Apple Distribution 証明書 (.p12) | `base64 -i cert.p12` |
-| `IOS_CERTIFICATE_PASSWORD` | その .p12 のパスワード | 書き出したときに決めたもの |
-| `IOS_APPSTORE_PROFILE_BASE64` | プロビジョニングプロファイル | `base64 -i KokoMeshi_AppStore.mobileprovision` |
-| `APPSTORE_API_KEY_ID` | ASC APIキーのID | ASC > ユーザーとアクセス > 統合 |
-| `APPSTORE_API_ISSUER_ID` | 同 Issuer ID | 同上 |
-| `APPSTORE_API_PRIVATE_KEY` | `AuthKey_xxx.p8` の中身そのもの | 同上(ダウンロードは一度きり) |
+| Developer ポータル | developer.apple.com/account | App ID、証明書、プロファイル |
+| App Store Connect | appstoreconnect.apple.com | アプリの登録、審査提出、APIキー |
+
+OmniVerse で作ったものが流用できるので、**新しく作るのは3つだけ**
+(App ID / プロファイル / アプリ登録)。証明書とAPIキーは使い回す。
+
+---
+
+#### 手順1: App ID を作る (Developer ポータル)
+
+1. https://developer.apple.com/account を開く
+2. **Certificates, IDs & Profiles** をクリック
+3. 左メニューの **Identifiers**
+4. 右上の青い **＋** ボタン
+5. **App IDs** を選んで Continue
+6. **App** を選んで Continue
+7. 入力する:
+   - **Description**: `KokoMeshi` (半角英数。日本語や記号は弾かれる)
+   - **Bundle ID**: 左のプルダウンを **Explicit** にして、
+     右の欄に `com.rou39.kokomeshi`
+8. **Capabilities は何もチェックしない**。ココメシは Push もサインインも
+   使わない。カメラや位置情報は Info.plist の権限であって、ここではない
+9. Continue → Register
+
+#### 手順2: プロビジョニングプロファイルを作る (Developer ポータル)
+
+1. 左メニューの **Profiles** → 右上の **＋**
+2. **Distribution** の中の **App Store Connect** を選んで Continue
+3. **App ID**: さっき作った `KokoMeshi (com.rou39.kokomeshi)` を選ぶ
+4. **証明書**: OmniVerse で使っている **Apple Distribution** の証明書を選ぶ
+   (`Apple Distribution: ... (M5D5CQRGX8)` のような表示。複数あれば
+   有効期限が先のもの)
+5. **Provisioning Profile Name**: `KokoMeshi AppStore` と**正確に**入力する
+   - この名前は `ios/ExportOptions-AppStore.plist` と `release.yml` の
+     `PROVISIONING_PROFILE_SPECIFIER` が参照している。1文字でも違うと
+     ビルドが落ちる
+6. Generate → **Download** して `.mobileprovision` を保存
+
+#### 手順3: App Store Connect にアプリを登録する
+
+1. https://appstoreconnect.apple.com を開く
+2. **マイApp** → 左上の **＋** → **新規App**
+3. 入力する:
+   - **プラットフォーム**: iOS にチェック
+   - **名前**: `ココメシ` (ストアに出る名前。30文字以内)
+   - **プライマリ言語**: 日本語
+   - **バンドルID**: プルダウンから `com.rou39.kokomeshi` を選ぶ
+     - **出てこない場合**: 手順1が終わっていないか、反映待ち(数分)
+   - **SKU**: `kokomeshi-ios` (自分用の管理番号。何でもよいが後で変えられない)
+   - **ユーザーアクセス**: フルアクセス
+4. 作成
+
+#### 手順4: GitHub に Secrets を登録する
+
+https://github.com/kuronekorou39/koko-meshi/settings/secrets/actions
+の **New repository secret** から6つ登録する。
+
+| Secret | 中身 | どこから取るか |
+|---|---|---|
+| `IOS_CERTIFICATE_BASE64` | Distribution 証明書 (.p12) を base64 した文字列 | **OmniVerse と同じ値**。登録済みのものを流用 |
+| `IOS_CERTIFICATE_PASSWORD` | その .p12 のパスワード | 同上 |
+| `IOS_APPSTORE_PROFILE_BASE64` | 手順2の `.mobileprovision` を base64 した文字列 | **今回新規**。下のコマンドで作る |
+| `APPSTORE_API_KEY_ID` | APIキーのID (10文字程度) | **OmniVerse と同じ値**。`AuthKey_XXXX.p8` の XXXX 部分 |
+| `APPSTORE_API_ISSUER_ID` | Issuer ID (UUID形式) | 同上 |
+| `APPSTORE_API_PRIVATE_KEY` | `.p8` ファイルの中身そのもの | 同上。`-----BEGIN PRIVATE KEY-----` から始まる全文 |
+
+base64 にするコマンド (PowerShell):
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\path\to\KokoMeshi_AppStore.mobileprovision")) | Set-Clipboard
+```
+
+APIキーを新しく作りたい場合は App Store Connect の
+**ユーザーとアクセス → 統合 → App Store Connect API → チームキー** から。
+アクセス権は **App Manager** で足りる。**.p8 のダウンロードは一度きり**なので
+無くさないこと。既存のキーが使えるなら作り直す必要はない。
 
 Secrets が無いうちは各ステップが飛ぶだけで、ワークフローは失敗しない。
 
@@ -301,9 +373,13 @@ Secrets が無いうちは各ステップが飛ぶだけで、ワークフロー
 ### コード / ビルド
 - [x] 「お店の検索（準備中）」を隠す（上記「1.」）
 - [x] `PrivacyInfo.xcprivacy` の同梱をCIで確認する門を入れる
-- [ ] Bundle ID を確定して App Store Connect に登録
-- [ ] プロビジョニングプロファイルを `KokoMeshi AppStore` の名前で作る
-- [ ] iOS 用の Secrets 6件を登録
+- [x] Bundle ID を `com.rou39.kokomeshi` に確定
+- [ ] Developer ポータルで App ID を登録（手順1）
+- [ ] プロビジョニングプロファイルを `KokoMeshi AppStore` の名前で作る（手順2）
+- [ ] App Store Connect にアプリを登録（手順3）
+- [ ] iOS 用の Secrets 6件を登録（手順4）
+- [ ] **Google Cloud Console で iOS の Maps キーのバンドルID制限を
+      `com.rou39.kokomeshi` に直す**（忘れると地図が出ない）
 - [ ] ストア表示バージョンを `1.0` にする
       (pubspec を `1.0.0+N` にする。Android の表示も同時に変わる)
 - [ ] 実機で権限ダイアログの文言が出ることを確認
