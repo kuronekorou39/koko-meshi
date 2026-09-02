@@ -9,21 +9,25 @@
   その上限を上げるだけで、RAMそのものを増やすわけではない。4GB級の端末では
   宣言しても足りない可能性がある。
 
+  この2つは Apple Developer ポータルの App ID で対応する Capability を
+  有効にし、プロビジョニングプロファイルに含めないと署名が通らない:
+  - extended-virtual-addressing → "Extended Virtual Address Space"
+  - increased-memory-limit       → "Increased Memory Limit"
+  App IDの設定を変えたらプロファイルを作り直すこと(古いものは無効になる)。
+
+  increased-debugging-memory-limit は入れない。Xcodeでデバッグ接続した
+  ときだけ効くもので、App Store配布ビルドには不要なうえ、配布用プロファイルに
+  含められず archive を失敗させる。
+
   Xcode のプロジェクト(project.pbxproj)には CODE_SIGN_ENTITLEMENTS として
   Debug/Profile/Release の3構成に登録済み。ファイル参照は登録していないので
   Xcode のナビゲータには出ないが、署名には効く。
-
-  注意: Sideloadly の無料 Apple ID での署名では、プロファイルに無い宣言は
-  署名時に落とされる(=効かない)ことがある。App Store / 有料アカウントの
-  署名では有効。
 -->
 <plist version="1.0">
 <dict>
 	<key>com.apple.developer.kernel.extended-virtual-addressing</key>
 	<true/>
 	<key>com.apple.developer.kernel.increased-memory-limit</key>
-	<true/>
-	<key>com.apple.developer.kernel.increased-debugging-memory-limit</key>
 	<true/>
 </dict>
 </plist>

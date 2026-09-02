@@ -299,9 +299,19 @@ OmniVerse で作ったものが流用できるので、**新しく作るのは3�
    - **Description**: `KokoMeshi` (半角英数。日本語や記号は弾かれる)
    - **Bundle ID**: 左のプルダウンを **Explicit** にして、
      右の欄に `com.rou39.kokomeshi`
-8. **Capabilities は何もチェックしない**。ココメシは Push もサインインも
-   使わない。カメラや位置情報は Info.plist の権限であって、ここではない
+8. **Capabilities で次の2つにチェックを入れる**(端末内AIがメモリ上限の
+   引き上げを要求するため。無いと archive が
+   "Provisioning profile doesn't include ... entitlements" で落ちる):
+   - **Extended Virtual Address Space**
+   - **Increased Memory Limit**
+
+   Push・サインイン・iCloud などは使わないのでチェックしない。カメラや
+   位置情報は Info.plist の権限であって、ここには出てこない
 9. Continue → Register
+
+> **App ID の Capability を後から変えた場合**、既存のプロビジョニング
+> プロファイルは無効になる。手順2でプロファイルを作り直し、base64 も取り直して
+> `IOS_APPSTORE_PROFILE_BASE64` を更新すること。
 
 #### 手順2: プロビジョニングプロファイルを作る (Developer ポータル)
 
