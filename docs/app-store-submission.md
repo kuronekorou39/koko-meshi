@@ -39,8 +39,13 @@ OmniVerse は `com.rou39.omniverse` を使っている。
 
 ### 4. バージョン
 
-`pubspec.yaml` は `0.9.4+17`。**ストア表示の Version は `1.0`** にする
-(ビルド番号 17 はそのままでよい)。
+ストア表示の Version は `1.0` にしたい。`ios/Runner/Info.plist` の
+`CFBundleShortVersionString` は `$(FLUTTER_BUILD_NAME)` を見ているので、
+**提出するときに `pubspec.yaml` を `1.0.0+N` にする**のが素直
+(Android の表示も同時に 1.0.0 になる。初回ストアリリースなので自然)。
+
+ビルド番号(`+N`)は App Store Connect 側で一意である必要があり、同じ組み合わせは
+二度受け付けられない。差し戻されて出し直すときも必ず上げること。
 
 ---
 
@@ -239,16 +244,70 @@ App Store Connect の「App のプライバシー」で聞かれる質問への�
 
 ---
 
+---
+
+## 提出の流れ (CI)
+
+手元は Windows で Xcode が無いので、**署名も書き出しもアップロードも GitHub Actions
+でやる**。`v*` タグを push すると `release.yml` の `ios-appstore` ジョブが動き、
+署名済み IPA を作って App Store Connect まで送る。そのあと App Store Connect で
+「審査に提出」を押すのは手作業。
+
+OmniVerse と同じ組み立てで、ハマりどころもそこで踏んだものを引き継いでいる:
+
+- **`macos-26` ランナーを固定**。Apple の要件(2026-04-28以降)で iOS 26 SDK が要る。
+  `macos-latest` だと世代交代のときに黙って古いSDKになりうる
+- **`flutter build ios --no-codesign` を archive の前に必ず走らせる**。ここが
+  ephemeral のプラグイン統合をやっていて、飛ばすと archive が落ちる
+- **署名設定は `ios/Flutter/Release.xcconfig` に追記する**。`xcodebuild` の引数で
+  渡すとワークスペース内の全ターゲットに効き、パッケージのリソースバンドルが
+  "does not support provisioning profiles" で archive を失敗させる
+- **`.p8` は CRLF を落として末尾に改行を付ける**。altool は PEM の解釈が厳しい
+
+### 一度だけやる準備
+
+1. **Apple Developer ポータル**
+   - App ID を登録する (`com.kokomeshi.kokoMeshi`)
+   - App Store 用のプロビジョニングプロファイルを作る。名前は
+     **`KokoMeshi AppStore`**(`ExportOptions-AppStore.plist` と
+     `release.yml` の `PROVISIONING_PROFILE_SPECIFIER` がこの名前を見ている)
+   - 配布証明書は OmniVerse と同じ Apple Distribution を使い回せる
+2. **App Store Connect** でアプリを新規作成し、同じ Bundle ID を割り当てる
+3. **Secrets を登録**する (Settings > Secrets and variables > Actions)
+
+| Secret | 中身 | 作り方 |
+|---|---|---|
+| `IOS_CERTIFICATE_BASE64` | Apple Distribution 証明書 (.p12) | `base64 -i cert.p12` |
+| `IOS_CERTIFICATE_PASSWORD` | その .p12 のパスワード | 書き出したときに決めたもの |
+| `IOS_APPSTORE_PROFILE_BASE64` | プロビジョニングプロファイル | `base64 -i KokoMeshi_AppStore.mobileprovision` |
+| `APPSTORE_API_KEY_ID` | ASC APIキーのID | ASC > ユーザーとアクセス > 統合 |
+| `APPSTORE_API_ISSUER_ID` | 同 Issuer ID | 同上 |
+| `APPSTORE_API_PRIVATE_KEY` | `AuthKey_xxx.p8` の中身そのもの | 同上(ダウンロードは一度きり) |
+
+Secrets が無いうちは各ステップが飛ぶだけで、ワークフローは失敗しない。
+
+### 毎回やること
+
+1. `pubspec.yaml` の version を上げる。**ビルド番号(`+N`)は必ず増やす**。
+   App Store Connect は同じ (バージョン, ビルド番号) の組を受け付けないので、
+   審査で差し戻されて出し直すときも上げること
+2. タグを打って push する (`git tag v1.0.0 && git push origin v1.0.0`)
+3. Actions が通ったら App Store Connect でビルドを選び、審査に提出する
+
+---
+
 ## 提出チェックリスト
 
 ### コード / ビルド
-- [ ] 「お店の検索（準備中）」を隠すか判断する（上記「1.」）
+- [x] 「お店の検索（準備中）」を隠す（上記「1.」）
+- [x] `PrivacyInfo.xcprivacy` の同梱をCIで確認する門を入れる
 - [ ] Bundle ID を確定して App Store Connect に登録
-- [ ] `ExportOptions-AppStore.plist` の teamID / プロファイル名を実際のものに合わせる
+- [ ] プロビジョニングプロファイルを `KokoMeshi AppStore` の名前で作る
+- [ ] iOS 用の Secrets 6件を登録
 - [ ] ストア表示バージョンを `1.0` にする
-- [ ] `PrivacyInfo.xcprivacy` が `Runner.app` に入っていることを確認
-      （`unzip -l kokomeshi.ipa | grep xcprivacy`）
+      (pubspec を `1.0.0+N` にする。Android の表示も同時に変わる)
 - [ ] 実機で権限ダイアログの文言が出ることを確認
+- [ ] 端末内AIが iPhone で動くことを確認（2026-09-02: 動作を確認済み）
 
 ### App Store Connect
 - [ ] プロモーション用テキスト / 概要 / キーワード / 著作権
