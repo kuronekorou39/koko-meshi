@@ -106,6 +106,9 @@ jobs:
         with:
           files: ${{ env.APK_NAME }}
           generate_release_notes: true
+          # -rc などの試し打ちタグは prerelease にする。そうしないと最新版扱いに
+          # なり、アプリの「更新があります」が試し打ちを指してしまう
+          prerelease: ${{ contains(github.ref_name, '-') }}
 
       # タグ以外(手動起動)ではReleaseを作らないので、確認用に成果物として残す。
       # タグ付きのときは上でReleaseに恒久的に添付されるため、同じAPKを成果物
@@ -268,3 +271,6 @@ jobs:
         with:
           files: ${{ env.IPA_NAME }}
           generate_release_notes: true
+          # -rc などの試し打ちタグは prerelease にする。そうしないと最新版扱いに
+          # なり、アプリの「更新があります」が試し打ちを指してしまう
+          prerelease: ${{ contains(github.ref_name, '-') }}
