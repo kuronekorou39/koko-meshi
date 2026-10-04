@@ -234,7 +234,7 @@ App Store Connect の「App のプライバシー」で聞かれる質問への�
 
 必須デバイス: **iPhone 6.9"** (Pro Max 系) と **iPad 13"**。各最大10枚。
 
-撮影候補（`docs/promo-video.md` のシーンと重なる）:
+撮影候補（紹介動画のシーンと重なる。シナリオは別リポジトリ promo-studio の `koko-meshi/promo-video.md`）:
 
 | 順 | 画面 | メインコピー | サブコピー |
 |---|---|---|---|
