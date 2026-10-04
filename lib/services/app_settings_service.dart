@@ -46,6 +46,20 @@ enum FunFeature {
   final String hint;
 }
 
+/// 初めての人に一度だけ見せる操作の案内。
+/// 増やしすぎると読まれなくなるので、無いと先へ進めないものだけにする。
+enum CoachTip {
+  /// 記録がまだ無いときに、撮影ボタンを教える
+  camera('coach_tip_camera_seen'),
+
+  /// 記録ができたあとに、表示の切り替えを教える
+  viewMode('coach_tip_view_mode_seen');
+
+  const CoachTip(this.prefsKey);
+
+  final String prefsKey;
+}
+
 class AppSettings {
   AppSettings._();
 
@@ -133,6 +147,16 @@ class AppSettings {
 
   static Future<void> setExportExifGps(bool enabled) async {
     await _prefs?.setBool(_keyExportExifGps, enabled);
+  }
+
+  // --- 操作の案内 ---
+
+  /// その案内をもう見せたか。一度見せたら二度と出さない
+  static bool isCoachTipSeen(CoachTip tip) =>
+      _prefs?.getBool(tip.prefsKey) ?? false;
+
+  static Future<void> markCoachTipSeen(CoachTip tip) async {
+    await _prefs?.setBool(tip.prefsKey, true);
   }
 
   // --- 本文フォント ---

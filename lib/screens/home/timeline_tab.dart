@@ -11,10 +11,12 @@ import '../../models/meal_photo.dart';
 import '../../providers/meal_providers.dart';
 import '../../theme/app_theme.dart';
 import '../../services/ai_analysis_service.dart';
+import '../../services/app_settings_service.dart';
 import '../../services/meal_stats.dart';
 import '../../services/update_service.dart';
 import '../../services/photo_service.dart';
 import '../../widgets/app_logo.dart';
+import '../../widgets/coach_mark.dart';
 import '../../widgets/meal_card.dart';
 import '../../widgets/meal_grid_tile.dart';
 import 'diet_advice_screen.dart';
@@ -62,6 +64,12 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
   /// 出ている新しいバージョン(無ければ null)
   AppUpdate? _update;
 
+  /// 表示切替のボタン。案内で囲む相手
+  final _viewModeKey = GlobalKey();
+
+  /// 表示切替の案内を、いま出そうとしているか(二重に出さないため)
+  bool _viewModeTipPending = false;
+
   @override
   void initState() {
     super.initState();
@@ -69,6 +77,29 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
     // カレンダーを開いたまま解析が終わったときに、日付セルの合計が
     // 古いままにならないようにする(カード側は各アイテムが購読している)
     AiAnalysisService.resultsVersion.addListener(_loadPhotosForStats);
+  }
+
+  /// 記録ができたのに表示を切り替えたことが無い人へ、切り替えられることを
+  /// 一度だけ教える。撮影や確認の画面が上に載っている間は出さず、一覧に
+  /// 戻ってきてから出す(一覧を描き直すたびに呼ばれるので、次の機会に出る)。
+  void _maybeShowViewModeTip() {
+    if (_viewModeTipPending || AppSettings.isCoachTipSeen(CoachTip.viewMode)) {
+      return;
+    }
+    _viewModeTipPending = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      try {
+        if (!mounted || ModalRoute.of(context)?.isCurrent != true) return;
+        final shown = await showCoachMark(
+          context,
+          targetKey: _viewModeKey,
+          message: '表示を切り替えられます。\nリスト・グリッド・カレンダーの3つから選べます。',
+        );
+        if (shown) await AppSettings.markCoachTipSeen(CoachTip.viewMode);
+      } finally {
+        _viewModeTipPending = false;
+      }
+    });
   }
 
   @override
@@ -172,6 +203,7 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
           ),
           // 表示モード切替
           IconButton(
+            key: _viewModeKey,
             icon: Icon(_viewModeIcon),
             onPressed: _cycleViewMode,
             tooltip: _viewModeLabel,
@@ -191,6 +223,7 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
               error: (e, _) => Center(child: Text('エラー: $e')),
               data: (mealLogs) {
                 if (mealLogs.isEmpty) return _buildEmptyState();
+                _maybeShowViewModeTip();
 
                 return switch (_viewMode) {
                   ViewMode.list => _buildListView(mealLogs),
@@ -227,6 +260,8 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
   }
 
   void _cycleViewMode() {
+    // 自分で切り替えられた人に、あとから案内を出さない
+    AppSettings.markCoachTipSeen(CoachTip.viewMode);
     final leavingCalendar = _viewMode == ViewMode.calendar;
     setState(() {
       _viewMode = ViewMode.values[(_viewMode.index + 1) % ViewMode.values.length];

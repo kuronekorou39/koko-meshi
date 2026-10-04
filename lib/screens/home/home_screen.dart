@@ -12,8 +12,10 @@ import '../../models/meal_type.dart';
 import '../../providers/map_focus_providers.dart';
 import '../../providers/meal_providers.dart';
 import '../../services/ai_analysis_service.dart';
+import '../../services/app_settings_service.dart';
 import 'package:geolocator/geolocator.dart';
 import '../../services/photo_service.dart';
+import '../../widgets/coach_mark.dart';
 import '../capture/camera_screen.dart';
 import 'timeline_tab.dart';
 import 'map_tab.dart';
@@ -29,6 +31,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   static const _uuid = Uuid();
   int _currentIndex = 0;
 
+  /// 撮影ボタン。初回の案内で囲む相手
+  final _cameraKey = GlobalKey();
+
   late final _tabs = [
     TimelineTab(onLibraryPressed: _onLibraryPressed),
     const MapTab(),
@@ -40,6 +45,31 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     // アプリ起動時、未解析(pending)のまま残っている写真があれば解析を回す
     // (モデルDL前に保存した写真などが「解析中」のまま止まらないように)
     _runBackgroundAi();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _showCameraTip());
+  }
+
+  /// 記録が1件も無い人に、どこから撮るのかを一度だけ教える
+  Future<void> _showCameraTip() async {
+    if (AppSettings.isCoachTipSeen(CoachTip.camera)) return;
+    final List<MealLog> mealLogs;
+    try {
+      mealLogs = await ref.read(mealLogsProvider.future);
+    } catch (_) {
+      return;
+    }
+    if (!mounted) return;
+    // すでに記録がある人(更新や復元で入ってきた人)には要らない
+    if (mealLogs.isNotEmpty) {
+      await AppSettings.markCoachTipSeen(CoachTip.camera);
+      return;
+    }
+    if (ModalRoute.of(context)?.isCurrent != true) return;
+    final shown = await showCoachMark(
+      context,
+      targetKey: _cameraKey,
+      message: 'ここから撮影してね！\n食事を撮るだけで、記録が残ります。',
+    );
+    if (shown) await AppSettings.markCoachTipSeen(CoachTip.camera);
   }
 
   @override
@@ -57,17 +87,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex == 0 ? 0 : 2,
         onDestinationSelected: _onDestinationSelected,
-        destinations: const [
-          NavigationDestination(
+        destinations: [
+          const NavigationDestination(
             icon: Icon(Icons.receipt_long_outlined),
             selectedIcon: Icon(Icons.receipt_long),
             label: '記録',
           ),
           NavigationDestination(
-            icon: _CameraDestinationIcon(),
+            icon: _CameraDestinationIcon(key: _cameraKey),
             label: '撮影',
           ),
-          NavigationDestination(
+          const NavigationDestination(
             icon: Icon(Icons.map_outlined),
             selectedIcon: Icon(Icons.map),
             label: 'マップ',
@@ -285,7 +315,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
 /// 中央「撮影」用の主ボタン: 漆色(primary)の円形地に白のカメラアイコン
 class _CameraDestinationIcon extends StatelessWidget {
-  const _CameraDestinationIcon();
+  const _CameraDestinationIcon({super.key});
 
   @override
   Widget build(BuildContext context) {
