@@ -384,16 +384,16 @@ Secrets が無いうちは各ステップが飛ぶだけで、ワークフロー
 - [x] 「お店の検索（準備中）」を隠す（上記「1.」）
 - [x] `PrivacyInfo.xcprivacy` の同梱をCIで確認する門を入れる
 - [x] Bundle ID を `com.rou39.kokomeshi` に確定
-- [ ] Developer ポータルで App ID を登録（手順1）
-- [ ] プロビジョニングプロファイルを `KokoMeshi AppStore` の名前で作る（手順2）
-- [ ] App Store Connect にアプリを登録（手順3）
-- [ ] iOS 用の Secrets 6件を登録（手順4）
+- [x] Developer ポータルで App ID を登録（手順1）
+- [x] プロビジョニングプロファイルを `KokoMeshi AppStore` の名前で作る（手順2）
+- [x] App Store Connect にアプリを登録（手順3）
+- [x] iOS 用の Secrets 6件を登録（手順4）
 - [ ] **Google Cloud Console で iOS の Maps キーのバンドルID制限を
       `com.rou39.kokomeshi` に直す**（忘れると地図が出ない）
 - [ ] ストア表示バージョンを `1.0` にする
       (pubspec を `1.0.0+N` にする。Android の表示も同時に変わる)
 - [ ] 実機で権限ダイアログの文言が出ることを確認
-- [ ] 端末内AIが iPhone で動くことを確認（2026-09-02: 動作を確認済み）
+- [x] 端末内AIが iPhone で動くことを確認（2026-09-02: 動作を確認済み）
 
 ### App Store Connect
 - [ ] プロモーション用テキスト / 概要 / キーワード / 著作権
@@ -406,4 +406,4 @@ Secrets が無いうちは各ステップが飛ぶだけで、ワークフロー
 - [ ] スクリーンショット（iPhone 6.9" / iPad 13"）
 - [ ] 輸出コンプライアンス（`ITSAppUsesNonExemptEncryption=false` 済み。
       アップロード時に聞かれなくなる）
-- [ ] ビルドをアップロード（Xcode Organizer または Transporter）
+- [x] ビルドをアップロード（2026-09-02: CI の v0.11.2-rc6 で送信済み。提出時は 1.0 で送り直す）
