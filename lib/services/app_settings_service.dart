@@ -141,9 +141,10 @@ class AppSettings {
 
   /// カメラロールへ保存する写真に、記録の位置情報をEXIFで書き込むか。
   ///
-  /// 既定はオフ。書き出した写真は端末の外に出ていく(共有・バックアップ)ので、
-  /// 食べた場所が一緒に付いていくことを選んでいない利用者に黙って付けない。
-  static bool get exportExifGps => _prefs?.getBool(_keyExportExifGps) ?? false;
+  /// 既定はオン。ただし黙っては付けない。オンのときは保存のたびに付けるかを
+  /// 尋ねる(写真を誰かに渡すと、食べた場所も一緒に渡ることがあるため)。
+  /// オフにすると尋ねずに、いつも付けないで保存する。
+  static bool get exportExifGps => _prefs?.getBool(_keyExportExifGps) ?? true;
 
   static Future<void> setExportExifGps(bool enabled) async {
     await _prefs?.setBool(_keyExportExifGps, enabled);
@@ -157,6 +158,16 @@ class AppSettings {
 
   static Future<void> markCoachTipSeen(CoachTip tip) async {
     await _prefs?.setBool(tip.prefsKey, true);
+  }
+
+  static const _keyExportGpsOffHintShown = 'export_gps_off_hint_shown';
+
+  /// 「付けずに保存」を選んだ人に、設定でオフにできることをもう伝えたか
+  static bool get exportGpsOffHintShown =>
+      _prefs?.getBool(_keyExportGpsOffHintShown) ?? false;
+
+  static Future<void> markExportGpsOffHintShown() async {
+    await _prefs?.setBool(_keyExportGpsOffHintShown, true);
   }
 
   // --- 本文フォント ---

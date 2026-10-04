@@ -44,8 +44,71 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
     super.dispose();
   }
 
+  /// 位置情報を付けて保存するかを尋ねる。付けるなら true、付けないなら false、
+  /// 保存そのものをやめるなら null
+  Future<bool?> _askIncludeGps() {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('位置情報を付けて保存しますか？'),
+        content: const Text(
+          '付けると、写真アプリの地図にこの写真が出るようになります。\n\n'
+          '保存した写真を誰かに渡すと、食べた場所も一緒に伝わることがあります。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('キャンセル'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('付けずに保存'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('付けて保存'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 「付けずに保存」を初めて選んだ人に、毎回尋ねられずに済む方法を伝える
+  Future<void> _showGpsOffHint() async {
+    await AppSettings.markExportGpsOffHintShown();
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('位置情報を付けずに保存しました'),
+        content: const Text(
+          'いつも付けない場合は、設定の「その他」にある'
+          '「位置情報を付けて保存する」をオフにすると、この確認は出なくなります。',
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _downloadPhoto() async {
     final photo = widget.photos[_currentIndex];
+
+    // 付ける位置情報がある写真だけ尋ねる。設定がオフなら尋ねずに付けない
+    var includeGps = false;
+    final hasLocation = photo.latitude != null && photo.longitude != null;
+    if (AppSettings.exportExifGps && hasLocation) {
+      final answer = await _askIncludeGps();
+      if (answer == null || !mounted) return;
+      includeGps = answer;
+    }
+    final declinedGps =
+        AppSettings.exportExifGps && hasLocation && !includeGps;
+
     setState(() => _downloading = true);
 
     try {
@@ -73,7 +136,7 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
         shotAt: photo.shotAt,
         latitude: photo.latitude,
         longitude: photo.longitude,
-        includeGps: AppSettings.exportExifGps,
+        includeGps: includeGps,
       );
 
       try {
@@ -86,6 +149,9 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('カメラロールに保存しました')),
         );
+      }
+      if (declinedGps && !AppSettings.exportGpsOffHintShown) {
+        await _showGpsOffHint();
       }
     } on GalException catch (e) {
       if (mounted) {
