@@ -7,12 +7,22 @@ import '../theme/app_theme.dart';
 /// どこを押しても閉じる。説明を読ませるためのもので、操作を強制しない
 /// (囲んだ先を押しても、その機能は動かさずに閉じるだけ)。
 ///
-/// [targetKey] の相手がまだ画面に無いときは何もせず false を返す。
+/// 画面が出た直後には出さない。まず画面そのものを見てもらい、[delay] だけ
+/// 置いてからゆっくり浮かび上がらせる。
+///
+/// 待っている間に別の画面が上に載ったときや、[targetKey] の相手が画面に
+/// 無いときは、何もせず false を返す。
 Future<bool> showCoachMark(
   BuildContext context, {
   required GlobalKey targetKey,
   required String message,
+  Duration delay = const Duration(seconds: 2),
 }) async {
+  if (delay > Duration.zero) await Future<void>.delayed(delay);
+  if (!context.mounted || ModalRoute.of(context)?.isCurrent != true) {
+    return false;
+  }
+
   final box = targetKey.currentContext?.findRenderObject() as RenderBox?;
   if (box == null || !box.attached || !box.hasSize) return false;
   final target = box.localToGlobal(Offset.zero) & box.size;
@@ -20,8 +30,8 @@ Future<bool> showCoachMark(
   await Navigator.of(context, rootNavigator: true).push(
     PageRouteBuilder<void>(
       opaque: false,
-      transitionDuration: const Duration(milliseconds: 200),
-      reverseTransitionDuration: const Duration(milliseconds: 150),
+      transitionDuration: const Duration(milliseconds: 500),
+      reverseTransitionDuration: const Duration(milliseconds: 200),
       pageBuilder: (context, animation, secondaryAnimation) => FadeTransition(
         opacity: animation,
         child: _CoachMarkOverlay(target: target, message: message),

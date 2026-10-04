@@ -89,7 +89,7 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
     _viewModeTipPending = true;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       try {
-        if (!mounted || ModalRoute.of(context)?.isCurrent != true) return;
+        if (!mounted) return;
         final shown = await showCoachMark(
           context,
           targetKey: _viewModeKey,

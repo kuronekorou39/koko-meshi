@@ -28,6 +28,10 @@ void main() {
       var closed = false;
       showCoachMark(context, targetKey: targetKey, message: 'ここから撮影してね！')
           .then((_) => closed = true);
+      // 画面が出てすぐには出さない
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('ここから撮影してね！'), findsNothing);
+      await tester.pump(const Duration(seconds: 1));
       await tester.pumpAndSettle();
       expect(find.text('ここから撮影してね！'), findsOneWidget);
       expect(closed, isFalse);
@@ -45,7 +49,12 @@ void main() {
       ]) {
         await tester.pumpWidget(app(alignment: alignment));
         final context = tester.element(find.byType(Scaffold));
-        showCoachMark(context, targetKey: targetKey, message: '説明');
+        showCoachMark(
+          context,
+          targetKey: targetKey,
+          message: '説明',
+          delay: Duration.zero,
+        );
         await tester.pumpAndSettle();
 
         final bubble = tester.getRect(find.text('説明'));
@@ -66,7 +75,12 @@ void main() {
           app(alignment: Alignment.center, withTarget: false));
       final context = tester.element(find.byType(Scaffold));
       expect(
-        await showCoachMark(context, targetKey: targetKey, message: '説明'),
+        await showCoachMark(
+          context,
+          targetKey: targetKey,
+          message: '説明',
+          delay: Duration.zero,
+        ),
         isFalse,
       );
     });

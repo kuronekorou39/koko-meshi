@@ -63,7 +63,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       await AppSettings.markCoachTipSeen(CoachTip.camera);
       return;
     }
-    if (ModalRoute.of(context)?.isCurrent != true) return;
     final shown = await showCoachMark(
       context,
       targetKey: _cameraKey,
