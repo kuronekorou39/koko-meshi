@@ -9,15 +9,25 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// 新しいバージョンが出ていないか調べる。
 ///
-/// ストア配布ではないので、更新の通知役がいない。利用者は新版が出たことを
-/// 知る手段が無いままになる。GitHub Releases の最新タグと自分のバージョンを
-/// 比べて、アプリ側から知らせる。
+/// Android はストア配布ではないので、更新の通知役がいない。利用者は新版が
+/// 出たことを知る手段が無いままになる。GitHub Releases の最新タグと自分の
+/// バージョンを比べて、アプリ側から知らせる。
+///
+/// iOS は App Store で配る。更新そのものはストアが届けるが、自動アップデートを
+/// 切っている人には気づく手段が無いので、ストアに出ている版と比べて知らせる。
+/// 行き先は App Store のページにする(ストアの外へ更新を取りに行かせない)。
 class UpdateService {
   UpdateService._();
 
-  /// 最新リリースの取得元。配布場所を移すときはここを変える
+  /// 最新リリースの取得元(Android)。配布場所を移すときはここを変える
   static const _latestReleaseApi =
       'https://api.github.com/repos/kuronekorou39/koko-meshi/releases/latest';
+
+  /// App Store に出ている版の取得元(iOS)。認証は要らない。
+  /// バンドルIDは実行時に取らずに固定する。再署名で入れたビルドは
+  /// バンドルIDが書き換わっていることがあり、それだと引き当たらない
+  static const _appStoreLookupApi =
+      'https://itunes.apple.com/lookup?bundleId=com.rou39.kokomeshi&country=jp';
 
   /// 調べる間隔。起動のたびに叩くとGitHubのレート制限(未認証60回/時)に
   /// 近づくうえ、更新はそう頻繁には出ない
@@ -62,10 +72,11 @@ class UpdateService {
     }
 
     try {
+      final ios = Platform.isIOS;
       final response = await http
           .get(
-            Uri.parse(_latestReleaseApi),
-            headers: {'Accept': 'application/vnd.github+json'},
+            Uri.parse(ios ? _appStoreLookupApi : _latestReleaseApi),
+            headers: {if (!ios) 'Accept': 'application/vnd.github+json'},
           )
           .timeout(_timeout);
 
@@ -77,16 +88,21 @@ class UpdateService {
       }
 
       final data = jsonDecode(response.body) as Map<String, dynamic>;
-      final tag = data['tag_name'] as String?;
-      final url = data['html_url'] as String?;
-      if (tag == null || url == null) return cached();
+      final latest = ios ? parseAppStoreLookup(data) : parseGithubRelease(data);
 
       await prefs.setInt(
         _keyLastChecked,
         DateTime.now().millisecondsSinceEpoch,
       );
-      await prefs.setString(_keyLatestVersion, normalize(tag));
-      await prefs.setString(_keyLatestUrl, url);
+      if (latest == null) {
+        // 問い合わせは通ったが、出ている版が無い(ストア公開前など)。
+        // 前の結果を残すと、もう無い版を知らせ続けてしまう
+        await prefs.remove(_keyLatestVersion);
+        await prefs.remove(_keyLatestUrl);
+        return null;
+      }
+      await prefs.setString(_keyLatestVersion, normalize(latest.version));
+      await prefs.setString(_keyLatestUrl, latest.url);
       return cached();
     } on TimeoutException {
       return cached();
@@ -96,6 +112,29 @@ class UpdateService {
       debugPrint('[Update] failed: $e');
       return cached();
     }
+  }
+
+  /// GitHub の「最新リリース」の応答から、版とリリースページを取り出す
+  static ({String version, String url})? parseGithubRelease(
+      Map<String, dynamic> data) {
+    final tag = data['tag_name'];
+    final url = data['html_url'];
+    if (tag is! String || url is! String) return null;
+    return (version: tag, url: url);
+  }
+
+  /// App Store の検索結果から、出ている版とストアのページを取り出す。
+  /// 公開前は結果が0件で返ってくるので、そのときは null
+  static ({String version, String url})? parseAppStoreLookup(
+      Map<String, dynamic> data) {
+    final results = data['results'];
+    if (results is! List || results.isEmpty) return null;
+    final app = results.first;
+    if (app is! Map) return null;
+    final version = app['version'];
+    final url = app['trackViewUrl'];
+    if (version is! String || url is! String) return null;
+    return (version: version, url: url);
   }
 
   /// このバージョンの知らせを閉じる。次の版が出るまで出さない
@@ -143,7 +182,8 @@ class AppUpdate {
 
   final String version;
 
-  /// リリースページ。ここからAPKを落としてもらう
+  /// 更新を取りに行く先。Android はリリースページ(APKを落としてもらう)、
+  /// iOS は App Store のページ
   final String url;
 
   /// 利用者がこのバージョンの知らせを閉じたか

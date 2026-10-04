@@ -42,4 +42,56 @@ void main() {
       expect(UpdateService.isNewer('こわれたタグ', '0.8.0'), isFalse);
     });
   });
+
+  group('parseGithubRelease', () {
+    test('タグとリリースページを取り出す', () {
+      final latest = UpdateService.parseGithubRelease({
+        'tag_name': 'v0.12.0',
+        'html_url': 'https://github.com/kuronekorou39/koko-meshi/releases/tag/v0.12.0',
+      });
+      expect(latest?.version, 'v0.12.0');
+      expect(latest?.url, contains('/releases/tag/v0.12.0'));
+    });
+
+    test('欠けていれば null', () {
+      expect(UpdateService.parseGithubRelease({'tag_name': 'v0.12.0'}), isNull);
+      expect(UpdateService.parseGithubRelease({}), isNull);
+    });
+  });
+
+  group('parseAppStoreLookup', () {
+    test('出ている版とストアのページを取り出す', () {
+      final latest = UpdateService.parseAppStoreLookup({
+        'resultCount': 1,
+        'results': [
+          {
+            'version': '1.0.1',
+            'trackViewUrl': 'https://apps.apple.com/jp/app/id0000000000',
+          },
+        ],
+      });
+      expect(latest?.version, '1.0.1');
+      expect(latest?.url, startsWith('https://apps.apple.com/'));
+    });
+
+    test('公開前(0件)なら null', () {
+      expect(
+        UpdateService.parseAppStoreLookup({'resultCount': 0, 'results': []}),
+        isNull,
+      );
+    });
+
+    test('形が違っても落ちない', () {
+      expect(UpdateService.parseAppStoreLookup({}), isNull);
+      expect(UpdateService.parseAppStoreLookup({'results': 'x'}), isNull);
+      expect(
+        UpdateService.parseAppStoreLookup({
+          'results': [
+            {'version': 1.0},
+          ],
+        }),
+        isNull,
+      );
+    });
+  });
 }
