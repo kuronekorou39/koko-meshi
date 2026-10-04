@@ -2,23 +2,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:package_info_plus/package_info_plus.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../config/features.dart';
 import '../../providers/app_settings_providers.dart';
 import '../../providers/meal_providers.dart';
 import '../../services/app_settings_service.dart';
 import '../../services/backup_service.dart';
-import '../../services/update_service.dart';
 import '../../theme/app_theme.dart';
 import 'analysis_bench_screen.dart';
 import 'font_settings_screen.dart';
 import 'settings_widgets.dart';
 
 /// 設定の「その他」。毎日は触らない項目をここに集めて、設定の最初の画面を
-/// AIと保存した場所だけにする。
+/// AIと保存した場所(とバージョン)だけにする。
 class OtherSettingsScreen extends ConsumerStatefulWidget {
   const OtherSettingsScreen({super.key});
 
@@ -28,53 +25,18 @@ class OtherSettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _OtherSettingsScreenState extends ConsumerState<OtherSettingsScreen> {
-  String _appVersion = '';
-
-  /// 出ている新しいバージョン(無ければ null)
-  AppUpdate? _update;
-  bool _checkingUpdate = false;
-
   /// カメラロールに保存する写真へ位置情報を埋め込むか
-  bool _exportExifGps = false;
+  bool _exportExifGps = true;
 
   @override
   void initState() {
     super.initState();
     _exportExifGps = AppSettings.exportExifGps;
-    _loadVersion();
-    _checkUpdate();
   }
 
   Future<void> _setExportExifGps(bool enabled) async {
     await AppSettings.setExportExifGps(enabled);
     if (mounted) setState(() => _exportExifGps = enabled);
-  }
-
-  Future<void> _loadVersion() async {
-    final info = await PackageInfo.fromPlatform();
-    if (mounted) setState(() => _appVersion = info.version);
-  }
-
-  Future<void> _checkUpdate({bool force = false}) async {
-    if (_checkingUpdate) return;
-    setState(() => _checkingUpdate = true);
-    final update = await UpdateService.check(force: force);
-    if (!mounted) return;
-    setState(() {
-      _update = update;
-      _checkingUpdate = false;
-    });
-    if (force && update == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('お使いのバージョンが最新です')),
-      );
-    }
-  }
-
-  Future<void> _openUpdatePage() async {
-    final update = _update;
-    if (update == null) return;
-    await launchUrl(Uri.parse(update.url), mode: LaunchMode.externalApplication);
   }
 
   // ─── バックアップと移行 ───
@@ -278,9 +240,10 @@ class _OtherSettingsScreenState extends ConsumerState<OtherSettingsScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
               child: Text(
-                'オフのときは、撮影日時だけを埋め込みます。'
-                '保存した写真を誰かに渡すと、食べた場所も一緒に渡ることに'
-                'なるため、既定ではオフにしています。',
+                'オンのときは、保存のたびに位置情報を付けるかを確認します。'
+                'オフにすると確認せず、撮影日時だけを埋め込みます。'
+                '位置情報を付けた写真を誰かに渡すと、食べた場所も一緒に'
+                '伝わることがあります。',
                 style: TextStyle(fontSize: 12, color: tokens.textMuted),
               ),
             ),
@@ -321,37 +284,6 @@ class _OtherSettingsScreenState extends ConsumerState<OtherSettingsScreen> {
               ),
             ]),
           ],
-
-          // ストア配布ではないので、更新は自分から知らせるしかない
-          Padding(
-            padding: const EdgeInsets.only(top: 32),
-            child: Center(
-              child: Column(
-                children: [
-                  Text(
-                    'ココメシ v$_appVersion',
-                    style: TextStyle(fontSize: 12, color: tokens.textFaint),
-                  ),
-                  const SizedBox(height: 6),
-                  if (_update != null)
-                    FilledButton.tonalIcon(
-                      onPressed: _openUpdatePage,
-                      icon: const Icon(Icons.system_update_alt, size: 16),
-                      label: Text('v${_update!.version} が出ています'),
-                    )
-                  else
-                    TextButton(
-                      onPressed:
-                          _checkingUpdate ? null : () => _checkUpdate(force: true),
-                      child: Text(
-                        _checkingUpdate ? '確認中…' : '更新を確認',
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
         ],
       ),
     );

@@ -1,6 +1,8 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:geocoding/geocoding.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../database/local_database.dart';
 import '../../models/saved_place.dart';
@@ -14,7 +16,7 @@ import '../../theme/app_theme.dart';
 import 'other_settings_screen.dart';
 import 'settings_widgets.dart';
 
-/// 設定の最初の画面。AIと保存した場所だけを置き、残りは「その他」へ送る。
+/// 設定の最初の画面。AIと保存した場所、バージョンだけを置き、残りは「その他」へ送る。
 /// スクロールせずに見渡せる量に収めるため。
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -26,8 +28,11 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   List<SavedPlace> _savedPlaces = [];
 
-  /// 新しいバージョンが出ているか。「その他」の行で知らせる
-  bool _hasUpdate = false;
+  String _appVersion = '';
+
+  /// 出ている新しいバージョン(無ければ null)
+  AppUpdate? _update;
+  bool _checkingUpdate = false;
 
   /// AIで自動解析するか(= 端末内Gemmaを使うか)
   bool _aiEnabled = true;
@@ -37,6 +42,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     _aiEnabled = AppSettings.aiMode == AiAnalysisMode.onDevice;
     _loadSavedPlaces();
+    _loadVersion();
     _checkUpdate();
     GemmaDownloadManager.instance.refreshInstalled(GemmaModelKind.e2b);
   }
@@ -109,9 +115,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Future<void> _checkUpdate() async {
-    final update = await UpdateService.check();
-    if (mounted) setState(() => _hasUpdate = update != null);
+  Future<void> _loadVersion() async {
+    final info = await PackageInfo.fromPlatform();
+    if (mounted) setState(() => _appVersion = info.version);
+  }
+
+  Future<void> _checkUpdate({bool force = false}) async {
+    if (_checkingUpdate) return;
+    setState(() => _checkingUpdate = true);
+    final update = await UpdateService.check(force: force);
+    if (!mounted) return;
+    setState(() {
+      _update = update;
+      _checkingUpdate = false;
+    });
+    if (force && update == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('お使いのバージョンが最新です')),
+      );
+    }
+  }
+
+  Future<void> _openUpdatePage() async {
+    final update = _update;
+    if (update == null) return;
+    await launchUrl(Uri.parse(update.url), mode: LaunchMode.externalApplication);
   }
 
   /// 「その他」から戻ったら場所を読み直す。バックアップの復元で増えうるため
@@ -187,6 +215,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = KokoTokens.of(context);
+
     return Scaffold(
       appBar: AppBar(title: const Text('設定')),
       body: ListView(
@@ -238,13 +268,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ListTile(
               leading: const Icon(Icons.more_horiz),
               title: const Text('その他'),
-              subtitle: Text(
-                _hasUpdate ? '新しいバージョンが出ています' : '表示・バックアップ・アプリの情報',
-              ),
+              subtitle: const Text('表示・写真の書き出し・バックアップ'),
               trailing: const Icon(Icons.chevron_right),
               onTap: _openOtherSettings,
             ),
           ]),
+
+          // ストア配布ではないので、更新は自分から知らせるしかない
+          Padding(
+            padding: const EdgeInsets.only(top: 24),
+            child: Center(
+              child: Column(
+                children: [
+                  Text(
+                    'ココメシ v$_appVersion',
+                    style: TextStyle(fontSize: 12, color: tokens.textFaint),
+                  ),
+                  const SizedBox(height: 6),
+                  if (_update != null)
+                    FilledButton.tonalIcon(
+                      onPressed: _openUpdatePage,
+                      icon: const Icon(Icons.system_update_alt, size: 16),
+                      label: Text('v${_update!.version} が出ています'),
+                    )
+                  else
+                    TextButton(
+                      onPressed:
+                          _checkingUpdate ? null : () => _checkUpdate(force: true),
+                      child: Text(
+                        _checkingUpdate ? '確認中…' : '更新を確認',
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -262,8 +321,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         secondary: const Icon(Icons.auto_awesome_outlined),
         title: const Text('AIで自動解析する'),
         // 何ができるかは料理名が出れば分かる。ここで言う価値があるのは
-        // 「通信しない・お金がかからない」の一点だけなので、それだけ残す
-        subtitle: const Text('オフラインで動作・無料'),
+        // 「スマホの外に出ない・お金がかからない」の一点だけなので、それだけ残す
+        subtitle: const Text('このスマホの中だけで動作・無料'),
         value: _aiEnabled,
         onChanged: _setAiEnabled,
       ),
@@ -369,7 +428,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'AIを使うには、最初に一度だけAIモデルのダウンロードが必要です。',
+                    'AIはこのスマホの中だけで動きます。写真が外に送られることはなく、'
+                    '料金もかかりません。\n'
+                    '使うには、最初に一度だけAIモデルのダウンロードが必要です。',
                     style: TextStyle(fontSize: 12, color: tokens.textMuted),
                   ),
                   const SizedBox(height: 12),
@@ -419,9 +480,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final tokens = KokoTokens.of(context);
     const model = GemmaModelKind.e2b;
     final facts = [
-      ('モデル', '${model.label}（Google のAI）'),
+      ('モデル', '${model.label}\nGoogle が無料で公開しているAI'),
       ('サイズ', model.approxSize),
-      ('入手先', '${Uri.parse(model.url).host}（Hugging Face）'),
+      (
+        '入手先',
+        'Hugging Face\nAIモデルを公開・配布しているサイト（${Uri.parse(model.url).host}）',
+      ),
     ];
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
