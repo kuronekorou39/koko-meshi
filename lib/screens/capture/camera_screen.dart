@@ -10,6 +10,7 @@ import 'package:path/path.dart' as p;
 import '../../database/local_database.dart';
 import '../../models/saved_place.dart';
 import '../../services/location_service.dart';
+import '../../widgets/side_gutter.dart';
 
 /// カメラ画面の撮影結果
 class CameraCaptureResult {
@@ -43,6 +44,7 @@ class _CameraScreenState extends State<CameraScreen>
   bool _isInitialized = false;
   bool _isCapturing = false;
   int _currentCameraIndex = 0;
+
   /// 料理を撮るのに焚くことはまずないので、既定は消しておく
   FlashMode _flashMode = FlashMode.off;
 
@@ -119,9 +121,9 @@ class _CameraScreenState extends State<CameraScreen>
     _cameras = await availableCameras();
     if (_cameras.isEmpty) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('カメラが見つかりません')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('カメラが見つかりません')));
         Navigator.pop(context);
       }
       return;
@@ -148,9 +150,9 @@ class _CameraScreenState extends State<CameraScreen>
     } catch (e) {
       debugPrint('Camera init error: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('カメラ初期化エラー: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('カメラ初期化エラー: $e')));
         Navigator.pop(context);
       }
     }
@@ -252,7 +254,9 @@ class _CameraScreenState extends State<CameraScreen>
   // ── 撮影 ──
 
   Future<void> _takePicture() async {
-    if (_isCapturing || _controller == null || !_controller!.value.isInitialized) {
+    if (_isCapturing ||
+        _controller == null ||
+        !_controller!.value.isInitialized) {
       return;
     }
 
@@ -275,7 +279,10 @@ class _CameraScreenState extends State<CameraScreen>
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('撮影エラー: $e'), duration: const Duration(seconds: 5)),
+          SnackBar(
+            content: Text('撮影エラー: $e'),
+            duration: const Duration(seconds: 5),
+          ),
         );
         setState(() => _isCapturing = false);
       }
@@ -351,63 +358,70 @@ class _CameraScreenState extends State<CameraScreen>
   Widget build(BuildContext context) {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
-    return PopScope(
-      onPopInvokedWithResult: (didPop, _) {
-        SystemChrome.setEnabledSystemUIMode(
-          SystemUiMode.manual,
-          overlays: SystemUiOverlay.values,
-        );
-      },
-      child: Scaffold(
-        backgroundColor: Colors.black,
-        body: Stack(
-          fit: StackFit.expand,
-          children: [
-            // メイン表示
-            if (_isReviewMode)
-              // 撮影済み写真。回した向きのまま保存される
-              Center(
-                child: RotatedBox(
-                  quarterTurns: _rotationDegrees ~/ 90,
-                  child: Image.file(
-                    File(_capturedPhoto!.path),
-                    fit: BoxFit.contain,
+    return SideGutterColor(
+      color: Colors.black,
+      child: PopScope(
+        onPopInvokedWithResult: (didPop, _) {
+          SystemChrome.setEnabledSystemUIMode(
+            SystemUiMode.manual,
+            overlays: SystemUiOverlay.values,
+          );
+        },
+        child: Scaffold(
+          backgroundColor: Colors.black,
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              // メイン表示
+              if (_isReviewMode)
+                // 撮影済み写真。回した向きのまま保存される
+                Center(
+                  child: RotatedBox(
+                    quarterTurns: _rotationDegrees ~/ 90,
+                    child: Image.file(
+                      File(_capturedPhoto!.path),
+                      fit: BoxFit.contain,
+                    ),
                   ),
+                )
+              else if (_isInitialized)
+                Center(child: CameraPreview(_controller!))
+              else
+                const Center(
+                  child: CircularProgressIndicator(color: Colors.white),
                 ),
-              )
-            else if (_isInitialized)
-              Center(child: CameraPreview(_controller!))
-            else
-              const Center(
-                child: CircularProgressIndicator(color: Colors.white),
+
+              // フラッシュ演出
+              AnimatedBuilder(
+                animation: _flashAnimation,
+                builder: (context, _) => _flashAnimation.value > 0
+                    ? Container(
+                        color: Colors.white.withValues(
+                          alpha: _flashAnimation.value,
+                        ),
+                      )
+                    : const SizedBox.shrink(),
               ),
 
-            // フラッシュ演出
-            AnimatedBuilder(
-              animation: _flashAnimation,
-              builder: (context, _) => _flashAnimation.value > 0
-                  ? Container(
-                      color: Colors.white.withValues(alpha: _flashAnimation.value),
-                    )
-                  : const SizedBox.shrink(),
-            ),
+              // 上部コントロール
+              Positioned(
+                top: MediaQuery.of(context).padding.top + 8,
+                left: 16,
+                right: 16,
+                child: _buildTopBar(),
+              ),
 
-            // 上部コントロール
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 8,
-              left: 16,
-              right: 16,
-              child: _buildTopBar(),
-            ),
-
-            // 下部コントロール
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: _isReviewMode ? _buildReviewControls() : _buildCaptureControls(),
-            ),
-          ],
+              // 下部コントロール
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: _isReviewMode
+                    ? _buildReviewControls()
+                    : _buildCaptureControls(),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -429,22 +443,12 @@ class _CameraScreenState extends State<CameraScreen>
     }
     return Row(
       children: [
-        _circleButton(
-          icon: Icons.close,
-          onTap: () => Navigator.pop(context),
-        ),
+        _circleButton(icon: Icons.close, onTap: () => Navigator.pop(context)),
         const Spacer(),
-        _circleButton(
-          icon: _flashIcon,
-          label: _flashLabel,
-          onTap: _cycleFlash,
-        ),
+        _circleButton(icon: _flashIcon, label: _flashLabel, onTap: _cycleFlash),
         if (_cameras.length >= 2) ...[
           const SizedBox(width: 12),
-          _circleButton(
-            icon: Icons.flip_camera_android,
-            onTap: _switchCamera,
-          ),
+          _circleButton(icon: Icons.flip_camera_android, onTap: _switchCamera),
         ],
       ],
     );
@@ -468,7 +472,10 @@ class _CameraScreenState extends State<CameraScreen>
             ),
             child: Center(
               child: _isCapturing
-                  ? const CircularProgressIndicator(color: Colors.white, strokeWidth: 3)
+                  ? const CircularProgressIndicator(
+                      color: Colors.white,
+                      strokeWidth: 3,
+                    )
                   : Container(
                       width: 58,
                       height: 58,
@@ -546,7 +553,9 @@ class _CameraScreenState extends State<CameraScreen>
               const SizedBox(width: 24),
               // AIトグル
               _actionButton(
-                icon: _aiEnabled ? Icons.auto_awesome : Icons.auto_awesome_outlined,
+                icon: _aiEnabled
+                    ? Icons.auto_awesome
+                    : Icons.auto_awesome_outlined,
                 label: _aiEnabled ? 'AI ON' : 'AI OFF',
                 onTap: () => setState(() => _aiEnabled = !_aiEnabled),
                 active: _aiEnabled,
@@ -583,11 +592,14 @@ class _CameraScreenState extends State<CameraScreen>
                     )
                   : Text(
                       _position != null
-                          ? (_address ?? '${_position!.latitude.toStringAsFixed(4)}, ${_position!.longitude.toStringAsFixed(4)}')
+                          ? (_address ??
+                                '${_position!.latitude.toStringAsFixed(4)}, ${_position!.longitude.toStringAsFixed(4)}')
                           : '位置情報なし',
                       style: TextStyle(
                         fontSize: 12,
-                        color: _position != null ? Colors.white70 : Colors.white38,
+                        color: _position != null
+                            ? Colors.white70
+                            : Colors.white38,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -623,8 +635,8 @@ class _CameraScreenState extends State<CameraScreen>
                   icon: place.iconType == 'home'
                       ? Icons.home_outlined
                       : place.iconType == 'friend'
-                          ? Icons.person_outlined
-                          : Icons.place_outlined,
+                      ? Icons.person_outlined
+                      : Icons.place_outlined,
                   isSelected: isSelected,
                   onTap: () => setState(() => _selectedLocationTag = tag),
                 );
@@ -656,7 +668,11 @@ class _CameraScreenState extends State<CameraScreen>
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 14, color: isSelected ? Colors.white : Colors.white54),
+            Icon(
+              icon,
+              size: 14,
+              color: isSelected ? Colors.white : Colors.white54,
+            ),
             const SizedBox(width: 4),
             Text(
               label,
@@ -727,7 +743,10 @@ class _CameraScreenState extends State<CameraScreen>
             Icon(icon, color: Colors.white, size: 22),
             if (label != null) ...[
               const SizedBox(width: 4),
-              Text(label, style: const TextStyle(color: Colors.white, fontSize: 12)),
+              Text(
+                label,
+                style: const TextStyle(color: Colors.white, fontSize: 12),
+              ),
             ],
           ],
         ),

@@ -1,7 +1,7 @@
 name: koko_meshi
 description: "撮るだけで食事を全自動記録する食事ログ＆グルメマップアプリ"
 publish_to: 'none'
-version: 0.13.1+31
+version: 0.13.2+32
 
 environment:
   sdk: ^3.11.0

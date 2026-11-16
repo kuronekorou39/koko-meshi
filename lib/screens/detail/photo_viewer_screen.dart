@@ -7,6 +7,7 @@ import '../../models/meal_photo.dart';
 import '../../services/app_settings_service.dart';
 import '../../services/photo_cache_service.dart';
 import '../../services/photo_export_service.dart';
+import '../../widgets/side_gutter.dart';
 
 class PhotoViewerScreen extends StatefulWidget {
   final List<MealPhoto> photos;
@@ -106,8 +107,7 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
       if (answer == null || !mounted) return;
       includeGps = answer;
     }
-    final declinedGps =
-        AppSettings.exportExifGps && hasLocation && !includeGps;
+    final declinedGps = AppSettings.exportExifGps && hasLocation && !includeGps;
 
     setState(() => _downloading = true);
 
@@ -122,9 +122,9 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
 
       if (path == null || !File(path).existsSync()) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('写真が見つかりません')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('写真が見つかりません')));
         }
         return;
       }
@@ -146,9 +146,9 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('カメラロールに保存しました')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('カメラロールに保存しました')));
       }
       if (declinedGps && !AppSettings.exportGpsOffHintShown) {
         await _showGpsOffHint();
@@ -158,15 +158,15 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
         final message = e.type == GalExceptionType.accessDenied
             ? 'ギャラリーへのアクセスが許可されていません'
             : '保存に失敗しました';
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(message)),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(message)));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('保存に失敗: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('保存に失敗: $e')));
       }
     } finally {
       if (mounted) setState(() => _downloading = false);
@@ -181,121 +181,128 @@ class _PhotoViewerScreenState extends State<PhotoViewerScreen> {
   }
 
   ButtonStyle get _overlayButtonStyle => IconButton.styleFrom(
-        backgroundColor: _overlayColor,
-        foregroundColor: Colors.white,
-      );
+    backgroundColor: _overlayColor,
+    foregroundColor: Colors.white,
+  );
 
   @override
   Widget build(BuildContext context) {
     final photo = widget.photos[_currentIndex];
     final hasMultiple = widget.photos.length > 1;
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      extendBodyBehindAppBar: true,
-      appBar: _showUI
-          ? AppBar(
-              backgroundColor: Colors.transparent,
-              foregroundColor: Colors.white,
-              centerTitle: true,
-              leading: Center(
-                child: IconButton(
-                  style: _overlayButtonStyle,
-                  icon: const Icon(Icons.close, size: 20),
-                  tooltip: '閉じる',
-                  onPressed: () => Navigator.of(context).maybePop(),
+    return SideGutterColor(
+      color: Colors.black,
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        extendBodyBehindAppBar: true,
+        appBar: _showUI
+            ? AppBar(
+                backgroundColor: Colors.transparent,
+                foregroundColor: Colors.white,
+                centerTitle: true,
+                leading: Center(
+                  child: IconButton(
+                    style: _overlayButtonStyle,
+                    icon: const Icon(Icons.close, size: 20),
+                    tooltip: '閉じる',
+                    onPressed: () => Navigator.of(context).maybePop(),
+                  ),
                 ),
-              ),
-              // ページインジケータ
-              title: hasMultiple
-                  ? Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 5),
-                      decoration: BoxDecoration(
+                // ページインジケータ
+                title: hasMultiple
+                    ? Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _overlayColor,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          '${_currentIndex + 1} / ${widget.photos.length}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            fontFeatures: [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      )
+                    : null,
+                actions: [
+                  if (_downloading)
+                    Container(
+                      width: 40,
+                      height: 40,
+                      alignment: Alignment.center,
+                      margin: const EdgeInsets.only(right: 8),
+                      decoration: const BoxDecoration(
                         color: _overlayColor,
-                        borderRadius: BorderRadius.circular(999),
+                        shape: BoxShape.circle,
                       ),
-                      child: Text(
-                        '${_currentIndex + 1} / ${widget.photos.length}',
-                        style: const TextStyle(
+                      child: const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
                           color: Colors.white,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          fontFeatures: [FontFeature.tabularFigures()],
                         ),
                       ),
                     )
-                  : null,
-              actions: [
-                if (_downloading)
-                  Container(
-                    width: 40,
-                    height: 40,
-                    alignment: Alignment.center,
-                    margin: const EdgeInsets.only(right: 8),
-                    decoration: const BoxDecoration(
-                      color: _overlayColor,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
+                  else
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: IconButton(
+                        style: _overlayButtonStyle,
+                        icon: const Icon(Icons.download_outlined, size: 20),
+                        tooltip: 'カメラロールに保存',
+                        onPressed: _downloadPhoto,
                       ),
                     ),
-                  )
-                else
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: IconButton(
-                      style: _overlayButtonStyle,
-                      icon: const Icon(Icons.download_outlined, size: 20),
-                      tooltip: 'カメラロールに保存',
-                      onPressed: _downloadPhoto,
-                    ),
-                  ),
-              ],
-            )
-          : null,
-      body: GestureDetector(
-        onTap: _toggleUI,
-        child: PageView.builder(
-          controller: _pageController,
-          itemCount: widget.photos.length,
-          onPageChanged: (index) => setState(() => _currentIndex = index),
-          itemBuilder: (context, index) {
-            return _PhotoPage(photo: widget.photos[index]);
-          },
+                ],
+              )
+            : null,
+        body: GestureDetector(
+          onTap: _toggleUI,
+          child: PageView.builder(
+            controller: _pageController,
+            itemCount: widget.photos.length,
+            onPageChanged: (index) => setState(() => _currentIndex = index),
+            itemBuilder: (context, index) {
+              return _PhotoPage(photo: widget.photos[index]);
+            },
+          ),
         ),
-      ),
-      // 下部バー: メニュー名
-      bottomNavigationBar: _showUI && photo.displayName != null
-          ? SafeArea(
-              top: false,
-              child: Container(
-                margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: BoxDecoration(
-                  color: _overlayColor,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  photo.displayName!,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
+        // 下部バー: メニュー名
+        bottomNavigationBar: _showUI && photo.displayName != null
+            ? SafeArea(
+                top: false,
+                child: Container(
+                  margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  decoration: BoxDecoration(
+                    color: _overlayColor,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    photo.displayName!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-              ),
-            )
-          : null,
+              )
+            : null,
+      ),
     );
   }
 }
@@ -368,12 +375,7 @@ class _PhotoPageState extends State<_PhotoPage> {
     return InteractiveViewer(
       minScale: 0.5,
       maxScale: 4.0,
-      child: Center(
-        child: Image.file(
-          File(_path!),
-          fit: BoxFit.contain,
-        ),
-      ),
+      child: Center(child: Image.file(File(_path!), fit: BoxFit.contain)),
     );
   }
 }

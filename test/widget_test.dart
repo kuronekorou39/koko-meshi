@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:koko_meshi/app.dart';
 import 'package:koko_meshi/screens/home/home_rail.dart';
+import 'package:koko_meshi/widgets/side_gutter.dart';
 
 void main() {
   /// 画面の大きさを決めてアプリを起こす(テストの既定は横長の 800x600)
@@ -24,6 +25,21 @@ void main() {
     expect(find.bySemanticsLabel('ココメシ'), findsOneWidget);
     expect(find.byType(NavigationBar), findsOneWidget);
     expect(find.byType(HomeRail), findsNothing);
+  });
+
+  testWidgets('横向きでナビゲーションバーが左に来ても、左の列はその外に出る',
+      (WidgetTester tester) async {
+    tester.view.padding = const FakeViewPadding(left: 48);
+    await pumpApp(tester, const Size(800, 400));
+
+    // バーの幅 + ゆとりのぶん右へずれ、列の中身がはみ出さない
+    final rail = tester.getRect(find.byType(HomeRail));
+    expect(rail.left, 48 + SideGutter.extra);
+    expect(rail.width, HomeRail.width);
+    final camera = tester.getRect(find.byTooltip('撮影'));
+    expect(camera.left, greaterThanOrEqualTo(rail.left));
+    expect(camera.right, lessThanOrEqualTo(rail.right));
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('横向きではヘッダと下のタブをやめて、左の列に操作を並べる',

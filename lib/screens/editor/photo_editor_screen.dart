@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 
 import '../../theme/app_theme.dart';
 import 'photo_edit_core.dart';
+import '../../widgets/side_gutter.dart';
 
 /// 統合フォトエディタ（切り抜き / フィルター / 調整）。
 ///
@@ -256,8 +257,8 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
   Size get _srcSize => Size(_srcW.toDouble(), _srcH.toDouble());
 
   Rect get _frameBounds => _kViewportPadding.deflateRect(
-        Rect.fromLTWH(0, 0, _viewportSize.width, _viewportSize.height),
-      );
+    Rect.fromLTWH(0, 0, _viewportSize.width, _viewportSize.height),
+  );
 
   /// 直近の90度単位からの相対角（-45〜45）
   double get _fineAngle {
@@ -367,13 +368,13 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
   }
 
   Offset _viewToSource(Offset point) => PhotoEditGeometry.viewToSource(
-        point: point,
-        viewportSize: _viewportSize,
-        srcSize: _srcSize,
-        rotationDeg: _transform.rotationDeg,
-        scale: _transform.scale,
-        offset: _transform.offset,
-      );
+    point: point,
+    viewportSize: _viewportSize,
+    srcSize: _srcSize,
+    rotationDeg: _transform.rotationDeg,
+    scale: _transform.scale,
+    offset: _transform.offset,
+  );
 
   /// 元画像上の点 [srcAnchor] がビュー上の [viewPoint] に来る offset を求める
   Offset _anchorOffset({
@@ -401,15 +402,19 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
         rotationDeg: rotationDeg ?? _transform.rotationDeg,
       );
 
-  Offset _clampOffset(Offset offset, {Rect? frame, double? rotationDeg, double? scale}) =>
-      PhotoEditGeometry.clampOffsetToCover(
-        viewportSize: _viewportSize,
-        frameRect: frame ?? _frame,
-        srcSize: _srcSize,
-        rotationDeg: rotationDeg ?? _transform.rotationDeg,
-        scale: scale ?? _transform.scale,
-        offset: offset,
-      );
+  Offset _clampOffset(
+    Offset offset, {
+    Rect? frame,
+    double? rotationDeg,
+    double? scale,
+  }) => PhotoEditGeometry.clampOffsetToCover(
+    viewportSize: _viewportSize,
+    frameRect: frame ?? _frame,
+    srcSize: _srcSize,
+    rotationDeg: rotationDeg ?? _transform.rotationDeg,
+    scale: scale ?? _transform.scale,
+    offset: offset,
+  );
 
   /// scale下限とoffsetのcover制約を現在状態へ適用（ハードクランプ）
   void _applyCoverClamp() {
@@ -428,8 +433,10 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
       scale: _transform.scale,
       offset: _transform.offset,
     );
-    final bounds =
-        PhotoEditGeometry.rotatedBoundsSize(_srcSize, _transform.rotationDeg);
+    final bounds = PhotoEditGeometry.rotatedBoundsSize(
+      _srcSize,
+      _transform.rotationDeg,
+    );
     return _clampCropToBounds(crop, bounds);
   }
 
@@ -536,8 +543,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
     final p = widget.initialParams;
     if (p == null) return null;
     var crop = p.cropRect;
-    final bounds =
-        PhotoEditGeometry.rotatedBoundsSize(_srcSize, p.rotationDeg);
+    final bounds = PhotoEditGeometry.rotatedBoundsSize(_srcSize, p.rotationDeg);
     if (p.srcW != _srcW || p.srcH != _srcH) {
       final expected = PhotoEditGeometry.rotatedBoundsSize(
         Size(p.srcW.toDouble(), p.srcH.toDouble()),
@@ -547,7 +553,11 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
       final sx = bounds.width / expected.width;
       final sy = bounds.height / expected.height;
       crop = Rect.fromLTWH(
-          crop.left * sx, crop.top * sy, crop.width * sx, crop.height * sy);
+        crop.left * sx,
+        crop.top * sy,
+        crop.width * sx,
+        crop.height * sy,
+      );
     }
     if (crop.width < 1 || crop.height < 1) return null;
     return p.copyWith(cropRect: _clampCropToBounds(crop, bounds));
@@ -567,11 +577,11 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
   // -------------------------------------------------------------------------
 
   _EditorSnapshot _currentSnapshot() => _EditorSnapshot(
-        frame: _frame,
-        scale: _transform.scale,
-        offset: _transform.offset,
-        rotationDeg: _transform.rotationDeg,
-      );
+    frame: _frame,
+    scale: _transform.scale,
+    offset: _transform.offset,
+    rotationDeg: _transform.rotationDeg,
+  );
 
   void _animateTo(
     _EditorSnapshot target, {
@@ -624,12 +634,14 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
       rotationDeg: _transform.rotationDeg,
       cropRect: crop,
     );
-    _animateTo(_EditorSnapshot(
-      frame: target,
-      scale: d.scale,
-      offset: d.offset,
-      rotationDeg: _transform.rotationDeg,
-    ));
+    _animateTo(
+      _EditorSnapshot(
+        frame: target,
+        scale: d.scale,
+        offset: d.offset,
+        rotationDeg: _transform.rotationDeg,
+      ),
+    );
   }
 
   /// 枠はそのまま回転角だけ変える目標状態（枠中心の内容を維持し、cover再計算）
@@ -646,8 +658,12 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
       rotationDeg: targetRotationDeg,
       scale: scale,
     );
-    offset = _clampOffset(offset,
-        frame: targetFrame, rotationDeg: targetRotationDeg, scale: scale);
+    offset = _clampOffset(
+      offset,
+      frame: targetFrame,
+      rotationDeg: targetRotationDeg,
+      scale: scale,
+    );
     return _EditorSnapshot(
       frame: targetFrame,
       scale: scale,
@@ -887,7 +903,9 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
       final cy = start.center.dy;
       final maxH = 2 * math.min(cy - b.top, b.bottom - cy);
       final maxW = math.min(
-          sx > 0 ? b.right - anchorX : anchorX - b.left, maxH * a);
+        sx > 0 ? b.right - anchorX : anchorX - b.left,
+        maxH * a,
+      );
       final minW = math.min(minSize * math.max(1, a), maxW);
       final w = ((p.dx - anchorX) * sx).clamp(minW, maxW);
       final h = w / a;
@@ -899,7 +917,9 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
     final cx = start.center.dx;
     final maxWc = 2 * math.min(cx - b.left, b.right - cx);
     final maxH = math.min(
-        sy > 0 ? b.bottom - anchorY : anchorY - b.top, maxWc / a);
+      sy > 0 ? b.bottom - anchorY : anchorY - b.top,
+      maxWc / a,
+    );
     final minH = math.min(minSize * math.max(1, 1 / a), maxH);
     final h = ((p.dy - anchorY) * sy).clamp(minH, maxH);
     final w = h * a;
@@ -963,11 +983,12 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
     final session = _ruler;
     if (session == null) return;
     session.accumDx += details.delta.dx;
-    final fine = (session.startFineDeg -
-            session.accumDx / _kRulerPixelsPerDegree)
-        .clamp(-_kRulerMaxDegrees, _kRulerMaxDegrees);
-    final rotation =
-        session.startRotationDeg + (fine - session.startFineDeg);
+    final fine =
+        (session.startFineDeg - session.accumDx / _kRulerPixelsPerDegree).clamp(
+          -_kRulerMaxDegrees,
+          _kRulerMaxDegrees,
+        );
+    final rotation = session.startRotationDeg + (fine - session.startFineDeg);
     setState(() {
       final t = _transform;
       t.rotationDeg = rotation;
@@ -1204,68 +1225,71 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
 
   @override
   Widget build(BuildContext context) {
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) _handleClose();
-      },
-      child: Scaffold(
-        backgroundColor: EditorColors.background,
-        appBar: AppBar(
+    return SideGutterColor(
+      color: EditorColors.background,
+      child: PopScope(
+        canPop: false,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) _handleClose();
+        },
+        child: Scaffold(
           backgroundColor: EditorColors.background,
-          foregroundColor: EditorColors.text,
-          iconTheme: const IconThemeData(color: EditorColors.text),
-          actionsIconTheme: const IconThemeData(color: EditorColors.text),
-          titleTextStyle: const TextStyle(
-            fontSize: 17,
-            fontWeight: FontWeight.w700,
-            letterSpacing: -0.2,
-            color: EditorColors.text,
-          ),
-          title: const Text('写真を編集'),
-          leading: IconButton(
-            icon: const Icon(Icons.close),
-            tooltip: '閉じる',
-            onPressed: _handleClose,
-          ),
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.refresh),
-              tooltip: 'リセット',
-              onPressed: _initialized ? _handleReset : null,
+          appBar: AppBar(
+            backgroundColor: EditorColors.background,
+            foregroundColor: EditorColors.text,
+            iconTheme: const IconThemeData(color: EditorColors.text),
+            actionsIconTheme: const IconThemeData(color: EditorColors.text),
+            titleTextStyle: const TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+              letterSpacing: -0.2,
+              color: EditorColors.text,
             ),
-            IconButton(
-              icon: const Icon(Icons.check),
-              tooltip: '完了',
-              onPressed: _initialized ? _handleDone : null,
+            title: const Text('写真を編集'),
+            leading: IconButton(
+              icon: const Icon(Icons.close),
+              tooltip: '閉じる',
+              onPressed: _handleClose,
             ),
-            if (widget.canRestoreOriginal)
-              PopupMenuButton<_MenuAction>(
-                icon: const Icon(Icons.more_vert),
-                color: const Color(0xFF222222),
-                onSelected: (action) {
-                  if (action == _MenuAction.restoreOriginal) {
-                    _confirmRestoreOriginal();
-                  }
-                },
-                itemBuilder: (context) => const [
-                  PopupMenuItem(
-                    value: _MenuAction.restoreOriginal,
-                    child: Text(
-                      'オリジナルに戻す',
-                      style: TextStyle(color: EditorColors.text),
-                    ),
-                  ),
-                ],
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.refresh),
+                tooltip: 'リセット',
+                onPressed: _initialized ? _handleReset : null,
               ),
-          ],
-        ),
-        body: SafeArea(
-          child: Column(
-            children: [
-              Expanded(child: _buildViewport()),
-              _buildBottomPanel(),
+              IconButton(
+                icon: const Icon(Icons.check),
+                tooltip: '完了',
+                onPressed: _initialized ? _handleDone : null,
+              ),
+              if (widget.canRestoreOriginal)
+                PopupMenuButton<_MenuAction>(
+                  icon: const Icon(Icons.more_vert),
+                  color: const Color(0xFF222222),
+                  onSelected: (action) {
+                    if (action == _MenuAction.restoreOriginal) {
+                      _confirmRestoreOriginal();
+                    }
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(
+                      value: _MenuAction.restoreOriginal,
+                      child: Text(
+                        'オリジナルに戻す',
+                        style: TextStyle(color: EditorColors.text),
+                      ),
+                    ),
+                  ],
+                ),
             ],
+          ),
+          body: SafeArea(
+            child: Column(
+              children: [
+                Expanded(child: _buildViewport()),
+                _buildBottomPanel(),
+              ],
+            ),
           ),
         ),
       ),
@@ -1437,8 +1461,9 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
                         color: selected
                             ? EditorColors.accent
                             : EditorColors.textMuted,
-                        fontWeight:
-                            selected ? FontWeight.w700 : FontWeight.w500,
+                        fontWeight: selected
+                            ? FontWeight.w700
+                            : FontWeight.w500,
                       ),
                     ),
                   ],
@@ -1471,10 +1496,9 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
               child: Center(
                 child: Text(
                   '${_fineAngle.toStringAsFixed(1)}°',
-                  style: KokoTokens.of(context).numeral.copyWith(
-                        fontSize: 12,
-                        color: EditorColors.accent,
-                      ),
+                  style: KokoTokens.of(
+                    context,
+                  ).numeral.copyWith(fontSize: 12, color: EditorColors.accent),
                 ),
               ),
             ),
@@ -1504,11 +1528,12 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
                           onTap: () => _changeAspect(preset),
                           child: Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 8),
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
                             decoration: BoxDecoration(
                               color: isSelected
-                                  ? EditorColors.accent
-                                      .withValues(alpha: 0.16)
+                                  ? EditorColors.accent.withValues(alpha: 0.16)
                                   : Colors.transparent,
                               borderRadius: BorderRadius.circular(999),
                               border: Border.all(
@@ -1599,8 +1624,9 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
                         color: isSelected
                             ? EditorColors.accent
                             : EditorColors.textMuted,
-                        fontWeight:
-                            isSelected ? FontWeight.w700 : FontWeight.w500,
+                        fontWeight: isSelected
+                            ? FontWeight.w700
+                            : FontWeight.w500,
                       ),
                     ),
                   ],
@@ -1681,8 +1707,7 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
           width: 52,
           child: Text(
             label,
-            style:
-                const TextStyle(fontSize: 11, color: EditorColors.textMuted),
+            style: const TextStyle(fontSize: 11, color: EditorColors.textMuted),
             maxLines: 1,
             overflow: TextOverflow.visible,
           ),
@@ -1711,10 +1736,9 @@ class _PhotoEditorScreenState extends State<PhotoEditorScreen>
           child: Text(
             value.round().toString(),
             textAlign: TextAlign.right,
-            style: KokoTokens.of(context).numeral.copyWith(
-                  fontSize: 12,
-                  color: EditorColors.textMuted,
-                ),
+            style: KokoTokens.of(
+              context,
+            ).numeral.copyWith(fontSize: 12, color: EditorColors.textMuted),
           ),
         ),
       ],
@@ -1783,7 +1807,8 @@ class _EditorCanvasPainter extends CustomPainter {
     canvas.rotate(rotationDeg * math.pi / 180);
     canvas.scale(scale);
     final paint = Paint()..filterQuality = FilterQuality.medium;
-    final hasMatrix = filter.brightness != 0 ||
+    final hasMatrix =
+        filter.brightness != 0 ||
         filter.contrast != 0 ||
         filter.saturation != 0 ||
         filter.temperature != 0;
@@ -1806,14 +1831,16 @@ class _EditorCanvasPainter extends CustomPainter {
 
   /// 焼き込み（_applyFilterBaked）と同じ減光カーブの放射グラデーション
   void _paintVignette(Canvas canvas, Rect rect) {
-    final radius = math.sqrt(rect.width * rect.width / 4 +
-        rect.height * rect.height / 4);
+    final radius = math.sqrt(
+      rect.width * rect.width / 4 + rect.height * rect.height / 4,
+    );
     final paint = Paint()
       ..shader = RadialGradient(
         colors: [
           Colors.transparent,
           Colors.black.withValues(
-              alpha: kVignetteStrength * filter.vignette / 100),
+            alpha: kVignetteStrength * filter.vignette / 100,
+          ),
         ],
         stops: const [0.5, 1.0],
       ).createShader(Rect.fromCircle(center: rect.center, radius: radius));
@@ -1825,8 +1852,7 @@ class _EditorCanvasPainter extends CustomPainter {
       ..addRect(Rect.fromLTWH(0, 0, size.width, size.height))
       ..addRect(f)
       ..fillType = PathFillType.evenOdd;
-    canvas.drawPath(
-        path, Paint()..color = Colors.black.withValues(alpha: 0.6));
+    canvas.drawPath(path, Paint()..color = Colors.black.withValues(alpha: 0.6));
   }
 
   void _paintGrid(Canvas canvas, Rect f) {
@@ -1855,8 +1881,7 @@ class _EditorCanvasPainter extends CustomPainter {
     final len = math.min(20.0, math.min(f.width, f.height) / 3);
 
     Paint handlePaint(_FrameHandle handle) => Paint()
-      ..color =
-          handle == activeHandle ? EditorColors.accent : EditorColors.text
+      ..color = handle == activeHandle ? EditorColors.accent : EditorColors.text
       ..strokeWidth = handle == activeHandle ? 4.5 : 3
       ..strokeCap = StrokeCap.round;
 
@@ -1875,8 +1900,7 @@ class _EditorCanvasPainter extends CustomPainter {
     // 辺: 中点の短い線分
     void edge(_FrameHandle handle, Offset center, bool horizontal) {
       final paint = handlePaint(handle);
-      final half = Offset(
-          horizontal ? len / 2 : 0, horizontal ? 0 : len / 2);
+      final half = Offset(horizontal ? len / 2 : 0, horizontal ? 0 : len / 2);
       canvas.drawLine(center - half, center + half, paint);
     }
 
@@ -1926,8 +1950,7 @@ class _RulerPainter extends CustomPainter {
       ..strokeWidth = 2;
 
     // 画面に表示される度数の範囲を計算
-    final halfRange =
-        (size.width / 2 / _kRulerPixelsPerDegree).ceil() + 1;
+    final halfRange = (size.width / 2 / _kRulerPixelsPerDegree).ceil() + 1;
     final degFloor = degrees.floor();
 
     for (var i = -halfRange; i <= halfRange; i++) {
@@ -1941,13 +1964,13 @@ class _RulerPainter extends CustomPainter {
       final tickH = isZero
           ? 20.0
           : isMajor
-              ? 16.0
-              : 8.0;
+          ? 16.0
+          : 8.0;
       final paint = isZero
           ? zeroTickPaint
           : isMajor
-              ? majorTickPaint
-              : tickPaint;
+          ? majorTickPaint
+          : tickPaint;
 
       canvas.drawLine(
         Offset(x, size.height - tickH - 4),

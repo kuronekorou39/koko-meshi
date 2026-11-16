@@ -58,6 +58,7 @@ class _MapTabState extends ConsumerState<MapTab> {
   LatLng _initialPosition = const LatLng(35.6812, 139.7671);
   LatLng _currentCenter = const LatLng(35.6812, 139.7671);
   bool _loadingPosition = true;
+
   /// 地図に出すラベルの種類。設定に保存され、次に開いたときも保たれる
   Set<MapLabelLayer> _mapLabels = AppSettings.mapLabelLayers;
   bool _isTilted = true;
@@ -136,8 +137,10 @@ class _MapTabState extends ConsumerState<MapTab> {
                   padding: const EdgeInsets.fromLTRB(16, 12, 8, 0),
                   child: Row(
                     children: [
-                      Text('地図に出すもの',
-                          style: Theme.of(context).textTheme.titleMedium),
+                      Text(
+                        '地図に出すもの',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
                       const Spacer(),
                       IconButton(
                         icon: const Icon(Icons.close),
@@ -615,9 +618,11 @@ class _MapTabState extends ConsumerState<MapTab> {
       // 条件で絞った結果の0件は「店が無い」ではないので、言い分けて出す
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(_searchOptions.hasNarrowing
-              ? '条件に合うお店は見つかりませんでした'
-              : 'この辺りにお店は見つかりませんでした'),
+          content: Text(
+            _searchOptions.hasNarrowing
+                ? '条件に合うお店は見つかりませんでした'
+                : 'この辺りにお店は見つかりませんでした',
+          ),
         ),
       );
       return;
@@ -850,9 +855,7 @@ class _MapTabState extends ConsumerState<MapTab> {
     // 遅れて取れた現在地で、指定された場所から離れてしまわないように
     _userMovedMap = true;
     setState(() => _currentCenter = target);
-    await _mapController?.animateCamera(
-      CameraUpdate.newLatLngZoom(target, 17),
-    );
+    await _mapController?.animateCamera(CameraUpdate.newLatLngZoom(target, 17));
     final label = focus.label;
     if (label != null && label.isNotEmpty && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -888,9 +891,9 @@ class _MapTabState extends ConsumerState<MapTab> {
         RailAction(
           icon: Icons.play_circle_outline,
           tooltip: '軌跡を再生',
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const TraceScreen()),
-          ),
+          onTap: () => Navigator.of(
+            context,
+          ).push(MaterialPageRoute(builder: (_) => const TraceScreen())),
         ),
       RailAction(
         icon: Icons.filter_list,
@@ -901,6 +904,10 @@ class _MapTabState extends ConsumerState<MapTab> {
     ];
 
     return Scaffold(
+      // キーボードが出ても地図の大きさを変えない。変えると地図が出入りの
+      // たびに伸び縮みして、裏でぴくぴく動いて見える(入力欄はシートの側で
+      // キーボードを避ける)
+      resizeToAvoidBottomInset: false,
       // 横向きは縦が足りないので、ヘッダを出さず操作を左の列へ移す
       appBar: nav != null
           ? null
@@ -1152,8 +1159,11 @@ class _MapTabState extends ConsumerState<MapTab> {
               // 条件を絞っているときは、それが効いていることを見せる
               if (!_isSearching && _searchOptions.hasNarrowing) ...[
                 const SizedBox(width: 6),
-                Icon(Icons.filter_alt,
-                    size: 15, color: theme.colorScheme.primary),
+                Icon(
+                  Icons.filter_alt,
+                  size: 15,
+                  color: theme.colorScheme.primary,
+                ),
               ],
             ],
           ),
@@ -1597,154 +1607,171 @@ class _MapTabState extends ConsumerState<MapTab> {
       builder: (sheetCtx) => StatefulBuilder(
         builder: (context, setSheetState) {
           final tokens = KokoTokens.of(context);
-          return SafeArea(
-            child: SingleChildScrollView(
-              // キーボードが出たぶん持ち上げて、入力欄が隠れないようにする
-              padding: EdgeInsets.fromLTRB(
-                  16, 4, 16, 8 + MediaQuery.viewInsetsOf(context).bottom),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        'フィルタ',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const Spacer(),
-                      if (tempFilter.isActive)
-                        TextButton(
-                          onPressed: () {
-                            keywordController.clear();
-                            setSheetState(
-                              () => tempFilter = const _MapFilter(),
-                            );
-                          },
-                          child: const Text('リセット'),
+          // キーボードが出たぶんシートごと持ち上げる。中身はその上に残った
+          // 高さで送れるので、横向きの低い画面でも入力欄が隠れない
+          return Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.viewInsetsOf(context).bottom,
+            ),
+            child: SafeArea(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          'フィルタ',
+                          style: Theme.of(context).textTheme.titleMedium,
                         ),
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        color: tokens.textMuted,
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  const Divider(),
-                  const SizedBox(height: 16),
-
-                  // 期間
-                  Text('期間', style: tokens.sectionLabel),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    children: [
-                      _filterChip('全期間', tempFilter.dateRange == null, () {
-                        setSheetState(
-                          () => tempFilter = tempFilter.copyWith(
-                            clearDateRange: true,
+                        const Spacer(),
+                        if (tempFilter.isActive)
+                          TextButton(
+                            onPressed: () {
+                              keywordController.clear();
+                              setSheetState(
+                                () => tempFilter = const _MapFilter(),
+                              );
+                            },
+                            child: const Text('リセット'),
                           ),
-                        );
-                      }),
-                      _filterChip('1週間', tempFilter.dateRangeLabel == '1w', () {
-                        final now = DateTime.now();
-                        setSheetState(
-                          () => tempFilter = tempFilter.copyWith(
-                            dateFrom: now.subtract(const Duration(days: 7)),
-                            dateTo: now,
-                            dateRangeLabel: '1w',
-                          ),
-                        );
-                      }),
-                      _filterChip('1ヶ月', tempFilter.dateRangeLabel == '1m', () {
-                        final now = DateTime.now();
-                        setSheetState(
-                          () => tempFilter = tempFilter.copyWith(
-                            dateFrom: DateTime(
-                              now.year,
-                              now.month - 1,
-                              now.day,
-                            ),
-                            dateTo: now,
-                            dateRangeLabel: '1m',
-                          ),
-                        );
-                      }),
-                      _filterChip('3ヶ月', tempFilter.dateRangeLabel == '3m', () {
-                        final now = DateTime.now();
-                        setSheetState(
-                          () => tempFilter = tempFilter.copyWith(
-                            dateFrom: DateTime(
-                              now.year,
-                              now.month - 3,
-                              now.day,
-                            ),
-                            dateTo: now,
-                            dateRangeLabel: '3m',
-                          ),
-                        );
-                      }),
-                      ActionChip(
-                        label: Text(
-                          tempFilter.dateRangeLabel == 'custom'
-                              ? '${DateFormat('M/d').format(tempFilter.dateFrom!)}〜${DateFormat('M/d').format(tempFilter.dateTo!)}'
-                              : 'カスタム',
-                        ),
-                        avatar: Icon(
-                          Icons.calendar_today_outlined,
-                          size: 16,
+                        IconButton(
+                          icon: const Icon(Icons.close),
                           color: tokens.textMuted,
+                          onPressed: () => Navigator.pop(context),
                         ),
-                        onPressed: () async {
-                          final range = await showDateRangePicker(
-                            context: context,
-                            firstDate: DateTime(2020),
-                            lastDate: DateTime.now(),
-                            locale: const Locale('ja'),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    const Divider(),
+                    const SizedBox(height: 16),
+
+                    // テキスト検索。キーボードが出ても見えるよう先頭に置く
+                    Text('キーワード', style: tokens.sectionLabel),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: keywordController,
+                      textInputAction: TextInputAction.search,
+                      decoration: const InputDecoration(
+                        hintText: 'メニュー名で検索',
+                        prefixIcon: Icon(Icons.search, size: 20),
+                      ),
+                      onChanged: (v) {
+                        tempFilter = tempFilter.copyWith(keyword: v);
+                      },
+                      onSubmitted: (_) => apply(context),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // 期間
+                    Text('期間', style: tokens.sectionLabel),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        _filterChip('全期間', tempFilter.dateRange == null, () {
+                          setSheetState(
+                            () => tempFilter = tempFilter.copyWith(
+                              clearDateRange: true,
+                            ),
                           );
-                          if (range != null) {
+                        }),
+                        _filterChip(
+                          '1週間',
+                          tempFilter.dateRangeLabel == '1w',
+                          () {
+                            final now = DateTime.now();
                             setSheetState(
                               () => tempFilter = tempFilter.copyWith(
-                                dateFrom: range.start,
-                                dateTo: range.end,
-                                dateRangeLabel: 'custom',
+                                dateFrom: now.subtract(const Duration(days: 7)),
+                                dateTo: now,
+                                dateRangeLabel: '1w',
                               ),
                             );
-                          }
-                        },
+                          },
+                        ),
+                        _filterChip(
+                          '1ヶ月',
+                          tempFilter.dateRangeLabel == '1m',
+                          () {
+                            final now = DateTime.now();
+                            setSheetState(
+                              () => tempFilter = tempFilter.copyWith(
+                                dateFrom: DateTime(
+                                  now.year,
+                                  now.month - 1,
+                                  now.day,
+                                ),
+                                dateTo: now,
+                                dateRangeLabel: '1m',
+                              ),
+                            );
+                          },
+                        ),
+                        _filterChip(
+                          '3ヶ月',
+                          tempFilter.dateRangeLabel == '3m',
+                          () {
+                            final now = DateTime.now();
+                            setSheetState(
+                              () => tempFilter = tempFilter.copyWith(
+                                dateFrom: DateTime(
+                                  now.year,
+                                  now.month - 3,
+                                  now.day,
+                                ),
+                                dateTo: now,
+                                dateRangeLabel: '3m',
+                              ),
+                            );
+                          },
+                        ),
+                        ActionChip(
+                          label: Text(
+                            tempFilter.dateRangeLabel == 'custom'
+                                ? '${DateFormat('M/d').format(tempFilter.dateFrom!)}〜${DateFormat('M/d').format(tempFilter.dateTo!)}'
+                                : 'カスタム',
+                          ),
+                          avatar: Icon(
+                            Icons.calendar_today_outlined,
+                            size: 16,
+                            color: tokens.textMuted,
+                          ),
+                          onPressed: () async {
+                            final range = await showDateRangePicker(
+                              context: context,
+                              firstDate: DateTime(2020),
+                              lastDate: DateTime.now(),
+                              locale: const Locale('ja'),
+                            );
+                            if (range != null) {
+                              setSheetState(
+                                () => tempFilter = tempFilter.copyWith(
+                                  dateFrom: range.start,
+                                  dateTo: range.end,
+                                  dateRangeLabel: 'custom',
+                                ),
+                              );
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+
+                    // 適用ボタン
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: () => apply(context),
+                        child: const Text('適用'),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-
-                  // テキスト検索
-                  Text('キーワード', style: tokens.sectionLabel),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: keywordController,
-                    textInputAction: TextInputAction.search,
-                    decoration: const InputDecoration(
-                      hintText: 'メニュー名で検索',
-                      prefixIcon: Icon(Icons.search, size: 20),
                     ),
-                    onChanged: (v) {
-                      tempFilter = tempFilter.copyWith(keyword: v);
-                    },
-                    onSubmitted: (_) => apply(context),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // 適用ボタン
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton(
-                      onPressed: () => apply(context),
-                      child: const Text('適用'),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                ],
+                    const SizedBox(height: 8),
+                  ],
+                ),
               ),
             ),
           );

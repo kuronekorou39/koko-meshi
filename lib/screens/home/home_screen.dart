@@ -91,6 +91,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           );
 
     return Scaffold(
+      // キーボードで地図や一覧を伸び縮みさせない(各画面の入力欄が自分で避ける)
+      resizeToAvoidBottomInset: false,
       body: IndexedStack(
         index: _currentIndex,
         children: [

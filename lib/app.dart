@@ -9,6 +9,7 @@ import 'screens/capture/capture_screen.dart';
 import 'screens/detail/meal_detail_screen.dart';
 import 'screens/settings/settings_screen.dart';
 import 'theme/app_theme.dart';
+import 'widgets/side_gutter.dart';
 
 final navigatorKey = GlobalKey<NavigatorState>();
 
@@ -60,6 +61,8 @@ class KokoMeshiApp extends ConsumerWidget {
       theme: AppTheme.light(fontFamily),
       darkTheme: AppTheme.dark(fontFamily),
       routerConfig: _router,
+      // 横向きの左右の余白はアプリの外枠でまとめて取る
+      builder: (context, child) => SideGutter(child: child!),
       debugShowCheckedModeBanner: false,
     );
   }
