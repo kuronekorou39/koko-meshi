@@ -169,6 +169,10 @@ class PhotoService {
     }
   }
 
+  /// 写真とサムネイルの置き場所(容量の集計用)
+  static Future<List<Directory>> storageDirectories() async =>
+      [await _getPhotoDir(), await _getThumbnailDir()];
+
   static Future<Directory> _getPhotoDir() async {
     final appDir = await getApplicationDocumentsDirectory();
     final photoDir = Directory(p.join(appDir.path, 'photos'));

@@ -248,11 +248,22 @@ class LocalDatabase {
     return maps.map((m) => MealPhoto.fromMap(m)).toList();
   }
 
-  /// 全写真レコード(クラウド写真取り込み・バックアップ用)
+  /// 全写真レコード(一覧・集計・バックアップ用)。
+  /// 記録ごとに束ねたときに [getPhotosForMealLog] と同じ並びになるよう、撮影順で返す
   static Future<List<MealPhoto>> getAllMealPhotos() async {
     final db = await database;
-    final maps = await db.query('meal_photos');
+    final maps = await db.query('meal_photos', orderBy: 'shot_at ASC');
     return maps.map((m) => MealPhoto.fromMap(m)).toList();
+  }
+
+  /// 記録と写真の件数
+  static Future<({int meals, int photos})> getRecordCounts() async {
+    final db = await database;
+    Future<int> count(String table) async =>
+        Sqflite.firstIntValue(
+            await db.rawQuery('SELECT COUNT(*) FROM $table')) ??
+        0;
+    return (meals: await count('meal_logs'), photos: await count('meal_photos'));
   }
 
   /// DBを閉じる(バックアップのエクスポート/復元でファイルを差し替える前に呼ぶ)。
