@@ -124,6 +124,18 @@ class AppSettings {
     await _prefs?.setStringList(_keyLastMapPosition, ['$lat', '$lng']);
   }
 
+  // --- テスト版の更新 ---
+  static const _keyIncludeBetaUpdates = 'include_beta_updates';
+
+  /// 全員に配る前のテスト版も、更新として受け取るか(Android のみ)。
+  /// 既定はオフ。配る側が自分の端末で確かめるための設定
+  static bool get includeBetaUpdates =>
+      _prefs?.getBool(_keyIncludeBetaUpdates) ?? false;
+
+  static Future<void> setIncludeBetaUpdates(bool enabled) async {
+    await _prefs?.setBool(_keyIncludeBetaUpdates, enabled);
+  }
+
   // --- 遊び要素 ---
   static const _keyFunFeatures = 'fun_features';
 

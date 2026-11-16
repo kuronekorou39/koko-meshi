@@ -1,4 +1,6 @@
-﻿import 'package:file_picker/file_picker.dart';
+﻿import 'dart:io' show Platform;
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
@@ -185,6 +187,26 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         const SnackBar(content: Text('お使いのバージョンが最新です')),
       );
     }
+  }
+
+  /// テスト版(全員に配る前の版)も更新として受け取るかを切り替える。
+  ///
+  /// 配る側が自分の端末で確かめるための設定で、ふつうの利用には要らない。
+  /// 升を1つ使うほどのものではないので、バージョンの長押しに置く。
+  /// テスト版の経路があるのは自前配布の Android だけ
+  Future<void> _toggleBetaUpdates() async {
+    if (!Platform.isAndroid) return;
+    final enabled = !AppSettings.includeBetaUpdates;
+    await AppSettings.setIncludeBetaUpdates(enabled);
+    if (!mounted) return;
+    setState(() {});
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(enabled ? 'テスト版も受け取ります' : 'テスト版の受け取りをやめました'),
+      ),
+    );
+    // 切り替えた結果をすぐ反映する(オフにしたらテスト版の知らせを消す)
+    await _checkUpdate(force: true);
   }
 
   Future<void> _openUpdatePage() async {
@@ -1018,9 +1040,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       child: Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(
-          'ココメシ v$_appVersion',
-          style: TextStyle(fontSize: 12, color: tokens.textFaint),
+        GestureDetector(
+          onLongPress: _toggleBetaUpdates,
+          child: Text(
+            AppSettings.includeBetaUpdates
+                ? 'ココメシ v$_appVersion（テスト版も受け取る）'
+                : 'ココメシ v$_appVersion',
+            style: TextStyle(fontSize: 12, color: tokens.textFaint),
+          ),
         ),
         const SizedBox(width: 4),
         // ストア配布ではないので、更新は自分から知らせるしかない

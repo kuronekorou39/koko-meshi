@@ -43,19 +43,42 @@ void main() {
     });
   });
 
-  group('parseGithubRelease', () {
-    test('タグとリリースページを取り出す', () {
-      final latest = UpdateService.parseGithubRelease({
-        'tag_name': 'v0.12.0',
-        'html_url': 'https://github.com/kuronekorou39/koko-meshi/releases/tag/v0.12.0',
+  group('parseManifest', () {
+    test('版とAPKの場所を取り出す', () {
+      final latest = UpdateService.parseManifest({
+        'version': '0.13.1',
+        'release_notes': '変更内容',
+        'apk_url': 'https://rou39.com/kokomeshi/kokomeshi-v0.13.1.apk',
       });
-      expect(latest?.version, 'v0.12.0');
-      expect(latest?.url, contains('/releases/tag/v0.12.0'));
+      expect(latest?.version, '0.13.1');
+      expect(latest?.url, endsWith('/kokomeshi-v0.13.1.apk'));
     });
 
     test('欠けていれば null', () {
-      expect(UpdateService.parseGithubRelease({'tag_name': 'v0.12.0'}), isNull);
-      expect(UpdateService.parseGithubRelease({}), isNull);
+      expect(UpdateService.parseManifest({'version': '0.13.1'}), isNull);
+      expect(UpdateService.parseManifest({}), isNull);
+    });
+  });
+
+  group('newerOf', () {
+    const stable = (version: '0.13.0', url: 'stable');
+    const beta = (version: '0.13.1', url: 'beta');
+
+    test('テスト版のほうが新しければテスト版', () {
+      expect(UpdateService.newerOf(stable, beta), beta);
+    });
+
+    test('公開版が追いついたら公開版(同じ版なら公開版を優先)', () {
+      const caughtUp = (version: '0.13.1', url: 'stable');
+      expect(UpdateService.newerOf(caughtUp, beta), caughtUp);
+      const ahead = (version: '0.14.0', url: 'stable');
+      expect(UpdateService.newerOf(ahead, beta), ahead);
+    });
+
+    test('片方が無ければもう片方', () {
+      expect(UpdateService.newerOf(null, beta), beta);
+      expect(UpdateService.newerOf(stable, null), stable);
+      expect(UpdateService.newerOf(null, null), isNull);
     });
   });
 
