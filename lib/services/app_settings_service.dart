@@ -107,6 +107,23 @@ class AppSettings {
     );
   }
 
+  // --- マップを最初に出す場所 ---
+  static const _keyLastMapPosition = 'map_last_position';
+
+  /// 前回マップで取れた現在地(緯度, 経度)。現在地が取れるのを待たずに
+  /// 地図を出すための出発点。端末の外には出ない
+  static (double, double)? get lastMapPosition {
+    final parts = _prefs?.getStringList(_keyLastMapPosition);
+    if (parts == null || parts.length != 2) return null;
+    final lat = double.tryParse(parts[0]);
+    final lng = double.tryParse(parts[1]);
+    return lat == null || lng == null ? null : (lat, lng);
+  }
+
+  static Future<void> setLastMapPosition(double lat, double lng) async {
+    await _prefs?.setStringList(_keyLastMapPosition, ['$lat', '$lng']);
+  }
+
   // --- 遊び要素 ---
   static const _keyFunFeatures = 'fun_features';
 

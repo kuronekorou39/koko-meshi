@@ -84,7 +84,7 @@ class UpdateService {
       // ないので、黙って前の状態のままにしておく
       if (response.statusCode != 200) {
         debugPrint('[Update] ${response.statusCode}: ${response.body}');
-        return cached();
+        return await cached();
       }
 
       final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -103,7 +103,7 @@ class UpdateService {
       }
       await prefs.setString(_keyLatestVersion, normalize(latest.version));
       await prefs.setString(_keyLatestUrl, latest.url);
-      return cached();
+      return await cached();
     } on TimeoutException {
       return cached();
     } on SocketException {

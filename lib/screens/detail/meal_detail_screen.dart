@@ -447,6 +447,7 @@ class _MealDetailScreenState extends ConsumerState<MealDetailScreen> {
                         originalUrl: photo.originalUrl,
                         height: 56,
                         width: 56,
+                        fullQuality: false,
                       ),
                     ),
                   ),

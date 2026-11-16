@@ -5,12 +5,10 @@ import 'package:intl/intl.dart';
 import 'package:table_calendar/table_calendar.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../../database/local_database.dart';
 import '../../models/meal_log.dart';
 import '../../models/meal_photo.dart';
 import '../../providers/meal_providers.dart';
 import '../../theme/app_theme.dart';
-import '../../services/ai_analysis_service.dart';
 import '../../services/app_settings_service.dart';
 import '../../services/meal_stats.dart';
 import '../../services/update_service.dart';
@@ -20,6 +18,7 @@ import '../../widgets/coach_mark.dart';
 import '../../widgets/meal_card.dart';
 import '../../widgets/meal_grid_tile.dart';
 import 'diet_advice_screen.dart';
+import 'home_rail.dart';
 
 enum ViewMode { list, grid, calendar }
 
@@ -30,7 +29,19 @@ enum CalendarMetric { none, calories, price }
 
 class TimelineTab extends ConsumerStatefulWidget {
   final VoidCallback? onLibraryPressed;
-  const TimelineTab({super.key, this.onLibraryPressed});
+
+  /// 横向きのときのタブ切り替え。渡されたらヘッダを出さず、操作を左の列に並べる
+  final HomeNav? nav;
+
+  /// このタブが表に出ているか。裏に回っている間は案内を出さない
+  final bool isActive;
+
+  const TimelineTab({
+    super.key,
+    this.onLibraryPressed,
+    this.nav,
+    this.isActive = true,
+  });
 
   @override
   ConsumerState<TimelineTab> createState() => _TimelineTabState();
@@ -42,10 +53,6 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
   // カレンダー用
   DateTime _focusedDay = DateTime.now();
   DateTime? _selectedDay = DateTime.now();
-
-  /// 集計用の写真(記録ID→写真)。カロリーと金額は写真側にしか無いので、
-  /// カレンダー表示に切り替えたときにまとめて読む。
-  Map<String, List<MealPhoto>>? _photosByLog;
 
   CalendarMetric _calendarMetric = CalendarMetric.none;
 
@@ -74,22 +81,21 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
   void initState() {
     super.initState();
     _checkUpdate();
-    // カレンダーを開いたまま解析が終わったときに、日付セルの合計が
-    // 古いままにならないようにする(カード側は各アイテムが購読している)
-    AiAnalysisService.resultsVersion.addListener(_loadPhotosForStats);
   }
 
   /// 記録ができたのに表示を切り替えたことが無い人へ、切り替えられることを
   /// 一度だけ教える。撮影や確認の画面が上に載っている間は出さず、一覧に
   /// 戻ってきてから出す(一覧を描き直すたびに呼ばれるので、次の機会に出る)。
   void _maybeShowViewModeTip() {
-    if (_viewModeTipPending || AppSettings.isCoachTipSeen(CoachTip.viewMode)) {
+    if (!widget.isActive ||
+        _viewModeTipPending ||
+        AppSettings.isCoachTipSeen(CoachTip.viewMode)) {
       return;
     }
     _viewModeTipPending = true;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       try {
-        if (!mounted) return;
+        if (!mounted || !widget.isActive) return;
         final shown = await showCoachMark(
           context,
           targetKey: _viewModeKey,
@@ -104,7 +110,6 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
 
   @override
   void dispose() {
-    AiAnalysisService.resultsVersion.removeListener(_loadPhotosForStats);
     _listController.dispose();
     _gridController.dispose();
     super.dispose();
@@ -122,13 +127,6 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
       final max = controller.position.maxScrollExtent;
       controller.jumpTo(offsetFor(day).clamp(0.0, max));
     });
-  }
-
-  /// 全写真を読むので、集計を使うカレンダー表示のときだけ走らせる
-  Future<void> _loadPhotosForStats() async {
-    if (_viewMode != ViewMode.calendar) return;
-    final photos = await LocalDatabase.getAllMealPhotos();
-    if (mounted) setState(() => _photosByLog = MealStats.groupPhotos(photos));
   }
 
   /// 新しいバージョンの知らせ。
@@ -190,53 +188,92 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
   @override
   Widget build(BuildContext context) {
     final mealLogsAsync = ref.watch(mealLogsProvider);
+    // 写真は記録ごとに問い合わせず、まとめて受け取る。読み直しの間も
+    // 前の値を出し続けるので、解析が終わるたびに一覧が消えることはない
+    final photosByLog = ref.watch(mealPhotosByLogProvider).valueOrNull;
+    final nav = widget.nav;
+
+    final actions = [
+      RailAction(
+        icon: Icons.photo_library_outlined,
+        tooltip: 'ライブラリから追加',
+        onTap: widget.onLibraryPressed ?? _defaultLibraryPressed,
+      ),
+      RailAction(
+        key: _viewModeKey,
+        icon: _viewModeIcon,
+        tooltip: _viewModeLabel,
+        onTap: _cycleViewMode,
+      ),
+      RailAction(
+        icon: Icons.settings_outlined,
+        tooltip: '設定',
+        onTap: () => context.push('/settings'),
+      ),
+    ];
 
     return Scaffold(
-      appBar: AppBar(
-        title: const AppLogo(),
-        actions: [
-          // ライブラリから追加
-          IconButton(
-            icon: const Icon(Icons.photo_library_outlined),
-            tooltip: 'ライブラリから追加',
-            onPressed: widget.onLibraryPressed ?? _defaultLibraryPressed,
-          ),
-          // 表示モード切替
-          IconButton(
-            key: _viewModeKey,
-            icon: Icon(_viewModeIcon),
-            onPressed: _cycleViewMode,
-            tooltip: _viewModeLabel,
-          ),
-          IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            onPressed: () => context.push('/settings'),
-          ),
-        ],
-      ),
-      body: Column(
+      // 横向きは縦が足りないので、ヘッダを出さず操作を左の列へ移す
+      appBar: nav != null
+          ? null
+          : AppBar(
+              title: const AppLogo(),
+              actions: [for (final a in actions) a.toIconButton()],
+            ),
+      body: Row(
         children: [
-          _buildUpdateBanner(),
+          if (nav != null) HomeRail(nav: nav, actions: actions),
           Expanded(
-            child: mealLogsAsync.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(child: Text('エラー: $e')),
-              data: (mealLogs) {
-                if (mealLogs.isEmpty) return _buildEmptyState();
-                _maybeShowViewModeTip();
+            child: SafeArea(
+              left: false,
+              bottom: false,
+              child: Column(
+                children: [
+                  _buildUpdateBanner(),
+                  Expanded(
+                    child: mealLogsAsync.when(
+                      skipLoadingOnReload: true,
+                      loading: () =>
+                          const Center(child: CircularProgressIndicator()),
+                      error: (e, _) => Center(child: Text('エラー: $e')),
+                      data: (mealLogs) {
+                        if (mealLogs.isEmpty) return _buildEmptyState();
+                        // 写真が揃う前に並べると、空のカードが一度出てしまう
+                        if (photosByLog == null) {
+                          return const Center(
+                              child: CircularProgressIndicator());
+                        }
+                        _maybeShowViewModeTip();
 
-                return switch (_viewMode) {
-                  ViewMode.list => _buildListView(mealLogs),
-                  ViewMode.grid => _buildGridView(mealLogs),
-                  ViewMode.calendar => _buildCalendarView(mealLogs),
-                };
-              },
+                        return switch (_viewMode) {
+                          ViewMode.list =>
+                            _buildListView(mealLogs, photosByLog),
+                          ViewMode.grid =>
+                            _buildGridView(mealLogs, photosByLog),
+                          ViewMode.calendar =>
+                            _buildCalendarView(mealLogs, photosByLog),
+                        };
+                      },
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
       ),
     );
   }
+
+  /// 横幅に入る列数。リストは写真を大きく見せたいので、広い画面でだけ並べる
+  static int _listColumnsFor(double width) =>
+      width < 600 ? 1 : (width / 340).floor().clamp(2, 4);
+
+  static int _gridColumnsFor(double width) =>
+      (width / 190).floor().clamp(2, 8);
+
+  static const double _pagePadding = 16;
+  static const double _tileSpacing = 12;
 
   IconData get _viewModeIcon => switch (_viewMode) {
     ViewMode.list => Icons.view_list_outlined,
@@ -266,53 +303,84 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
     setState(() {
       _viewMode = ViewMode.values[(_viewMode.index + 1) % ViewMode.values.length];
     });
-    // カレンダーの集計は写真が要る。切り替えるたびに読み直して、
-    // 直前の解析結果も反映されるようにする
-    if (_viewMode == ViewMode.calendar) {
-      _loadPhotosForStats();
-    } else if (leavingCalendar && _selectedDay != null) {
+    if (leavingCalendar && _selectedDay != null) {
       _pendingScrollDay = _selectedDay;
     }
   }
 
   // ─── リスト表示（日付でグルーピング） ───
 
-  Widget _buildListView(List<MealLog> mealLogs) {
-    // 日付見出し(DateTime)と記録(MealLog)を順に並べたフラットなリストを作る
-    final items = <Object>[];
-    DateTime? lastDay;
-    for (final log in mealLogs) {
-      final day =
-          DateTime(log.eatenAt.year, log.eatenAt.month, log.eatenAt.day);
-      if (lastDay == null || day != lastDay) {
-        items.add(day);
-        lastDay = day;
-      }
-      items.add(log);
-    }
+  Widget _buildListView(
+      List<MealLog> mealLogs, Map<String, List<MealPhoto>> photosByLog) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final columns = _listColumnsFor(width);
 
-    _scrollToPendingDay(
-      _listController,
-      (day) => _listOffsetFor(day, items, MediaQuery.sizeOf(context).width),
-    );
+        // 日付見出し(DateTime)と、記録を列数ぶん束ねた行(List<MealLog>)を
+        // 順に並べる。行ごとに作るので、何年ぶん溜まっても見えている分しか
+        // 組み立てない
+        final rows = <Object>[];
+        DateTime? lastDay;
+        for (final log in mealLogs) {
+          final day =
+              DateTime(log.eatenAt.year, log.eatenAt.month, log.eatenAt.day);
+          final last = rows.isEmpty ? null : rows.last;
+          if (lastDay == null || day != lastDay) {
+            rows.add(day);
+            rows.add(<MealLog>[log]);
+            lastDay = day;
+          } else if (last is List<MealLog> && last.length < columns) {
+            last.add(log);
+          } else {
+            rows.add(<MealLog>[log]);
+          }
+        }
 
-    return RefreshIndicator(
-      onRefresh: () => ref.read(mealLogsProvider.notifier).refresh(),
-      child: ListView.builder(
-        controller: _listController,
-        padding: const EdgeInsets.only(bottom: 100),
-        itemCount: items.length,
-        itemBuilder: (context, index) {
-          final item = items[index];
-          if (item is DateTime) return _buildDateHeader(item);
-          final log = item as MealLog;
-          return _MealLogItem(
-            key: ValueKey(log.id),
-            mealLog: log,
-            onTap: () => context.push('/meal/${log.id}'),
-          );
-        },
-      ),
+        _scrollToPendingDay(
+          _listController,
+          (day) => _listOffsetFor(day, rows, width, columns),
+        );
+
+        return RefreshIndicator(
+          onRefresh: () => ref.read(mealLogsProvider.notifier).refresh(),
+          child: ListView.builder(
+            controller: _listController,
+            padding: const EdgeInsets.only(bottom: 100),
+            itemCount: rows.length,
+            itemBuilder: (context, index) {
+              final row = rows[index];
+              if (row is DateTime) return _buildDateHeader(row);
+              final logs = row as List<MealLog>;
+              return Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: _pagePadding,
+                  vertical: _tileSpacing / 2,
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    for (var i = 0; i < columns; i++) ...[
+                      if (i > 0) const SizedBox(width: _tileSpacing),
+                      Expanded(
+                        child: i < logs.length
+                            ? MealCard(
+                                key: ValueKey(logs[i].id),
+                                mealLog: logs[i],
+                                photos: photosByLog[logs[i].id] ?? const [],
+                                onTap: () =>
+                                    context.push('/meal/${logs[i].id}'),
+                              )
+                            : const SizedBox.shrink(),
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 
@@ -322,16 +390,19 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
   ///
   /// カードの高さは幅から縦横比(4:3)で決まり、見出しは高さを固定してあるので
   /// 積み上げれば正確に出せる。
-  double _listOffsetFor(DateTime day, List<Object> items, double width) {
+  double _listOffsetFor(
+      DateTime day, List<Object> rows, double width, int columns) {
     final target = DateTime(day.year, day.month, day.day);
-    final cardHeight = (width - 32) * 3 / 4 + 12; // 上下のPadding6ぶんを足す
+    final cardWidth =
+        (width - _pagePadding * 2 - _tileSpacing * (columns - 1)) / columns;
+    final rowHeight = cardWidth * 3 / 4 + _tileSpacing;
     var offset = 0.0;
-    for (final item in items) {
-      if (item is DateTime) {
-        if (!item.isAfter(target)) return offset;
+    for (final row in rows) {
+      if (row is DateTime) {
+        if (!row.isAfter(target)) return offset;
         offset += _dateHeaderHeight;
       } else {
-        offset += cardHeight;
+        offset += rowHeight;
       }
     }
     return offset;
@@ -354,39 +425,65 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
 
   // ─── グリッド表示 ───
 
-  Widget _buildGridView(List<MealLog> mealLogs) {
-    _scrollToPendingDay(
-      _gridController,
-      (day) => _gridOffsetFor(day, mealLogs, MediaQuery.sizeOf(context).width),
-    );
+  Widget _buildGridView(
+      List<MealLog> mealLogs, Map<String, List<MealPhoto>> photosByLog) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final columns = _gridColumnsFor(width);
 
-    return RefreshIndicator(
-      onRefresh: () => ref.read(mealLogsProvider.notifier).refresh(),
-      child: GridView.builder(
-        controller: _gridController,
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
-          // テキストを写真の中(下部スクリム)へ入れたので正方形タイルにする
-          childAspectRatio: 1,
-        ),
-        itemCount: mealLogs.length,
-        itemBuilder: (context, index) {
-          return _MealLogGridItem(
-            key: ValueKey(mealLogs[index].id),
-            mealLog: mealLogs[index],
-            onTap: () => context.push('/meal/${mealLogs[index].id}'),
-          );
-        },
+        _scrollToPendingDay(
+          _gridController,
+          (day) => _gridOffsetFor(day, mealLogs, width, columns),
+        );
+
+        return RefreshIndicator(
+          onRefresh: () => ref.read(mealLogsProvider.notifier).refresh(),
+          child: _buildMealGrid(
+            mealLogs,
+            photosByLog,
+            columns: columns,
+            controller: _gridController,
+          ),
+        );
+      },
+    );
+  }
+
+  /// 正方形タイルのグリッド(グリッド表示と、カレンダーの下の一覧で使う)。
+  /// テキストは写真の中(下部スクリム)に入れてあるので正方形でよい
+  Widget _buildMealGrid(
+    List<MealLog> logs,
+    Map<String, List<MealPhoto>> photosByLog, {
+    required int columns,
+    ScrollController? controller,
+  }) {
+    return GridView.builder(
+      controller: controller,
+      padding: const EdgeInsets.fromLTRB(_pagePadding, 8, _pagePadding, 100),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: columns,
+        crossAxisSpacing: _tileSpacing,
+        mainAxisSpacing: _tileSpacing,
+        childAspectRatio: 1,
       ),
+      itemCount: logs.length,
+      itemBuilder: (context, index) {
+        final log = logs[index];
+        return MealGridTile(
+          key: ValueKey(log.id),
+          mealLog: log,
+          photos: photosByLog[log.id] ?? const [],
+          onTap: () => context.push('/meal/${log.id}'),
+        );
+      },
     );
   }
 
   /// [day] 以前で最初に現れる記録の行が先頭に来るスクロール量。
-  /// タイルは正方形2列なので、行数から直接出せる。
-  double _gridOffsetFor(DateTime day, List<MealLog> logs, double width) {
+  /// タイルは正方形なので、行数から直接出せる。
+  double _gridOffsetFor(
+      DateTime day, List<MealLog> logs, double width, int columns) {
     final target = DateTime(day.year, day.month, day.day);
     final index = logs.indexWhere((log) {
       final d =
@@ -394,14 +491,15 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
       return !d.isAfter(target);
     });
     if (index < 0) return 0;
-    const spacing = 12.0;
-    final tile = (width - 32 - spacing) / 2; // 左右padding16x2 + 列間
-    return 8 + (index ~/ 2) * (tile + spacing); // 上padding8
+    final tile =
+        (width - _pagePadding * 2 - _tileSpacing * (columns - 1)) / columns;
+    return 8 + (index ~/ columns) * (tile + _tileSpacing); // 上padding8
   }
 
   // ─── カレンダー表示 ───
 
-  Widget _buildCalendarView(List<MealLog> mealLogs) {
+  Widget _buildCalendarView(
+      List<MealLog> mealLogs, Map<String, List<MealPhoto>> photosByLog) {
     // 日付ごとにグルーピング
     final grouped = <DateTime, List<MealLog>>{};
     for (final log in mealLogs) {
@@ -413,16 +511,9 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
         ? (grouped[DateTime(_selectedDay!.year, _selectedDay!.month, _selectedDay!.day)] ?? [])
         : <MealLog>[];
 
-    final summary = MealStats.forMonth(
-      _focusedDay,
-      mealLogs,
-      _photosByLog ?? const {},
-    );
+    final summary = MealStats.forMonth(_focusedDay, mealLogs, photosByLog);
 
-    return Column(
-      children: [
-        _buildPeriodSummary(summary),
-        TableCalendar<MealLog>(
+    final calendar = TableCalendar<MealLog>(
           locale: 'ja_JP',
           firstDay: DateTime(2020),
           lastDay: DateTime(2030),
@@ -514,41 +605,55 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
           ),
           calendarFormat: CalendarFormat.month,
           availableCalendarFormats: const {CalendarFormat.month: '月'},
-        ),
-        const Divider(height: 1),
-        // 選択した日の食事一覧
-        Expanded(
-          child: selectedLogs.isEmpty
-              ? Center(
-                  child: Text(
-                    _selectedDay != null
-                        ? '${DateFormat('M月d日', 'ja').format(_selectedDay!)}の記録はありません'
-                        : '日付をタップして記録を表示',
-                    style: TextStyle(color: KokoTokens.of(context).textFaint),
+    );
+
+    // 選択した日の食事一覧。カレンダーの脇や下は狭いので、1件でも
+    // 列に並べて写真を大きく見せる
+    final dayList = selectedLogs.isEmpty
+        ? Center(
+            child: Text(
+              _selectedDay != null
+                  ? '${DateFormat('M月d日', 'ja').format(_selectedDay!)}の記録はありません'
+                  : '日付をタップして記録を表示',
+              style: TextStyle(color: KokoTokens.of(context).textFaint),
+            ),
+          )
+        : LayoutBuilder(
+            builder: (context, constraints) => _buildMealGrid(
+              selectedLogs,
+              photosByLog,
+              columns: _gridColumnsFor(constraints.maxWidth),
+            ),
+          );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 横長の画面では縦に積むと一覧の高さが残らないので、左右に分ける
+        if (constraints.maxWidth > constraints.maxHeight) {
+          return Row(
+            children: [
+              SizedBox(
+                width: (constraints.maxWidth * 0.5).clamp(0.0, 420.0),
+                child: SingleChildScrollView(
+                  child: Column(
+                    children: [_buildPeriodSummary(summary), calendar],
                   ),
-                )
-              // カレンダーの下は縦が狭いので、1件でも2列で並べて写真を大きく見せる
-              : GridView.builder(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-                  gridDelegate:
-                      const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    crossAxisSpacing: 12,
-                    mainAxisSpacing: 12,
-                    childAspectRatio: 1,
-                  ),
-                  itemCount: selectedLogs.length,
-                  itemBuilder: (context, index) {
-                    return _MealLogGridItem(
-                      key: ValueKey(selectedLogs[index].id),
-                      mealLog: selectedLogs[index],
-                      onTap: () =>
-                          context.push('/meal/${selectedLogs[index].id}'),
-                    );
-                  },
                 ),
-        ),
-      ],
+              ),
+              const VerticalDivider(width: 1),
+              Expanded(child: dayList),
+            ],
+          );
+        }
+        return Column(
+          children: [
+            _buildPeriodSummary(summary),
+            calendar,
+            const Divider(height: 1),
+            Expanded(child: dayList),
+          ],
+        );
+      },
     );
   }
 
@@ -611,8 +716,7 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
     final tokens = KokoTokens.of(context);
     final fmt = NumberFormat('#,###');
 
-    final loading = _photosByLog == null;
-    final hasData = !loading && !s.isEmpty;
+    final hasData = !s.isEmpty;
     const noValue = '—';
 
     return Padding(
@@ -654,11 +758,7 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
               ),
               const SizedBox(height: 10),
               Text(
-                loading
-                    ? '集計中…'
-                    : hasData
-                        ? _summaryFooter(s, fmt)
-                        : 'この月の記録はありません',
+                hasData ? _summaryFooter(s, fmt) : 'この月の記録はありません',
                 style: TextStyle(
                   fontSize: 11.5,
                   color: hasData ? tokens.textMuted : tokens.textFaint,
@@ -795,95 +895,6 @@ class _TimelineTabState extends ConsumerState<TimelineTab> {
           ],
         ),
       ),
-    );
-  }
-}
-
-/// リスト表示用: 各食事記録の写真を非同期で取得して表示
-class _MealLogItem extends StatefulWidget {
-  final MealLog mealLog;
-  final VoidCallback onTap;
-
-  const _MealLogItem({super.key, required this.mealLog, required this.onTap});
-
-  @override
-  State<_MealLogItem> createState() => _MealLogItemState();
-}
-
-class _MealLogItemState extends State<_MealLogItem> {
-  List<MealPhoto>? _photos;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadPhotos();
-    // AI解析結果の書き込みを購読し、表示中カードを自動更新する
-    // (「AI解析中」が結果に切り替わらないまま残るのを防ぐ)
-    AiAnalysisService.resultsVersion.addListener(_loadPhotos);
-  }
-
-  @override
-  void dispose() {
-    AiAnalysisService.resultsVersion.removeListener(_loadPhotos);
-    super.dispose();
-  }
-
-  Future<void> _loadPhotos() async {
-    final photos = await LocalDatabase.getPhotosForMealLog(widget.mealLog.id);
-    if (mounted) setState(() => _photos = photos);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      child: MealCard(
-        mealLog: widget.mealLog,
-        photos: _photos ?? [],
-        onTap: widget.onTap,
-      ),
-    );
-  }
-}
-
-/// グリッド表示用
-class _MealLogGridItem extends StatefulWidget {
-  final MealLog mealLog;
-  final VoidCallback onTap;
-
-  const _MealLogGridItem({super.key, required this.mealLog, required this.onTap});
-
-  @override
-  State<_MealLogGridItem> createState() => _MealLogGridItemState();
-}
-
-class _MealLogGridItemState extends State<_MealLogGridItem> {
-  List<MealPhoto>? _photos;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadPhotos();
-    AiAnalysisService.resultsVersion.addListener(_loadPhotos);
-  }
-
-  @override
-  void dispose() {
-    AiAnalysisService.resultsVersion.removeListener(_loadPhotos);
-    super.dispose();
-  }
-
-  Future<void> _loadPhotos() async {
-    final photos = await LocalDatabase.getPhotosForMealLog(widget.mealLog.id);
-    if (mounted) setState(() => _photos = photos);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return MealGridTile(
-      mealLog: widget.mealLog,
-      photos: _photos ?? [],
-      onTap: widget.onTap,
     );
   }
 }

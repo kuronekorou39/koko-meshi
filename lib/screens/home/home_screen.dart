@@ -17,6 +17,7 @@ import 'package:geolocator/geolocator.dart';
 import '../../services/photo_service.dart';
 import '../../widgets/coach_mark.dart';
 import '../capture/camera_screen.dart';
+import 'home_rail.dart';
 import 'timeline_tab.dart';
 import 'map_tab.dart';
 
@@ -34,10 +35,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   /// 撮影ボタン。初回の案内で囲む相手
   final _cameraKey = GlobalKey();
 
-  late final _tabs = [
-    TimelineTab(onLibraryPressed: _onLibraryPressed),
-    const MapTab(),
-  ];
+  /// マップを一度でも開いたか。開くまでは地図を作らない(起動を重くしない)。
+  /// 開いたあとは裏に回しても残すので、戻るたびに読み込み直さずに済む
+  bool _mapOpened = false;
 
   @override
   void initState() {
@@ -76,14 +76,38 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     // 詳細画面などから場所を指定されたらマップへ切り替える。
     // 寄る操作自体はマップ側が行う
     ref.listen(mapFocusProvider, (_, next) {
-      if (next != null && _currentIndex != 1) {
-        setState(() => _currentIndex = 1);
-      }
+      if (next != null && _currentIndex != 1) _selectTab(1);
     });
 
+    // 横向きは縦が足りないので、下のタブをやめて左の1列にまとめる
+    final wide = MediaQuery.orientationOf(context) == Orientation.landscape;
+    HomeNav? navFor(int tab) => !wide
+        ? null
+        : HomeNav(
+            tabIndex: _currentIndex,
+            onSelectTab: _selectTab,
+            onCamera: _onCameraPressed,
+            cameraKey: _currentIndex == tab ? _cameraKey : null,
+          );
+
     return Scaffold(
-      body: _tabs[_currentIndex],
-      bottomNavigationBar: NavigationBar(
+      body: IndexedStack(
+        index: _currentIndex,
+        children: [
+          TimelineTab(
+            onLibraryPressed: _onLibraryPressed,
+            nav: navFor(0),
+            isActive: _currentIndex == 0,
+          ),
+          if (_mapOpened)
+            MapTab(nav: navFor(1), isActive: _currentIndex == 1)
+          else
+            const SizedBox.shrink(),
+        ],
+      ),
+      bottomNavigationBar: wide
+          ? null
+          : NavigationBar(
         selectedIndex: _currentIndex == 0 ? 0 : 2,
         onDestinationSelected: _onDestinationSelected,
         destinations: [
@@ -113,8 +137,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       _onCameraPressed();
       return;
     }
+    _selectTab(index == 0 ? 0 : 1);
+  }
+
+  void _selectTab(int tab) {
     setState(() {
-      _currentIndex = index == 0 ? 0 : 1;
+      _currentIndex = tab;
+      if (tab == 1) _mapOpened = true;
     });
   }
 

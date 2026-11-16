@@ -224,6 +224,8 @@ class MealCard extends StatelessWidget {
       localPath: photo.localPath,
       thumbnailPath: photo.thumbnailUrl,
       originalUrl: photo.originalUrl,
+      fullQuality: false,
+      sharpen: true,
     );
   }
 }

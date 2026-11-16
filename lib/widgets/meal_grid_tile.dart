@@ -148,6 +148,8 @@ class MealGridTile extends StatelessWidget {
       thumbnailPath: photo.thumbnailUrl,
       originalUrl: photo.originalUrl,
       fit: BoxFit.cover,
+      fullQuality: false,
+      sharpen: true,
     );
   }
 }
